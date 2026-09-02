@@ -7,11 +7,16 @@ Decisions from review (docs/design.md §2, §5):
   and downgraded to calendar-flag confidence;
 * calendar-flag defaults: AMC -> 16:05, BMO -> 07:00 America/New_York, confidence 0.5;
 * event_id = f"{underlying}:{fiscal_period}" with fiscal_period = fiscal quarter-end month;
-* vendor estimates for past events are `estimate_source = fmp_final` (not point-in-time);
+  when the period's own facts are not on file yet (a fresh or upcoming event) the month is
+  projected from the issuer's latest SEC period end in whole quarters, so the id is the same
+  before and after the 10-Q lands;
+* vendor estimates for past events are `estimate_source = fmp_final` (not point-in-time),
+  upcoming rows carry the vendor's current, not-yet-final value as `fmp_calendar`;
   archived consensus snapshots (data/archive/consensus/*.parquet) win when they exist and
   give `estimate_source = consensus_snapshot` with `estimate_snapshot_time`;
 * budget exhaustion is a checkpoint: rows already resolved are written, the rest are marked
-  `pending = True`, the command exits non-zero, and a rerun resumes from the cache.
+  `pending = True`, the command exits non-zero, and a rerun resumes from the cache. A row
+  that an earlier run completed is never replaced by a pending one.
 
 Implementation notes (what the code below relies on):
 
@@ -37,12 +42,19 @@ Implementation notes (what the code below relies on):
 * Events with no timing source at all (no 8-K, no detection, no flag) get the AMC default with
   ``CONFIDENCE_UNKNOWN`` and ``flags += timing_unknown``; they stay in the table and are
   excluded from training by ``min_t0_confidence`` like every other calendar-flag row.
+* An FMP error on one event's intraday request (a bad symbol, a transport failure) is not a
+  checkpoint: the event is resolved without bars (``flags += intraday_error;no_intraday``)
+  and the build goes on. Only ProviderUnavailable / BudgetExhausted stop it.
 * Optional manual overrides live in ``configs/t0_overrides.yaml`` as
   ``{"NVDA:2026-07": "2026-08-26T20:20:00Z"}`` (keys may also be ``"NVDA:2026-08-26"``).
+* ``upcoming_events`` takes ``expected_t0`` from, in order: a manual override recorded on the
+  matching upcoming row of events.parquet, the issuer's median sec_8k acceptance clock, the
+  calendar-flag time of that upcoming row, the Nasdaq calendar's time flag, the AMC default.
 """
 
 from __future__ import annotations
 
+import calendar
 import logging
 import math
 from dataclasses import dataclass, field
@@ -57,6 +69,7 @@ import yaml
 
 from ..config import Settings
 from ..data.base import BudgetExhausted, ProviderUnavailable, utcnow
+from ..data.fmp import FMPError
 from ..data.sec import split_items
 from ..schemas import EVENT_KINDS, NY, SCHEMA_VERSION, UTC, C, E, Kind, T0Source, U
 from ..timeutil import classify_timing, to_utc
@@ -141,10 +154,11 @@ def _fmt_ts(ts: pd.Timestamp | None) -> str:
 
 def timing_from_flag(flag: Any) -> str | None:
     """'AMC' / 'BMO' from a vendor time-of-day flag ('post-market', 'pre-market', 'after-hours',
-    ...); None for missing or uninformative flags such as 'time-not-supplied'."""
+    Nasdaq's 'time-after-hours' / 'time-pre-market', ...); None for missing or uninformative
+    flags such as 'time-not-supplied'."""
     if flag is None or _isna(flag):
         return None
-    s = str(flag).strip().lower()
+    s = str(flag).strip().lower().removeprefix("time-")
     if s in _AMC_FLAGS:
         return "AMC"
     if s in _BMO_FLAGS:
@@ -361,12 +375,38 @@ def _quarter_end_before(d: date) -> date:
     return first_of_next - timedelta(days=1)
 
 
+def _add_months(d: date, n: int) -> date:
+    """`d` shifted by `n` calendar months, the day clipped to the target month's length."""
+    year, month0 = divmod(d.year * 12 + d.month - 1 + n, 12)
+    month = month0 + 1
+    return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
+
+
+def project_quarter_end(anchor: date, d: date) -> date:
+    """The issuer's fiscal quarter end strictly before `d`, projected from one known quarter
+    end `anchor` in whole quarters (3 months) forwards or backwards. Deterministic in the
+    issuer's fiscal calendar, so the value does not change when later periods are filed."""
+    k = ((d.year - anchor.year) * 12 + d.month - anchor.month) // 3
+    while _add_months(anchor, 3 * k) >= d:
+        k -= 1
+    while _add_months(anchor, 3 * (k + 1)) < d:
+        k += 1
+    return _add_months(anchor, 3 * k)
+
+
 def fiscal_period_for(report_date_ny: pd.Timestamp, *, sec_eps_facts: pd.DataFrame | None,
                       av_rows: pd.DataFrame | None) -> tuple[str, str, bool]:
     """(fiscal_period 'YYYY-MM', source, derived_flag). SEC companyfacts period_end nearest
-    before the report date (within 120 days) for US filers, Alpha Vantage fiscalDateEnding for
-    FPIs, else the calendar quarter end preceding the report date (derived_flag=True)."""
+    before the report date (within 120 days, first filed on or after it) for US filers
+    ('sec_facts'), Alpha Vantage fiscalDateEnding of the row matched by report date for FPIs
+    ('alphavantage'). When the period's own facts are not on file yet -- a fresh event before
+    its 10-Q, an upcoming one -- the quarter end is projected from the issuer's latest known
+    period end in whole quarters ('sec_facts_projected' / 'alphavantage_projected'), which
+    gives the same month the eventual filing will. Only a name with no period end from either
+    source falls back to the calendar quarter end preceding the report date ('derived',
+    derived_flag=True)."""
     d = _as_date(report_date_ny)
+    known_ends: list[date] = []
     if sec_eps_facts is not None and len(sec_eps_facts) and "period_end" in sec_eps_facts.columns:
         ends = pd.to_datetime(sec_eps_facts["period_end"], utc=True, errors="coerce").dt.date
         # the results of a period are public from the day they are first filed: a period whose
@@ -381,6 +421,7 @@ def fiscal_period_for(report_date_ny: pd.Timestamp, *, sec_eps_facts: pd.DataFra
                     first_filed[e] = f
         best: date | None = None
         for e in ends.dropna().unique():
+            known_ends.append(e)
             lag = (d - e).days
             if not 0 < lag <= FISCAL_PERIOD_MAX_LAG_DAYS:
                 continue
@@ -390,6 +431,7 @@ def fiscal_period_for(report_date_ny: pd.Timestamp, *, sec_eps_facts: pd.DataFra
                 best = e
         if best is not None:
             return f"{best.year:04d}-{best.month:02d}", "sec_facts", False
+    av_ends: list[date] = []
     if av_rows is not None and len(av_rows) and "report_date_ny" in av_rows.columns:
         dates = [x for x in av_rows["report_date_ny"].tolist() if x is not None and not _isna(x)]
         hit = _nearest_date(dates, d)
@@ -399,6 +441,13 @@ def fiscal_period_for(report_date_ny: pd.Timestamp, *, sec_eps_facts: pd.DataFra
             if fe is not None and not _isna(fe):
                 fe = _as_date(fe)
                 return f"{fe.year:04d}-{fe.month:02d}", "alphavantage", False
+        if "fiscal_period_end" in av_rows.columns:
+            av_ends = [_as_date(x) for x in av_rows["fiscal_period_end"].tolist()
+                       if x is not None and not _isna(x)]
+    for anchors, source in ((known_ends, "sec_facts_projected"), (av_ends, "alphavantage_projected")):
+        if anchors:
+            q = project_quarter_end(max(anchors), d)
+            return f"{q.year:04d}-{q.month:02d}", source, False
     q = _quarter_end_before(d)
     return f"{q.year:04d}-{q.month:02d}", "derived", True
 
@@ -540,11 +589,14 @@ def _names_from_universe(universe: pd.DataFrame, underlyings: list[str] | None) 
 
 def _names_without_universe(settings: Settings, underlyings: list[str]) -> list[_Name]:
     """Degraded mode for an explicit list of tickers when data/universe.parquet is missing: CIK
-    from the SEC ticker map, kind guessed from the filings (6-K only -> equity_fpi), no market."""
+    from the SEC ticker map, kind guessed from the earnings filings (no 8-K item 2.02 and at
+    least one 6-K -> equity_fpi, else equity_us), no market. The submissions request is cached,
+    so the guess costs nothing extra: the resolver reads the same filings."""
     from ..data.sec import SECClient
 
+    sec = SECClient(settings)
     try:
-        tickers = SECClient(settings).ticker_map().set_index("ticker")
+        tickers = sec.ticker_map().set_index("ticker")
     except Exception as exc:  # noqa: BLE001 - a missing ticker map only costs the CIKs
         log.warning("SEC ticker map unavailable (%s)", exc)
         tickers = pd.DataFrame(columns=["cik", "title"])
@@ -552,7 +604,16 @@ def _names_without_universe(settings: Settings, underlyings: list[str]) -> list[
     for u in underlyings:
         u = u.strip().upper()
         cik = int(tickers.loc[u, "cik"]) if u in tickers.index else None
-        names.append(_Name(u, Kind.equity_us.value, cik, None, [], flags=("no_universe",)))
+        kind = Kind.equity_us.value
+        if cik is not None:
+            try:
+                forms = sec.earnings_filings(cik)["form"].astype(str)
+            except (httpx.HTTPError, ValueError, KeyError) as exc:
+                log.warning("SEC filings unavailable for %s (CIK %s): %s; treating it as equity_us", u, cik, exc)
+            else:
+                if not (forms == "8-K").any() and (forms == "6-K").any():
+                    kind = Kind.equity_fpi.value
+        names.append(_Name(u, kind, cik, None, [], flags=("no_universe",)))
     return names
 
 
@@ -687,13 +748,15 @@ def _base_row(ev: _Event) -> dict[str, Any]:
     }
 
 
-def _pending_row(ev: _Event, providers: _Providers | None) -> dict[str, Any]:
+def _pending_row(ev: _Event, providers: _Providers | None, *, today_ny: date | None = None) -> dict[str, Any]:
     row = _base_row(ev)
     facts = providers.sec_data(ev.name.cik).facts if providers is not None else None
     fp, src, derived = fiscal_period_for(ev.report_date_ny, sec_eps_facts=facts, av_rows=None)
     row[E.event_id] = f"{ev.name.underlying}:{fp}"
     row[E.fiscal_period], row[E.fiscal_period_source] = fp, src
     row[E.pending] = True
+    if ev.report_date_ny > (today_ny if today_ny is not None else _today_ny()):
+        row[E.estimate_source] = "fmp_calendar"
     row[E.flags] = ";".join(["pending"] + (["fiscal_period_derived"] if derived else []) + list(ev.name.flags))
     return row
 
@@ -763,12 +826,19 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
     bars = None
     if d_eff > today_ny:
         flags.append("upcoming")
+        row[E.estimate_source] = "fmp_calendar"  # the vendor's current, not-yet-final value
     elif d_eff < INTRADAY_1MIN_FLOOR:
         flags.append("no_intraday")
     else:
         start = pd.Timestamp(d_eff) - pd.Timedelta(days=1)
         end = pd.Timestamp(d_eff) + pd.Timedelta(days=2)
-        bars = providers.fmp.intraday(name.underlying, "1min", start, end, extended=True)
+        try:
+            bars = providers.fmp.intraday(name.underlying, "1min", start, end, extended=True)
+        except (FMPError, httpx.HTTPError) as exc:
+            # one symbol's bad answer is not a checkpoint: resolve without bars and go on
+            log.warning("FMP 1-minute bars unavailable for %s %s: %s", name.underlying, d_eff, exc)
+            bars = None
+            flags.append("intraday_error")
         if bars is not None and len(bars):
             sources.append("fmp_intraday")
         else:
@@ -874,10 +944,22 @@ def _write_events(settings: Settings, df: pd.DataFrame) -> None:
     write_parquet_atomic(df, settings.events_path)
 
 
+def _days_apart(a: Any, b: Any) -> float:
+    """|a - b| in days for two calendar dates; NaN when either is missing."""
+    if a is None or b is None or _isna(a) or _isna(b):
+        return math.nan
+    return float(abs((_as_date(a) - _as_date(b)).days))
+
+
 def _merge_existing(settings: Settings, new: pd.DataFrame, processed: set[str],
                     since: date | None) -> pd.DataFrame:
     """Keep rows of an existing events.parquet that this run did not rebuild: other
-    underlyings, and rows of processed underlyings older than `since`."""
+    underlyings, rows of processed underlyings older than `since`, every row of a name whose
+    earnings history could not be fetched (the new frame carries only its `<U>:pending`
+    placeholder), and completed rows that this run could only mark pending -- same event_id,
+    or same name and report date within a day. A resolved row is never replaced by a pending
+    one; the pending row is dropped instead, so a budget-hit rerun keeps what earlier runs
+    finished."""
     if not settings.events_path.exists():
         return new
     try:
@@ -888,10 +970,29 @@ def _merge_existing(settings: Settings, new: pd.DataFrame, processed: set[str],
     if old.attrs.get("schema_version") != SCHEMA_VERSION or list(old.columns) != list(new.columns):
         log.warning("existing %s has another schema; replacing it", settings.events_path)
         return new
-    keep = ~old[E.underlying].astype(str).str.upper().isin(processed)
+    old_u = old[E.underlying].astype(str).str.upper()
+    new_u = new[E.underlying].astype(str).str.upper()
+    new_pending = new[E.pending].astype(bool)
+    placeholder = new_pending & new[E.flags].astype(str).map(lambda f: "earnings_history_pending" in f.split(";"))
+    rebuilt = {u.upper() for u in processed} - set(new_u[placeholder])
+    keep = ~old_u.isin(rebuilt)
     if since is not None:
         older = old[E.report_date_ny].map(lambda x: x is not None and not _isna(x) and _as_date(x) < since)
         keep |= older
+    old_done = ~old[E.pending].astype(bool)
+    superseded = pd.Series(False, index=new.index)
+    for i in new.index[new_pending & ~placeholder]:
+        same_name = old_done & (old_u == new_u[i])
+        if not same_name.any():
+            continue
+        near = old[E.report_date_ny].map(lambda x, d=new.at[i, E.report_date_ny]: _days_apart(x, d))
+        hit = same_name & ((old[E.event_id] == new.at[i, E.event_id]) | (near <= DATE_CONFLICT_DAYS).fillna(False))
+        if hit.any():
+            keep |= hit
+            superseded[i] = True
+    if superseded.any():
+        log.info("keeping %d completed rows that this run could only mark pending", int(superseded.sum()))
+        new = new[~superseded]
     keep &= ~old[E.event_id].isin(new[E.event_id])
     if not keep.any():
         return new
@@ -949,7 +1050,7 @@ def build_events(settings: Settings, *, underlyings: list[str] | None = None,
     n_done = 0
     for ev in events:
         if budget_error is not None:
-            rows.append(_pending_row(ev, providers))
+            rows.append(_pending_row(ev, providers, today_ny=today_ny))
             continue
         try:
             rows.append(_resolve_event(ev, providers, snapshots=snapshots, manual=manual,
@@ -957,7 +1058,7 @@ def build_events(settings: Settings, *, underlyings: list[str] | None = None,
             n_done += 1
         except BudgetExhausted as exc:
             budget_error = exc
-            rows.append(_pending_row(ev, providers))
+            rows.append(_pending_row(ev, providers, today_ny=today_ny))
     for name in unfetched:
         row = _base_row(_Event(name, None, math.nan, math.nan, math.nan, math.nan))  # type: ignore[arg-type]
         row[E.event_id] = f"{name.underlying}:pending"
@@ -972,10 +1073,13 @@ def build_events(settings: Settings, *, underlyings: list[str] | None = None,
     n_pending = int(out[E.pending].sum())
     log.info("events: %d resolved, %d pending, %d underlyings", n_done, n_pending, len(names))
     if budget_error is not None:
-        raise BudgetExhausted(
-            f"{budget_error} -- {n_done} events resolved and {n_pending} written as pending "
-            f"to {settings.events_path}; rerun to resume from the cache."
-        ) from budget_error
+        if write:
+            outcome = (f"{n_done} events resolved and {n_pending} written as pending to "
+                       f"{settings.events_path}; rerun to resume from the cache.")
+        else:
+            outcome = (f"{n_done} events resolved and {n_pending} pending; nothing written "
+                       f"(write=False), rerun to resume from the cache.")
+        raise BudgetExhausted(f"{budget_error} -- {outcome}") from budget_error
     return out
 
 
@@ -1028,10 +1132,57 @@ def detect_release_live(bars: pd.DataFrame, expected_date_ny: pd.Timestamp, **kw
     return None if hit is None else hit[0]
 
 
+def _events_table_clock(events: pd.DataFrame | None, underlying: str, d: date) -> tuple[time, str, str] | None:
+    """(clock America/New_York, t0_source, label) of the completed events.parquet row for
+    (underlying, report date within a day) whose release time has a real source -- a manual
+    override or a calendar flag -- or None when there is no such row or it only carries the
+    timing_unknown default."""
+    if events is None or len(events) == 0:
+        return None
+    e = events[(events[E.underlying].astype(str).str.upper() == underlying.upper())
+               & ~events[E.pending].astype(bool) & events[E.t0].notna()]
+    if len(e) == 0:
+        return None
+    apart = e[E.report_date_ny].map(lambda x: _days_apart(x, d))
+    e = e.assign(_apart=apart)[(apart <= DATE_CONFLICT_DAYS).fillna(False).to_numpy()]
+    if len(e) == 0:
+        return None
+    row = e.sort_values("_apart", kind="mergesort").iloc[0]
+    flags = set(str(row[E.flags]).split(";"))
+    if "timing_unknown" in flags:
+        return None
+    src = str(row[E.t0_source])
+    label = f"events table: {src}" + (" (timing_from_history)" if "timing_from_history" in flags else "")
+    return pd.Timestamp(row[E.t0]).tz_convert(NY).time(), src, label
+
+
+def expected_t0_for(events: pd.DataFrame | None, underlying: str, report_date_ny: Any,
+                    nasdaq_flag: Any = None) -> tuple[pd.Timestamp, str]:
+    """(expected_t0 UTC, source) for an upcoming event, in order: a manual override recorded on
+    the matching events.parquet row, the issuer's median sec_8k acceptance clock, the
+    calendar-flag time of the matching events.parquet row, the Nasdaq calendar's time flag
+    (BMO 07:00 / AMC 16:05), else the AMC default."""
+    d = _as_date(report_date_ny)
+    table = _events_table_clock(events, underlying, d)
+    if table is not None and table[1] == T0Source.manual.value:
+        return to_utc(pd.Timestamp.combine(d, table[0]), assume_tz=NY), table[2]
+    clock = expected_release_clock(events, underlying) if events is not None else None
+    if clock is not None:
+        hh, mm = (int(x) for x in clock[0].split(":"))
+        return to_utc(pd.Timestamp.combine(d, time(hh, mm)), assume_tz=NY), clock[1]
+    if table is not None:
+        return to_utc(pd.Timestamp.combine(d, table[0]), assume_tz=NY), table[2]
+    timing = timing_from_flag(nasdaq_flag)
+    if timing is not None:
+        return calendar_default_t0(d, timing), f"nasdaq flag {str(nasdaq_flag)!r} ({timing} default)"
+    return calendar_default_t0(d, "AMC"), "calendar default (AMC)"
+
+
 def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
     """Future events for the event universe from the FMP calendar, with the consensus taken from
-    the newest archived snapshot when present."""
+    the newest archived snapshot when present and `expected_t0` from `expected_t0_for`."""
     from ..data.fmp import FMPClient
+    from ..data.nasdaq import NasdaqClient
     from ..universe import event_universe, load_universe
 
     universe = load_universe(settings)
@@ -1041,6 +1192,22 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
     cal = FMPClient(settings).earnings_calendar(pd.Timestamp(today), pd.Timestamp(today) + pd.Timedelta(days=int(days)))
     snapshots = load_consensus_snapshots(settings)
     events = load_events(settings) if settings.events_path.exists() else None
+    nasdaq = NasdaqClient(settings)
+    nasdaq_flags: dict[date, dict[str, Any]] = {}
+
+    def nasdaq_flag(sym: str, day: date) -> Any:
+        if day not in nasdaq_flags:
+            flags: dict[str, Any] = {}
+            try:
+                rows = nasdaq.earnings_calendar(pd.Timestamp(day))
+            except (httpx.HTTPError, ValueError) as exc:
+                log.warning("Nasdaq calendar unavailable for %s: %s", day, exc)
+            else:
+                for rec in rows.to_dict("records"):
+                    flags.setdefault(str(rec["symbol"]).upper(), rec.get("time_flag"))
+            nasdaq_flags[day] = flags
+        return nasdaq_flags[day].get(sym)
+
     rows = []
     for _, r in cal.iterrows():
         sym = str(r[U.symbol]).upper()
@@ -1048,13 +1215,7 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
         if u is None:
             continue
         d = _as_date(r[E.report_date_ny])
-        clock = expected_release_clock(events, sym) if events is not None else None
-        if clock is not None:
-            hh, mm = (int(x) for x in clock[0].split(":"))
-            expected_t0 = to_utc(pd.Timestamp.combine(d, time(hh, mm)), assume_tz=NY)
-            expected_src = clock[1]
-        else:
-            expected_t0, expected_src = calendar_default_t0(d, "AMC"), "calendar default (AMC)"
+        expected_t0, expected_src = expected_t0_for(events, sym, d, nasdaq_flag(sym, d))
         snap = consensus_before(snapshots, sym, d, None)
         rows.append({
             E.underlying: sym, E.market: u[U.market], E.kind: u[U.kind], E.report_date_ny: d,

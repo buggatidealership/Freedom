@@ -39,6 +39,7 @@ from freedom.events import (
     expected_release_clock,
     fiscal_period_for,
     load_events,
+    project_quarter_end,
     resolve_release_time,
     snapshot_consensus,
     upcoming_events,
@@ -102,6 +103,9 @@ class FakeHttp:
         }
         self.intraday_budget: int | None = None  # BudgetExhausted after this many 1min requests
         self.n_intraday = 0
+        self.intraday_errors: set[str] = set()  # symbols whose 1min request answers an error payload
+        self.earnings_budget_exhausted = False  # every earnings-history request hits the budget
+        self.tickers_extra: dict[str, int] = {}  # ticker -> CIK appended to the SEC ticker map
         self.nasdaq: dict[str, list[dict]] = {}  # iso date -> rows
         self.submissions: dict[int, dict] = {
             NVDA_CIK: load("sec", "submissions_CIK0001045810.json"),
@@ -126,7 +130,10 @@ class FakeHttp:
     def get_json(self, provider: str, url: str, params: dict):
         self.calls.append({"provider": provider, "url": url, "params": params})
         if url == TICKERS_URL:
-            return load("sec", "company_tickers_head.json")
+            payload = load("sec", "company_tickers_head.json")
+            for i, (ticker, cik) in enumerate(self.tickers_extra.items()):
+                payload[str(len(payload) + i)] = {"cik_str": cik, "ticker": ticker, "title": ticker}
+            return payload
         if url.startswith(SUBMISSIONS_URL):
             name = url[len(SUBMISSIONS_URL):]
             if "-submissions-" in name:
@@ -142,11 +149,15 @@ class FakeHttp:
             if path == "stable/earnings-calendar":
                 return self.calendar
             if path == "stable/earnings":
+                if self.earnings_budget_exhausted:
+                    raise BudgetExhausted("fmp: daily budget of 240 requests exhausted (240 used).")
                 return self.earnings.get(params["symbol"], [])
             if path == "stable/historical-chart/1min":
                 self.n_intraday += 1
                 if self.intraday_budget is not None and self.n_intraday > self.intraday_budget:
                     raise BudgetExhausted("fmp: daily budget of 240 requests exhausted (240 used).")
+                if params["symbol"] in self.intraday_errors:
+                    return {"Error Message": "Invalid symbol"}
                 return self.intraday.get((params["symbol"], params["from"]), [])
             raise AssertionError(f"unexpected FMP path {path}")
         if url.startswith(NASDAQ_URL):
@@ -328,6 +339,10 @@ def test_resolver_priority_and_earlier_only_rule():
     r = resolve_release_time(report_date_ny=REPORT_DAY, sec_filings=None, intraday=None,
                              calendar_flag="time-not-supplied")
     assert r.confidence == CONFIDENCE_UNKNOWN and "timing_unknown" in r.flags
+    # Nasdaq's prefixed flags are read like the vendor-neutral ones
+    r = resolve_release_time(report_date_ny=REPORT_DAY, sec_filings=None, intraday=None,
+                             calendar_flag="time-after-hours")
+    assert r.t0 == ny("2026-08-26 16:05") and r.confidence == CONFIDENCE["calendar_flag"]
 
     # an 8-K on another date is not attributed to this report date
     r = resolve_release_time(report_date_ny=pd.Timestamp("2026-08-20"), sec_filings=filings,
@@ -367,9 +382,29 @@ def test_fiscal_period_from_sec_facts_alphavantage_and_derived(settings, fake):
     assert fiscal_period_for(REPORT_DAY, sec_eps_facts=None, av_rows=None) == ("2026-06", "derived", True)
     assert fiscal_period_for(pd.Timestamp("2026-01-15"), sec_eps_facts=None, av_rows=None)[0] == "2025-12"
     assert fiscal_period_for(pd.Timestamp("2026-06-30"), sec_eps_facts=None, av_rows=None)[0] == "2026-03"
-    # a period end that is too old (> 120 days) does not qualify
+    # a period end that is too old (> 120 days) does not qualify as the period itself; with any
+    # facts on file the issuer's quarter end is projected from the latest one in whole quarters
     old = facts[facts["period_end"] < pd.Timestamp("2026-01-01", tz="UTC")]
-    assert fiscal_period_for(REPORT_DAY, sec_eps_facts=old, av_rows=None)[1] == "derived"
+    assert fiscal_period_for(REPORT_DAY, sec_eps_facts=old, av_rows=None) == ("2026-07", "sec_facts_projected", False)
+    # so the id is stable: the Aug-2026 event before its 10-Q landed gets the id the 10-Q gives
+    before_10q = facts[facts["period_end"] < pd.Timestamp("2026-07-01", tz="UTC")]
+    assert fiscal_period_for(REPORT_DAY, sec_eps_facts=before_10q, av_rows=None) == ("2026-07", "sec_facts_projected", False)
+    # ... and the upcoming Nov-2026 event keeps its id before and after the Q3 10-Q is on file
+    nov = pd.Timestamp("2026-11-18")
+    assert fiscal_period_for(nov, sec_eps_facts=facts, av_rows=None) == ("2026-10", "sec_facts_projected", False)
+    assert fiscal_period_for(nov, sec_eps_facts=before_10q, av_rows=None)[0] == "2026-10"
+    q3 = pd.DataFrame({"period_end": [pd.Timestamp("2026-10-25", tz="UTC")],
+                       "filed": [pd.Timestamp("2026-11-19", tz="UTC")]})
+    assert fiscal_period_for(nov, sec_eps_facts=pd.concat([facts, q3]), av_rows=None) == ("2026-10", "sec_facts", False)
+    # the projection also runs backwards for an old event whose own facts are missing
+    recent = facts[facts["period_end"] >= pd.Timestamp("2026-01-01", tz="UTC")]
+    assert fiscal_period_for(pd.Timestamp("2024-02-21"), sec_eps_facts=recent, av_rows=None) == ("2024-01", "sec_facts_projected", False)
+    # Alpha Vantage periods project the same way when no row matches the report date
+    assert fiscal_period_for(pd.Timestamp("2026-11-12"), sec_eps_facts=None, av_rows=av) == ("2026-10", "alphavantage_projected", False)
+    assert project_quarter_end(date(2026, 4, 26), date(2026, 8, 26)) == date(2026, 7, 26)
+    assert project_quarter_end(date(2026, 7, 26), date(2026, 2, 25)) == date(2026, 1, 26)
+    assert project_quarter_end(date(2025, 12, 31), date(2026, 10, 1)) == date(2026, 9, 30)
+    assert project_quarter_end(date(2025, 12, 31), date(2026, 9, 30)) == date(2026, 6, 30)
 
 
 # ---- build_events ---------------------------------------------------------------------------------
@@ -418,11 +453,14 @@ def test_build_events_end_to_end_from_fixtures(settings, fake):
     assert aug25[E.market] == "para:NVDA" and bool(aug25[E.has_perp_at_t0]) is True
     nov = by.loc["NVDA:2025-10"]
     assert nov[E.market] == "xyz:NVDA" and bool(nov[E.has_perp_at_t0]) is True
-    # a future event is kept with the calendar default and flagged upcoming
-    up = by.loc["NVDA:2026-09"]
+    # a future event is kept with the calendar default and flagged upcoming; its fiscal period
+    # is projected from the issuer's latest filed period (the Q3 10-Q is not on file yet)
+    up = by.loc["NVDA:2026-10"]
     assert "upcoming" in up[E.flags].split(";") and pd.isna(up[E.eps_actual])
     assert up[E.t0_source] == "calendar_flag" and up[E.t0] == ny("2026-11-18 16:05")
     assert "timing_from_history" in up[E.flags].split(";")
+    assert up[E.fiscal_period_source] == "sec_facts_projected" and "fiscal_period_derived" not in up[E.flags]
+    assert up[E.estimate_source] == "fmp_calendar" and up[E.eps_estimate] == 2.47
 
     # intraday requests use exactly the loaders window: report date - 1 .. + 2, one chunk
     intraday_calls = [c for c in fake.calls if c["url"].endswith("historical-chart/1min")]
@@ -491,7 +529,7 @@ def test_budget_exhaustion_writes_completed_and_pending_rows(settings, fake):
     assert df.attrs["schema_version"] == SCHEMA_VERSION
     done, pending = df[~df[E.pending]], df[df[E.pending]]
     # newest first: the upcoming NVDA event (no request) and NVDA 2026-08-26 completed
-    assert set(done[E.event_id]) == {"NVDA:2026-09", "NVDA:2026-07"}
+    assert set(done[E.event_id]) == {"NVDA:2026-10", "NVDA:2026-07"}
     assert set(pending[E.event_id]) == {"AAPL:2026-06", "NVDA:2026-04", "AAPL:2026-03", "NVDA:2026-01", "AAPL:2025-12"}
     assert pending[E.t0].isna().all() and pending[E.t0_source].isna().all()
     assert pending[E.flags].map(lambda f: "pending" in f.split(";")).all()
@@ -503,6 +541,68 @@ def test_budget_exhaustion_writes_completed_and_pending_rows(settings, fake):
     df2 = build_events(settings, underlyings=["NVDA", "AAPL"], since=pd.Timestamp("2026-01-01"))
     assert not df2[E.pending].any() and set(df2[E.event_id]) == set(df[E.event_id])
     assert not load_events(settings)[E.pending].any()
+
+
+def test_budget_hit_rerun_never_downgrades_completed_rows(settings, fake):
+    write_universe(settings)
+    full = build_events(settings, underlyings=["NVDA"], since=pd.Timestamp("2026-01-01"))
+    assert len(full) == 4 and not full[E.pending].any()
+    # a week later the empty-payload cache entries have expired and the very first intraday
+    # request hits the budget: only the upcoming row (no request) resolves in this run
+    fake.intraday_budget = 0
+    with pytest.raises(BudgetExhausted):
+        build_events(settings, underlyings=["NVDA"], since=pd.Timestamp("2026-01-01"))
+    again = load_events(settings)
+    assert set(again[E.event_id]) == set(full[E.event_id]) and again[E.event_id].is_unique
+    assert not again[E.pending].any()
+    a = full.set_index(E.event_id).sort_index()
+    b = again.set_index(E.event_id).sort_index()
+    for col in (E.t0, E.t0_source, E.t0_confidence, E.report_date_ny, E.eps_actual, E.flags):
+        assert a[col].equals(b[col]), col
+    # when not even the earnings history can be fetched, the placeholder joins the completed
+    # rows instead of replacing them
+    fake.intraday_budget = None
+    fake.earnings_budget_exhausted = True
+    with pytest.raises(BudgetExhausted):
+        build_events(settings, underlyings=["NVDA"], since=pd.Timestamp("2026-01-01"))
+    third = load_events(settings)
+    assert set(third[~third[E.pending]][E.event_id]) == set(full[E.event_id])
+    assert list(third[third[E.pending]][E.event_id]) == ["NVDA:pending"]
+    # the next run with budget drops the placeholder again
+    fake.earnings_budget_exhausted = False
+    build_events(settings, underlyings=["NVDA"], since=pd.Timestamp("2026-01-01"))
+    assert set(load_events(settings)[E.event_id]) == set(full[E.event_id])
+    # a pending row for an event the table never completed is still written
+    fake.intraday_budget = 0
+    with pytest.raises(BudgetExhausted):
+        build_events(settings, underlyings=["NVDA", "AAPL"], since=pd.Timestamp("2026-01-01"))
+    mixed = load_events(settings)
+    assert set(mixed[~mixed[E.pending]][E.event_id]) >= set(full[E.event_id])
+    assert set(mixed[mixed[E.pending]][E.underlying]) == {"AAPL"}
+
+
+def test_budget_exhaustion_without_write_reports_nothing_written(settings, fake):
+    write_universe(settings)
+    fake.intraday_budget = 0
+    with pytest.raises(BudgetExhausted, match=r"nothing written \(write=False\)") as info:
+        build_events(settings, underlyings=["NVDA"], since=pd.Timestamp("2026-01-01"), write=False)
+    assert "written as pending" not in str(info.value)
+    assert not settings.events_path.exists()
+
+
+def test_fmp_error_on_one_intraday_request_does_not_abort_the_build(settings, fake):
+    write_universe(settings)
+    fake.intraday_errors.add("AAPL")
+    df = build_events(settings, underlyings=["NVDA", "AAPL"], since=pd.Timestamp("2026-01-01"))
+    assert settings.events_path.exists() and not df[E.pending].any()
+    by = df.set_index(E.event_id)
+    aapl = by.loc["AAPL:2026-06"]
+    assert {"intraday_error", "no_intraday"} <= set(aapl[E.flags].split(";"))
+    assert aapl[E.t0_source] == "sec_8k"  # the 8-K time stands without bars
+    assert "fmp_intraday" not in aapl[E.sources_used].split(";")
+    nvda = by.loc["NVDA:2026-07"]
+    assert "intraday_error" not in nvda[E.flags].split(";")
+    assert "fmp_intraday" in nvda[E.sources_used].split(";")
 
 
 def test_budget_exhaustion_before_any_history_yields_placeholders(settings, fake):
@@ -573,11 +673,16 @@ def test_subset_run_merges_into_the_existing_table(settings, fake):
 def test_missing_universe_requires_explicit_underlyings(settings, fake):
     with pytest.raises(FileNotFoundError):
         build_events(settings)
-    df = build_events(settings, underlyings=["NVDA"], since=pd.Timestamp("2026-08-01"))
+    fake.tickers_extra["TSM"] = TSM_CIK
+    fake.earnings["TSM"] = [dict(r, symbol="TSM") for r in load("fmp", "earnings_NVDA.json")[1:3]]
+    df = build_events(settings, underlyings=["NVDA", "TSM"], since=pd.Timestamp("2026-08-01"))
     q2 = df.set_index(E.event_id).loc["NVDA:2026-07"]
-    assert q2[E.cik] == NVDA_CIK and q2[E.t0_source] == "sec_8k"
+    assert q2[E.cik] == NVDA_CIK and q2[E.t0_source] == "sec_8k" and q2[E.kind] == "equity_us"
     assert pd.isna(q2[E.market]) and bool(q2[E.has_perp_at_t0]) is False
     assert "no_universe" in q2[E.flags].split(";")
+    # the kind is guessed from the filings: 6-K only -> equity_fpi
+    tsm = df[df[E.underlying] == "TSM"]
+    assert len(tsm) == 1 and (tsm[E.kind] == "equity_fpi").all() and (tsm[E.cik] == TSM_CIK).all()
 
 
 # ---- upcoming and consensus snapshots ---------------------------------------------------------
@@ -629,6 +734,49 @@ def test_upcoming_events_prefers_archived_consensus(settings, fake):
     assert nvda["expected_t0"] == ny("2026-09-10 16:21") and nvda["expected_t0_source"].startswith("median")
     tsm = up.set_index(E.underlying).loc["TSM"]
     assert tsm["expected_t0"] == ny("2026-09-11 16:05") and tsm[E.market] == "xyz:TSM"
+
+
+def test_upcoming_expected_t0_fallbacks(settings, fake):
+    write_universe(settings)
+
+    def cal_row(sym: str, day: str) -> dict:
+        return {"symbol": sym, "date": day, "epsActual": None, "epsEstimated": 1.5,
+                "revenueActual": None, "revenueEstimated": 9.0e10, "lastUpdated": "2026-09-02"}
+
+    fake.calendar = [cal_row("TSM", "2026-09-11"), cal_row("AAPL", "2026-09-15")]
+    # without an events table: the Nasdaq calendar's time flag, else the AMC default
+    fake.nasdaq["2026-09-11"] = [nasdaq_row("TSM", time_flag="time-pre-market")]
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["TSM", "expected_t0"] == ny("2026-09-11 07:00")
+    assert up.loc["TSM", "expected_t0_source"] == "nasdaq flag 'time-pre-market' (BMO default)"
+    assert up.loc["AAPL", "expected_t0"] == ny("2026-09-15 16:05")
+    assert up.loc["AAPL", "expected_t0_source"] == "calendar default (AMC)"
+    assert (up[E.estimate_source] == "fmp_calendar").all()
+    # an upcoming row in events.parquet whose calendar flag came from the filing history (a
+    # morning filer) beats the Nasdaq flag; a row carrying only the timing_unknown default does not
+    fake.submissions[AAPL_CIK] = {"filings": {"recent": submissions_page(
+        [("8-K", t, "2.02,9.01") for t in ("2026-04-30T11:30:00.000Z", "2026-01-29T11:30:00.000Z")]
+    ), "files": []}}
+    fake.earnings["AAPL"] = [cal_row("AAPL", "2026-09-15")]
+    fake.earnings["TSM"] = [cal_row("TSM", "2026-09-11")]
+    build_events(settings, underlyings=["AAPL", "TSM"], since=pd.Timestamp("2026-09-01"))
+    table = load_events(settings).set_index(E.underlying)
+    assert "timing_from_history" in table.loc["AAPL", E.flags].split(";")
+    assert table.loc["AAPL", E.estimate_source] == "fmp_calendar"
+    assert "timing_unknown" in table.loc["TSM", E.flags].split(";")
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["AAPL", "expected_t0"] == ny("2026-09-15 07:00")
+    assert up.loc["AAPL", "expected_t0_source"] == "events table: calendar_flag (timing_from_history)"
+    assert up.loc["TSM", "expected_t0"] == ny("2026-09-11 07:00")
+    assert up.loc["TSM", "expected_t0_source"].startswith("nasdaq flag")
+    # a manual override recorded on the upcoming row wins over everything
+    settings.configs_dir = settings.data_dir / "configs"
+    settings.configs_dir.mkdir()
+    (settings.configs_dir / "t0_overrides.yaml").write_text('"TSM:2026-09-11": "2026-09-11T12:30:00Z"\n')
+    build_events(settings, underlyings=["TSM"], since=pd.Timestamp("2026-09-01"))
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["TSM", "expected_t0"] == pd.Timestamp("2026-09-11 12:30", tz="UTC")
+    assert up.loc["TSM", "expected_t0_source"] == "events table: manual"
 
 
 def test_archiver_records_a_consensus_summary_row(settings, fake, monkeypatch):
