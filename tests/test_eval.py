@@ -12,7 +12,7 @@ from freedom import models as models_mod
 from freedom.data.base import BudgetExhausted
 from freedom.eval import runner
 from freedom.eval.folds import season_start
-from freedom.schemas import C, D, E, P, T
+from freedom.schemas import SCHEMA_VERSION, C, D, E, P, T
 from tests.synth_eval import (
     PERP_LISTING,
     make_bars,
@@ -892,7 +892,7 @@ def test_train_final_saves_model_with_provenance(settings, dataset):
     assert meta["decision_time"] == "post_30m" and meta["model"] == "linear" and meta["target"] == "r_24h"
     assert len(meta["dataset_sha256"]) == 64 and meta["git_sha"] and len(meta["config_hash"]) == 64
     assert meta["dataset_hash_source"] == "content"  # no dataset.parquet in this data_dir
-    assert meta["trained_at"] and meta["schema_version"] == 2
+    assert meta["trained_at"] and meta["schema_version"] == SCHEMA_VERSION
     sub = dataset[(dataset[D.decision_time] == "post_30m") & (dataset["season"] != "2026Q3")]
     trainable = sub[(sub[E.t0_confidence] >= settings.min_t0_confidence) & ~sub["target_missing"]]
     perp = trainable[trainable[E.has_perp_at_t0]]

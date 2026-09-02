@@ -162,9 +162,12 @@ feature group is marked non-point-in-time in reports: `features.groups.NON_POINT
 names it (with `perp_state.max_leverage`, §6), `estimate_source` travels with the dataset, and
 `evaluate` (summary `non_point_in_time_groups`, per-decision-time `estimate_source` counts of
 the trainable events, notes and leaderboard) and `optimize` (`best_params.json`, leaderboard,
-a flag on a best trial that used such a group) both print it. From now on the archiver's consensus
-snapshots provide `estimate_source = consensus_snapshot` with the capture time, and live
-prediction uses only those. `has_perp_at_t0 = t0 ≥ min(listing_start)` over all markets of the
+a flag on a best trial that used such a group) both print it. `estimate_source` joined the
+dataset's meta columns at `schemas.SCHEMA_VERSION = 3`; a dataset written under an earlier
+version still evaluates, but reports the provenance as `unavailable` unless `data/events.parquet`
+supplies it per event. From now on the archiver's consensus snapshots provide
+`estimate_source = consensus_snapshot` with the capture time, and live prediction uses only
+those. `has_perp_at_t0 = t0 ≥ min(listing_start)` over all markets of the
 underlying; when the primary market was unlisted at `t0` but an alternate existed, the
 alternate's candles are used and recorded in `price_market`.
 

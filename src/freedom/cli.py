@@ -270,7 +270,9 @@ def _summary_rows(summary: dict) -> dict[str, list[dict]]:
     """decision time -> one row per model from the evaluation summary, whose metrics are nested
     as results[decision_time][model]["subsets"][subset] (eval.runner). Like the written
     leaderboard, a row shows the headline subset when it has events, else all events, with the
-    paired comparison against the best baseline and the fixed-sizing trading result."""
+    paired comparison against the best baseline and the fixed-sizing trading result of that same
+    subset (summary `trading_subsets`; `trading` alone is the every-row entry and stands in only
+    when the per-subset statistics are absent)."""
     out: dict[str, list[dict]] = {}
     for d, per_model in (summary.get("results") or {}).items():
         rows = []
@@ -279,7 +281,8 @@ def _summary_rows(summary: dict) -> dict[str, list[dict]]:
             subset = "headline" if (subsets.get("headline") or {}).get("n") else "all"
             cell = subsets.get(subset) or {}
             comp = (cell.get("comparison") or {}).get("brier") or {}
-            trading = (res.get("trading") or {}).get("fixed") or {}
+            # the trading columns describe the same rows as the metric cell of this row
+            trading = (((res.get("trading_subsets") or {}).get(subset) or res.get("trading") or {}).get("fixed") or {})
             mean_pnl = (trading.get("mean_pnl") or {}).get("point")
             rows.append({"model": model, "subset": subset, "n": cell.get("n"),
                          "accuracy": cell.get("accuracy"), "brier": cell.get("brier"),

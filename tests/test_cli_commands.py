@@ -180,17 +180,29 @@ def _eval_summary() -> dict:
                 "linear": {"is_baseline": False,
                            "subsets": {"all": _cell(300, 0.244, 0.53), "headline": _cell(120, 0.241, 0.55, comparison)},
                            "residual_band": {"q10": -0.04, "q90": 0.05, "n": 300, "coverage": 0.81, "n_with_band": 300},
-                           "trading": trading(0.8, 0.0012)}}},
+                           # `trading` is the every-row entry; the per-subset statistics differ from it
+                           "trading": trading(0.8, 0.0012),
+                           "trading_subsets": {"all": trading(0.8, 0.0012), "headline": trading(1.1, 0.0015)}}}},
             "holdout_results": None, "sizings": ["fixed", "by_confidence"], "n_boot": 1000, "notes": ["a note"]}
 
 
 def test_summary_rows_flatten_the_nested_eval_results():
-    rows = _summary_rows(_eval_summary())
+    summary = _eval_summary()
+    rows = _summary_rows(summary)
     assert list(rows) == ["pre_5m"] and [r["model"] for r in rows["pre_5m"]] == ["zero", "linear"]
     linear = rows["pre_5m"][1]
     assert linear["subset"] == "headline" and linear["n"] == 120 and linear["brier"] == 0.241
     assert linear["baseline"] == "zero" and linear["verdict"] == "improves" and linear["Δbrier vs baseline"] == 0.009
-    assert linear["mean net bp (fixed)"] == pytest.approx(12.0) and rows["pre_5m"][0]["baseline"] == "(is baseline)"
+    assert rows["pre_5m"][0]["baseline"] == "(is baseline)"
+    # the trading columns follow the row's subset, not the every-row `trading` entry
+    res = summary["results"]["pre_5m"]["linear"]
+    headline = res["trading_subsets"]["headline"]["fixed"]
+    assert linear["sharpe (fixed)"] == headline["sharpe_like"] == 1.1
+    assert linear["sharpe (fixed)"] != res["trading"]["fixed"]["sharpe_like"]
+    assert linear["mean net bp (fixed)"] == pytest.approx(headline["mean_pnl"]["point"] * 1e4) == pytest.approx(15.0)
+    # a result without per-subset statistics (older summaries) falls back to `trading`
+    zero = rows["pre_5m"][0]
+    assert "trading_subsets" not in summary["results"]["pre_5m"]["zero"] and zero["sharpe (fixed)"] == 0.0
     assert _summary_rows({"run_id": "x"}) == {}
 
 
