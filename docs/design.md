@@ -170,13 +170,17 @@ alternate's candles are used and recorded in `price_market`.
 | pre_price | returns 1/5/20/60 d, realised vol 20 d, distance to 52 w high/low, drift in last 60/30 min before t0, extended-hours volume vs baseline, gap since last close | pre |
 | history | this name's past `r_24h` mean/std/skew, hit rate of continuation, last four reactions, historical sensitivity of `r_24h` to EPS surprise — computed only from `history_view(events, targets, underlying, as_of)` = rows with `t0 + 24h ≤ as_of` | pre |
 | market | `xyz:SP500` / SPY 1/5 d returns, `xyz:VIX` level and 5 d change, sector proxy (SMH, XLE, XBI) returns | pre |
-| perp_state | funding rate, premium (mark−oracle), open-interest change 24 h, 30-day volume, leverage cap | pre (when perp exists) |
+| perp_state | funding rate, premium (mark−oracle), open-interest change 24 h, 30-day volume, listing age (None when the listing is after `d`), leverage cap (the **current** cap — Hyperliquid publishes no history, so this one feature is not point-in-time) | pre (when perp exists) |
 | surprise | EPS and revenue surprise %, standardised against the name's own surprise history, sign agreement | post |
 | reaction | `r_1m…r_k`, path high/low range, volume z-score, perp premium after release | post_k |
 | text (deferred) | guidance change and tone from the 8-K EX-99.1 via an LLM; **not built in v1** because an LLM trained after the event knows the outcome, so the feature cannot be made point-in-time for historical rows | — |
 
-Missing features are explicit (`NaN` + indicator), never imputed silently. `as_of` gates the
-harness's own event/target store as well as provider calls: `build_features` asserts
+Missing features are explicit (`NaN` + indicator), never imputed silently. Daily bars of the
+underlying and the equity proxies are usable from their session's XNYS close (16:00 ET, earlier
+on half days), not from the calendar-day end the loaders stamp as `t_end`, so an AMC release
+sees the release-day session and an in-session release does not; perp 1d candles are usable
+from their `t_end`. The reaction group, like the targets, reads 1m/5m bars only. `as_of` gates
+the harness's own event/target store as well as provider calls: `build_features` asserts
 `(history.t0 + 24h ≤ as_of).all()`. Feature functions are pure and unit-tested against fixtures
 with two look-ahead traps: a bar starting before `d` but ending after it must be excluded, and
 at `post_60m` setting the event's own `r_24h` to +5.0 must leave every feature unchanged.
