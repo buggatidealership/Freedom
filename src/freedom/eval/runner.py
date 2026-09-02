@@ -214,7 +214,9 @@ def _fit_predict(name: str, seed: int, train: pd.DataFrame, test: pd.DataFrame,
 
 # ---- walk-forward ------------------------------------------------------------------------------
 def _fold_plan(sub: pd.DataFrame, settings: Settings) -> tuple[list[Fold], Fold | None, list[dict], list[dict]]:
-    folds, holdout = walk_forward_folds(sub, min_train=settings.min_train_events,
+    # ask the builder for every season and apply the trainable-row minimum here, so seasons
+    # that cannot be tested are listed as skipped instead of vanishing
+    folds, holdout = walk_forward_folds(sub, min_train=0,
                                         embargo_days=settings.embargo_days,
                                         holdout_season=settings.holdout_season)
     usable, info, skipped = [], [], []
@@ -687,6 +689,17 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
         if sub.empty:
             raise ValueError(f"the dataset has no scorable rows for decision_time {d!r}")
         folds, holdout, info, skip = _fold_plan(sub, settings)
+        # seasons whose every event is unscorable disappear from the plan; list them as skipped
+        # so the report shows where the data ran out instead of silently narrowing
+        from .folds import seasons_of
+
+        gone = sorted(set(seasons_of(sub_all[E.t0]).dropna()) - set(seasons_of(sub[E.t0]).dropna()))
+        for label in gone:
+            if label == settings.holdout_season:
+                continue
+            before = int((sub[TRAINABLE] & (seasons_of(sub[E.t0]) < label)).sum())
+            skip.append({"test_season": label, "n_train_trainable": before, "reason": "no scorable events"})
+        skip.sort(key=lambda x: x["test_season"])
         if not folds:
             raise ValueError(f"{d}: no season has {settings.min_train_events} trainable events before it "
                              f"(embargo {settings.embargo_days} d); {len(sub)} events in the dataset")

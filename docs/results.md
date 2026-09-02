@@ -1,6 +1,6 @@
 # First end-to-end run (2026-09-02)
 
-Run `20260902T125550Z-e966f02d` (`reports/20260902T125550Z-e966f02d/`), twelve underlyings with the earliest Hyperliquid listings
+Run `20260902T130217Z-e966f02d` (`reports/20260902T130217Z-e966f02d/`), twelve underlyings with the earliest Hyperliquid listings
 (NVDA, TSLA, AAPL, MSFT, GOOGL, AMZN, META, MU, INTC, PLTR, AMD, NFLX), events since
 2025-09-01, decision times `pre_5m`, `post_15m`, `post_30m`, minimum training events lowered to
 12 for this smoke run (`FREEDOM_MIN_TRAIN_EVENTS=12`; the default is 120). Everything below is

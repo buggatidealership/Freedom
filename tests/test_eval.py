@@ -406,7 +406,9 @@ def test_evaluate_end_to_end_writes_reports(settings, dataset):
     assert [f["test_season"] for f in summary["folds"]["post_30m"]] == sorted(set(preds[P.test_season]))
     assert all(f["n_train"] >= settings.min_train_events for f in summary["folds"]["post_30m"])
     skipped = summary["skipped_seasons"]["post_30m"]
-    assert [s["test_season"] for s in skipped] == ["2025Q2"] and skipped[0]["n_train_trainable"] < 120
+    # every season before the first usable fold is listed with its (too small) training count
+    assert [s["test_season"] for s in skipped] == ["2024Q3", "2024Q4", "2025Q1", "2025Q2"]
+    assert all(s["n_train_trainable"] < 120 for s in skipped)
     # the first fold has no earlier residuals, later folds carry a band around r_hat
     lin = preds[(preds[P.model] == "linear") & (preds[P.decision_time] == "post_30m")]
     assert lin.loc[lin[P.fold] == 0, P.r_lo].isna().all() and lin.loc[lin[P.fold] > 0, P.r_lo].notna().all()
