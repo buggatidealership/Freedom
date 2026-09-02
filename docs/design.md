@@ -49,7 +49,9 @@ behind them. Whether anything is predictable is an output of the harness, not an
      whether detection fires. Detection is the primary source for foreign private issuers; a
      detection that fires on the very first bar of the extended session is flagged
      (`detection_first_bar`) and gets calendar-flag confidence, because the release probably
-     happened while no bars existed.
+     happened while no bars existed. A detection may not cross the open/close boundary: a
+     filing accepted after the close is never moved into the regular session (the closing
+     auction's volume spike fired the detector on MU 2026-06-24 and was rejected by this rule).
   3. Calendar flag (`post-market` / `pre-market` from Alpha Vantage or Nasdaq) mapped to a
      default clock time (16:05 / 07:00 America/New_York), low confidence.
   4. Manual override file.
@@ -356,3 +358,16 @@ events); zero-key behaviour (FMP is required and fails fast); and two checkpoint
 claims that the bar rule already handles. Text features were deferred, the per-model interval
 method was dropped in favour of residual bands, and `predict` reports only point-in-time
 consensus.
+
+## 14. Integration notes (2026-09-02)
+
+* FMP returns at most three sessions of 1-minute bars per request, so 1-minute windows are
+  chunked at three calendar days and the resolver and the price-path loader both request
+  `[report day − 1, report day + 1]`, one request per event, shared through the cache.
+* Upcoming events (no realised target) are excluded from fold planning; they previously formed
+  a phantom future test fold and spent one provider request per run on empty windows.
+* Learners whose direction head fell back to the base rate in every fold (fewer than 30 usable
+  training rows) are labelled `untrained` in reports; a model whose predictions equal its
+  baseline exactly is labelled `identical_to_baseline`, and neither counts as evidence about
+  predictability.
+* The first end-to-end run and how to read it: `docs/results.md`.
