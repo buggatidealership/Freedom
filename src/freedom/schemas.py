@@ -86,11 +86,13 @@ class C:
 
 # ---- events.parquet --------------------------------------------------------------------------
 class E:
-    event_id = "event_id"  # f"{underlying}:{fiscal_period_end}"
+    event_id = "event_id"  # f"{underlying}:{fiscal_period}" with fiscal_period = YYYY-MM quarter end
     underlying = "underlying"
-    market = "market"  # primary perp market or None
+    market = "market"  # perp market used for prices (primary, or alternate if primary unlisted at t0)
     cik = "cik"
-    fiscal_period_end = "fiscal_period_end"
+    kind = "kind"  # equity_us | equity_fpi
+    fiscal_period = "fiscal_period"  # "YYYY-MM" fiscal quarter-end month
+    fiscal_period_source = "fiscal_period_source"  # sec_facts | alphavantage | derived
     report_date_ny = "report_date_ny"  # calendar date in New York
     t0 = "t0"
     t0_confidence = "t0_confidence"  # 0..1
@@ -103,9 +105,13 @@ class E:
     rev_estimate = "rev_estimate"
     rev_surprise_pct = "rev_surprise_pct"
     n_estimates = "n_estimates"
+    estimate_source = "estimate_source"  # consensus_snapshot | fmp_final | nasdaq_final
+    estimate_snapshot_time = "estimate_snapshot_time"  # UTC time the consensus was captured, or NaT
     sources_used = "sources_used"
-    has_perp_at_t0 = "has_perp_at_t0"
-    flags = "flags"
+    has_perp_at_t0 = "has_perp_at_t0"  # t0 >= earliest listing_start over all markets of the underlying
+    listing_start = "listing_start"
+    pending = "pending"  # True when data fetching stopped (budget) before this row was completed
+    flags = "flags"  # ';'-joined: date_conflict, fiscal_period_derived, detection_first_bar, ...
 
 
 # ---- targets ----------------------------------------------------------------------------------
@@ -118,12 +124,21 @@ HEADLINE_CHECKPOINT = "24h"
 class T:
     event_id = "event_id"
     p0 = "p0"
-    p0_time = "p0_time"
-    price_source = "price_source"
-    # per checkpoint: r_<cp>, ar_<cp>, p_<cp>, t_<cp>
+    p0_time = "p0_time"  # end of the bar that supplied p0
+    p0_staleness_min = "p0_staleness_min"  # (t0 - buffer) - p0_time, minutes
+    price_source = "price_source"  # schemas.PriceSource
+    price_interval = "price_interval"  # 1m | 5m
+    price_market = "price_market"  # perp market or underlying ticker the path came from
+    horizon_actual_h = "horizon_actual_h"  # hours between p0_time and the bar used for 24h
+    h24_in_closure = "h24_in_closure"  # XNYS not in session at t0 + 24h
+    # per checkpoint: r_<cp>, ar_<cp>, p_<cp>, t_<cp>, s_<cp> (staleness in minutes)
     direction = "direction_24h"  # +1 / -1 / 0
     magnitude = "magnitude_24h"  # |r_24h|
-    continuation = "continuation_24h"  # sign(r_24h - r_30m)
+    # continuation_k = sign(r_k) * sign(r_24h - r_k): +1 the early reaction extended, -1 it
+    # reversed; NaN when |r_k| is inside the dead band (CONTINUATION_DEAD_BAND)
+    continuation_15m = "continuation_15m"
+    continuation_30m = "continuation_30m"
+    continuation = continuation_30m  # headline continuation label
 
     @staticmethod
     def r(cp: str) -> str:
@@ -140,6 +155,13 @@ class T:
     @staticmethod
     def t(cp: str) -> str:
         return f"t_{cp}"
+
+    @staticmethod
+    def s(cp: str) -> str:
+        return f"s_{cp}"
+
+
+CONTINUATION_DEAD_BAND = 0.0025  # 25 bp: below this the early reaction has no sign to extend
 
 
 # ---- decision times -----------------------------------------------------------------------------
@@ -168,8 +190,21 @@ class P:
     decision_time = "decision_time"
     model = "model"
     fold = "fold"
+    test_season = "test_season"
     p_up = "p_up"
     r_hat = "r_hat"
-    r_q10 = "r_q10"
-    r_q90 = "r_q90"
+    r_lo = "r_lo"  # r_hat + 10th percentile of out-of-sample residuals
+    r_hi = "r_hi"  # r_hat + 90th percentile
     r_true = "r_true"
+    direction_true = "direction_true"
+
+
+SCHEMA_VERSION = 2  # bump when any artifact's columns change; written into every parquet's metadata
+
+
+def season_of(ts) -> str:
+    """Earnings season label = calendar quarter of t0 in UTC, e.g. '2026Q3'."""
+    import pandas as pd
+
+    t = pd.Timestamp(ts)
+    return f"{t.year}Q{(t.month - 1) // 3 + 1}"

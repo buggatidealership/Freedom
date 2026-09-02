@@ -15,11 +15,11 @@ log = logging.getLogger(__name__)
 
 
 def _perp_bars(settings: Settings, hl, market: str, lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame | None:
-    """Archive (1m, then 5m, then 15m) if it covers the window, else live candles for whichever
-    interval still reaches back to `lo` (5000-candle cap), else None."""
+    """Archive (1m, then 5m) if it covers the window, else live 1m/5m candles when the
+    5000-candle window still reaches back to `lo`, else None. Coarser candles are never used."""
     from ..data.archive import load_archive
 
-    for interval in ("1m", "5m", "15m"):
+    for interval in ("1m", "5m"):
         try:
             b = load_archive(settings, market, interval, lo, hi)
         except FileNotFoundError:
@@ -29,8 +29,7 @@ def _perp_bars(settings: Settings, hl, market: str, lo: pd.Timestamp, hi: pd.Tim
             b[C.source] = PriceSource.hl_archive.value
             return b
     now = pd.Timestamp.now(tz="UTC")
-    for interval, span in (("1m", pd.Timedelta(minutes=5000)), ("5m", pd.Timedelta(minutes=5 * 5000)),
-                           ("15m", pd.Timedelta(minutes=15 * 5000)), ("1h", pd.Timedelta(hours=5000))):
+    for interval, span in (("1m", pd.Timedelta(minutes=5000)), ("5m", pd.Timedelta(minutes=5 * 5000))):
         if now - lo < span * 0.95:
             b = hl.candles(market, interval, lo, hi)
             if b is not None and len(b):

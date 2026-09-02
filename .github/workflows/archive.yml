@@ -1,25 +1,30 @@
 name: archive-candles
-# Hyperliquid serves only the most recent 5000 candles per interval (1m ≈ 3.5 days),
-# so fine-grained perp history must be captured continuously. This job pulls the
-# universe's 1m/5m/15m/1h candles and funding into parquet and uploads them as an artifact.
+# Hyperliquid serves only the most recent 5000 candles per interval (1m ≈ 83 h), so fine-grained
+# perp history must be captured continuously. Every 12 h this job restores the newest archive
+# artifact, pulls new candles/funding/context and a consensus snapshot, and re-uploads.
 on:
   schedule:
     - cron: "17 */12 * * *"
   workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
 jobs:
   archive:
     runs-on: ubuntu-latest
+    env:
+      FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - run: uv python install 3.11
       - run: uv venv && uv pip install -e .
       - name: Restore previous archive
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: candle-archive
-          path: data/archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # actions/download-artifact only sees the current run; gh fetches the newest artifact
+        # of that name from any earlier run, which is how the archive accumulates.
+        run: gh run download -n candle-archive -D data/archive -R "${{ github.repository }}" || echo "no previous archive (first run)"
       - run: uv run freedom universe
       - run: uv run freedom archive
       - uses: actions/upload-artifact@v4

@@ -2,8 +2,13 @@
 
 Bar convention everywhere: half-open [t, t_end). A price "at" instant `when` is the close of the
 last bar whose t_end <= when, so a bar that contains `when` is never used. The reference price
-p0 additionally backs off by `p0_buffer` (default 1 minute) because the 8-K acceptance time can
-trail the newswire by up to a minute.
+p0 additionally backs off by a source-dependent buffer: 3 minutes when t0 comes from an 8-K
+acceptance time (measured acceptance-minus-wire lags of 25-134 s), 0 otherwise.
+
+Validity rules (from review): a checkpoint is NaN unless the bar used ends after the p0 bar
+and its staleness (t0+h minus bar end) is within max(2 x interval, 5 min). Only 1m/5m bars
+resolve prices; 1h or coarser candles are never used for p0, checkpoints or fills. One price
+source per event, never mixed inside the window.
 """
 
 from __future__ import annotations
@@ -15,17 +20,27 @@ import numpy as np
 import pandas as pd
 
 from ..config import Settings
-from ..schemas import CHECKPOINTS, C, E, T
-from ..timeutil import next_close_after, next_open_after, to_utc
+from ..schemas import CHECKPOINTS, CONTINUATION_DEAD_BAND, C, E, T
+from ..timeutil import is_rth, next_close_after, next_open_after, to_utc
 
 log = logging.getLogger(__name__)
 
 INTERVAL_TD = {"1m": pd.Timedelta(minutes=1), "5m": pd.Timedelta(minutes=5),
                "15m": pd.Timedelta(minutes=15), "1h": pd.Timedelta(hours=1)}
-P0_BUFFER = pd.Timedelta(minutes=1)
-# a checkpoint price is accepted only if the bar used ends within this staleness of the checkpoint
-MAX_STALENESS = {"1m": pd.Timedelta(minutes=10), "5m": pd.Timedelta(minutes=15),
-                 "15m": pd.Timedelta(minutes=45), "1h": pd.Timedelta(hours=2)}
+FINE_INTERVALS = ("1m", "5m")  # the only intervals allowed to resolve p0, checkpoints and fills
+P0_BUFFER_BY_SOURCE = {"sec_8k": pd.Timedelta(minutes=3)}  # others: no buffer
+MIN_STALENESS = pd.Timedelta(minutes=5)
+
+
+def max_staleness(interval: str) -> pd.Timedelta:
+    """A checkpoint bar may end at most max(2 x interval, 5 min) before the checkpoint instant."""
+    td = INTERVAL_TD.get(interval, pd.Timedelta(hours=1))
+    return max(2 * td, MIN_STALENESS)
+
+
+def p0_buffer_for(event: pd.Series) -> pd.Timedelta:
+    src = event.get(E.t0_source) if hasattr(event, "get") else None
+    return P0_BUFFER_BY_SOURCE.get(str(src), pd.Timedelta(0))
 
 
 def checkpoint_times(t0: pd.Timestamp, horizon_hours: int = 24) -> dict[str, pd.Timestamp]:
@@ -87,26 +102,23 @@ def _interval_of(bars: pd.DataFrame) -> str:
 def build_price_path(settings: Settings, event: pd.Series, *, market_bars: pd.DataFrame | None,
                      equity_bars: pd.DataFrame | None) -> pd.DataFrame:
     """Choose ONE source for the event window so the path never mixes price bases:
-    the perp (market_bars) when it covers [t0 - 1h, t0 + horizon] at 15m or finer, else the
-    underlying's extended-hours bars. Returns bars sorted by t with a `source` column; an empty
-    frame with schemas.C columns when neither source covers the window."""
+    the perp (market_bars) when 1m/5m candles cover [t0 - 1h, t0 + horizon], else the
+    underlying's 1-minute extended-hours bars. Coarser candles are never used. Returns bars
+    sorted by t with a `source` column; an empty frame with schemas.C columns when neither
+    fine source covers the window (targets then stay NaN)."""
     t0 = to_utc(event[E.t0])
     lo, hi = t0 - pd.Timedelta(hours=1), t0 + pd.Timedelta(hours=settings.horizon_hours)
     cols = [C.market, C.interval, C.t, C.t_end, C.open, C.high, C.low, C.close, C.volume, C.n_trades, C.source]
 
-    def covers(b: pd.DataFrame | None, fine_only: bool) -> bool:
-        if b is None or len(b) == 0:
-            return False
-        if fine_only and _interval_of(b) not in ("1m", "5m", "15m"):
+    def covers(b: pd.DataFrame | None) -> bool:
+        if b is None or len(b) == 0 or _interval_of(b) not in FINE_INTERVALS:
             return False
         return bool(b[C.t].min() <= lo and b[C.t_end].max() >= hi - pd.Timedelta(hours=1))
 
-    if covers(market_bars, fine_only=True):
+    if covers(market_bars):
         out = market_bars
-    elif covers(equity_bars, fine_only=False):
+    elif covers(equity_bars):
         out = equity_bars
-    elif covers(market_bars, fine_only=False):  # coarse perp bars beat nothing
-        out = market_bars
     else:
         return pd.DataFrame(columns=cols)
     out = out.sort_values(C.t).drop_duplicates(C.t, keep="last").reset_index(drop=True)
@@ -118,28 +130,39 @@ def build_price_path(settings: Settings, event: pd.Series, *, market_bars: pd.Da
 
 def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFrame | None,
                     *, horizon_hours: int = 24, p0_buffer: pd.Timedelta | None = None) -> pd.Series:
-    """p0 = price strictly before t0; r_<cp> = ln(p_cp / p0); ar_<cp> = r_<cp> - r_<cp>(market);
-    labels direction/magnitude/continuation. Missing checkpoints stay NaN."""
+    """p0 = close of the last bar with t_end <= t0 - buffer; r_<cp> = ln(p_cp / p0);
+    ar_<cp> = r_<cp> - r_<cp>(market); labels direction/magnitude and
+    continuation_k = sign(r_k) * sign(r_24h - r_k) for k in {15m, 30m} (NaN inside the dead band).
+    Every checkpoint records the bar end used (t_<cp>) and staleness in minutes (s_<cp>);
+    invalid checkpoints stay NaN."""
     if p0_buffer is None:
-        p0_buffer = P0_BUFFER
+        p0_buffer = p0_buffer_for(event)
     t0 = to_utc(event[E.t0])
     out: dict[str, object] = {T.event_id: event[E.event_id], T.p0: np.nan, T.p0_time: pd.NaT,
-                              T.price_source: None, "path_interval": None}
+                              T.p0_staleness_min: np.nan, T.price_source: None, T.price_interval: None,
+                              T.price_market: None, T.horizon_actual_h: np.nan,
+                              T.h24_in_closure: not is_rth(t0 + pd.Timedelta(hours=horizon_hours))}
     for cp in CHECKPOINTS:
         out[T.r(cp)] = np.nan
         out[T.ar(cp)] = np.nan
         out[T.p(cp)] = np.nan
         out[T.t(cp)] = pd.NaT
+        out[T.s(cp)] = np.nan
     out[T.direction] = np.nan
     out[T.magnitude] = np.nan
-    out[T.continuation] = np.nan
+    out[T.continuation_15m] = np.nan
+    out[T.continuation_30m] = np.nan
     if path is None or len(path) == 0:
         return pd.Series(out)
 
     interval = _interval_of(path)
-    out["path_interval"] = interval
+    if interval not in FINE_INTERVALS:
+        log.warning("%s: path interval %s is too coarse for targets", event[E.event_id], interval)
+        return pd.Series(out)
+    out[T.price_interval] = interval
     out[T.price_source] = str(path[C.source].dropna().iloc[0]) if path[C.source].notna().any() else None
-    stale = MAX_STALENESS.get(interval, pd.Timedelta(hours=2))
+    out[T.price_market] = str(path[C.market].dropna().iloc[0]) if C.market in path and path[C.market].notna().any() else None
+    stale = max_staleness(interval)
 
     ref = price_at(path, t0 - p0_buffer)
     if ref is None:
@@ -148,8 +171,10 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
     if not (p0 > 0):
         return pd.Series(out)
     out[T.p0], out[T.p0_time] = p0, p0_time
+    out[T.p0_staleness_min] = ((t0 - p0_buffer) - p0_time) / pd.Timedelta(minutes=1)
 
     mref = price_at(market_path, t0 - p0_buffer) if market_path is not None and len(market_path) else None
+    m_stale = max_staleness(_interval_of(market_path)) if mref is not None else stale
     cps = checkpoint_times(t0, horizon_hours)
     for cp, when in cps.items():
         hit = price_at(path, when)
@@ -158,16 +183,20 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
         p, t_end = hit
         r = math.log(p / p0)
         out[T.p(cp)], out[T.t(cp)], out[T.r(cp)] = p, t_end, r
+        out[T.s(cp)] = (when - t_end) / pd.Timedelta(minutes=1)
         if mref is not None:
             mh = price_at(market_path, when)
-            if mh is not None and mh[1] > mref[1] and when - mh[1] <= MAX_STALENESS.get(_interval_of(market_path), stale):
+            if mh is not None and mh[1] > mref[1] and when - mh[1] <= m_stale:
                 out[T.ar(cp)] = r - math.log(mh[0] / mref[0])
-    r24, r30 = out[T.r("24h")], out[T.r("30m")]
+    r24 = out[T.r("24h")]
     if not (isinstance(r24, float) and math.isnan(r24)):
+        out[T.horizon_actual_h] = (out[T.t("24h")] - p0_time) / pd.Timedelta(hours=1)
         out[T.direction] = float(np.sign(r24))
         out[T.magnitude] = abs(r24)
-        if not (isinstance(r30, float) and math.isnan(r30)):
-            out[T.continuation] = float(np.sign(r24 - r30))
+        for k, col in (("15m", T.continuation_15m), ("30m", T.continuation_30m)):
+            rk = out[T.r(k)]
+            if isinstance(rk, float) and not math.isnan(rk) and abs(rk) >= CONTINUATION_DEAD_BAND:
+                out[col] = float(np.sign(rk) * np.sign(r24 - rk))
     return pd.Series(out)
 
 
@@ -200,5 +229,5 @@ def build_targets(settings: Settings, events: pd.DataFrame, *, write: bool = Tru
             rows.append(empty)
     out = pd.DataFrame(rows)
     if write:
-        out.to_parquet(settings.data_dir / "targets.parquet", index=False)
+        out.to_parquet(settings.targets_path, index=False)
     return out

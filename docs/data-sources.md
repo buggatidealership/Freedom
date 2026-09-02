@@ -33,10 +33,16 @@ Every statement here was verified by a live request from the build environment o
   used; during closures the oracle holds the last reference and drifts with a 30-minute EWMA of
   the market's impact-price difference. So post-market perp moves reflect real after-hours
   trading, and weekend moves are perp-internal. *Assumed until the docs page is read directly.*
-* Worked example (`xyz:NVDA`, release 2026-08-26 20:21 UTC): last 5m close before the release
-  207.94; +10 min −0.68 %; +40 min +3.37 %; next 13:30 UTC +6.97 %; +24 h +9.06 %. The
-  after-hours path whipsawed before trending, which is why the harness records intermediate
-  checkpoints and not only the 24 h endpoint.
+* Worked example (`xyz:NVDA`, 8-K accepted 2026-08-26 20:21:19 Z, 5-minute candles): the last
+  bar ending at or before t0 is [20:15, 20:20) with close 211.07; the [20:20, 20:25) bar contains
+  the release and is never used for P0 (with the 3-minute 8-K buffer the harness backs off one
+  more bar, to 210.63). Log returns versus 211.07 using only bars that end at or before each
+  checkpoint: +5m −1.49 % (207.94, the release bar: an initial dump to 203.52), +15m −2.18 %,
+  +30m −0.62 %, +60m +3.09 %, next open 13:30 Z +5.45 %, next close 20:00 Z +7.72 %, +24 h +7.16 %
+  (226.74). The path dumped about 2 %, was back to flat after roughly 40 minutes and only then
+  trended. An earlier draft of this note quoted +9.06 % by taking P0 from inside the release bar
+  and checkpoint prices from bars that ended after the checkpoint; that is exactly the look-ahead
+  the target code is tested against.
 
 ## SEC EDGAR (release timing and actuals, no key, needs a User-Agent)
 

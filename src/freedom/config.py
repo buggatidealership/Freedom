@@ -48,11 +48,16 @@ class Settings(BaseSettings):
 
     # --- target and evaluation defaults -------------------------------------------------------
     horizon_hours: int = 24
+    p0_buffer_minutes_sec_8k: float = 3.0  # 8-K acceptance trails the wire by 25-134 s (measured)
     taker_fee_bps: float = 4.5  # conservative; HIP-3 growth-mode fees are lower, see docs
-    slippage_bps: float = 5.0
+    slippage_floor_bps: float = 5.0  # per leg, floor of the execution-cost model
+    slippage_range_coeff: float = 0.25  # per leg: + coeff * (high-low)/open of the execution bar
+    max_fill_lag_minutes: float = 5.0  # a fill later than this after the signal is not traded
+    gross_exposure_cap: float = 1.0  # equal_split capital rule across overlapping positions
     min_train_events: int = 120
     embargo_days: int = 2
-    min_t0_confidence: float = 0.6
+    min_t0_confidence: float = 0.6  # dataset filter; fixed per run, never a search dimension
+    holdout_season: str | None = "2026Q3"  # pinned; scored only by `freedom evaluate --final`
     random_seed: int = 7
 
     # --- derived paths -----------------------------------------------------------------------
@@ -83,6 +88,18 @@ class Settings(BaseSettings):
     @property
     def optuna_db(self) -> Path:
         return self.data_dir / "optuna.db"
+
+    @property
+    def targets_path(self) -> Path:
+        return self.data_dir / "targets.parquet"
+
+    @property
+    def consensus_archive_dir(self) -> Path:
+        return self.archive_dir / "consensus"
+
+    @property
+    def holdout_log_path(self) -> Path:
+        return self.reports_dir / "holdout_scorings.jsonl"
 
     @property
     def universe_overrides_path(self) -> Path:

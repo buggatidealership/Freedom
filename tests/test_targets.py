@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from freedom.schemas import C, E, T
+from freedom.schemas import CONTINUATION_DEAD_BAND, C, E, T
 from freedom.targets import build_price_path, checkpoint_times, compute_targets, price_at
 from freedom.timeutil import to_utc
 
@@ -31,8 +31,9 @@ def _hl_bars(name: str, interval: str) -> pd.DataFrame:
 T0 = to_utc("2026-08-26 20:21:19", assume_tz="UTC")  # NVDA 8-K acceptance
 
 
-def _event():
-    return pd.Series({E.event_id: "NVDA:2026-07-26", E.underlying: "NVDA", E.market: "xyz:NVDA", E.t0: T0})
+def _event(source: str = "detected"):
+    return pd.Series({E.event_id: "NVDA:2026-07", E.underlying: "NVDA", E.market: "xyz:NVDA", E.t0: T0,
+                      E.t0_source: source})
 
 
 def test_checkpoints_use_exchange_calendar():
@@ -77,9 +78,49 @@ def test_compute_targets_on_real_reaction():
     assert tg[T.r("24h")] == pytest.approx(math.log(float(last[C.close]) / 211.07))
     assert tg[T.r("24h")] > 0.05
     assert tg[T.direction] == 1.0 and tg[T.magnitude] == pytest.approx(abs(tg[T.r("24h")]))
-    assert tg[T.continuation] == 1.0  # move extended after the first 30 minutes
-    assert tg["path_interval"] == "5m" and tg[T.price_source] == "hl_live"
+    # the first 30 minutes were negative (-0.62%) and the day ended +7%: a REVERSAL, not a continuation
+    assert tg[T.r("30m")] < -CONTINUATION_DEAD_BAND
+    assert tg[T.continuation_30m] == -1.0
+    assert tg[T.continuation_15m] == -1.0
+    assert tg[T.price_interval] == "5m" and tg[T.price_source] == "hl_live"
+    assert tg[T.price_market] == "xyz:NVDA"
+    assert tg[T.s("5m")] == pytest.approx(79 / 60, abs=0.01)  # 20:26:19 minus bar end 20:25:00
+    assert 23 < tg[T.horizon_actual_h] < 24.2
+    assert bool(tg[T.h24_in_closure]) is True  # 16:21 ET next day is after the regular close
     assert np.isnan(tg[T.ar("24h")])  # no market path given
+
+
+def test_sec_8k_source_backs_off_three_minutes():
+    bars = _hl_bars("candles_xyzNVDA_5m_20260826.json", "5m")
+    tg = compute_targets(_event("sec_8k"), bars, None)
+    # t0 - 3 min = 20:18:19 -> last bar ending at or before that is [20:10, 20:15)
+    assert tg[T.p0_time] == to_utc("2026-08-26 20:15", assume_tz="UTC")
+    assert tg[T.p0] == pytest.approx(210.63)
+    assert tg[T.p0_staleness_min] == pytest.approx(3 + 19 / 60, abs=0.01)
+
+
+def test_coarse_bars_never_resolve_targets():
+    coarse = _hl_bars("candles_xyzNVDA_1h_20260824_29.json", "1h")
+    tg = compute_targets(_event(), coarse, None)
+    assert np.isnan(tg[T.p0]) and tg[T.price_interval] is None
+
+
+def test_continuation_label_follows_the_early_reaction_sign():
+    bars = _hl_bars("candles_xyzNVDA_5m_20260826.json", "5m")
+    # synthetic: a negative early reaction that keeps falling must be a continuation (+1)
+    down = bars.copy()
+    post = down[C.t_end] > T0
+    minutes = ((down[C.t_end] - T0) / pd.Timedelta(minutes=1)).clip(lower=0)
+    down.loc[post, C.close] = 211.07 * (1 - 0.01 - 0.0005 * minutes[post])
+    tg = compute_targets(_event(), down, None)
+    assert tg[T.r("30m")] < 0 and tg[T.r("24h")] < tg[T.r("30m")]
+    assert tg[T.continuation_30m] == 1.0 and tg[T.continuation_15m] == 1.0
+    # dead band: an early move inside 25 bp has no sign to extend
+    flat = bars.copy()
+    flat.loc[post, C.close] = 211.07 * (1 + 0.001)
+    flat.loc[down[C.t_end] > T0 + pd.Timedelta(hours=2), C.close] = 211.07 * 1.05
+    tg2 = compute_targets(_event(), flat, None)
+    assert np.isnan(tg2[T.continuation_30m]) and tg2[T.direction] == 1.0
 
 
 def test_compute_targets_marks_missing_checkpoints():
@@ -115,6 +156,7 @@ def test_build_price_path_prefers_fine_perp_then_equity(settings):
     ev = _event()
     assert build_price_path(settings, ev, market_bars=fine, equity_bars=equity)[C.source].iloc[0] == "hl_live"
     assert build_price_path(settings, ev, market_bars=coarse, equity_bars=equity)[C.source].iloc[0] == "fmp_intraday"
-    assert build_price_path(settings, ev, market_bars=coarse, equity_bars=None)[C.source].iloc[0] == "hl_live"
+    # coarse perp bars are never a fallback
+    assert len(build_price_path(settings, ev, market_bars=coarse, equity_bars=None)) == 0
     short = fine[fine[C.t_end] <= T0 + pd.Timedelta(hours=2)]
     assert len(build_price_path(settings, ev, market_bars=short, equity_bars=None)) == 0
