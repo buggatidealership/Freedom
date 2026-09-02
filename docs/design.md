@@ -84,17 +84,13 @@ behind them. Whether anything is predictable is an output of the harness, not an
   for `k ∈ {15m, 30m}` (+1 the early reaction extended, −1 it reversed, NaN when `|r_k|` is
   inside a 25 bp dead band; the count of dead-band events is reported). `post_15m` reports
   `continuation_15m`, later decision times `continuation_30m`.
-* **Corporate actions**: price inputs within one source are put on the as-of basis using the
-  FMP splits calendar (`stable/splits`, fetched once per underlying; measured 2026-09-02: FMP
-  intraday and EOD bars are already split-adjusted for NFLX's 10:1 split; see
-  data-sources.md). Events with a split ex-date inside `[t0 − 60 d, t0 + 24 h]` get
-  `flags += corporate_action` and carry the ex-date nearest `t0` as
-  `corporate_action_ex_date` (00:00 America/New_York); those with the ex-date inside
-  `[P0, t0 + 24 h]` have NaN headline targets (`r_24h` and the labels derived from it). The
-  FMP proxy keeps its intermediate checkpoints because its bars are adjusted; a perp path is
-  not adjusted and no perp split has been measured continuous yet, so on a perp path every
-  checkpoint whose bar ends at or after the ex-date is NaN as well. A failed splits request is
-  `flags += splits_error` and leaves the event unchecked.
+* **Corporate actions**: the harness does not re-base prices itself. FMP bars arrive vendor
+  split-adjusted (measured 2026-09-02 on NFLX's 10:1 split) and the FMP splits calendar
+  (`stable/splits`, fetched once per underlying) is used only to flag events and void targets:
+  events with an ex-date inside `[t0 − 60 d, t0 + 24 h]` get `flags += corporate_action`; when
+  the ex-date falls inside `[P0, t0 + 24 h]` the headline `+24h` checkpoint and labels are NaN,
+  and on a perp path every checkpoint from the ex-date on is NaN because perp continuity across a
+  split has not been measured.
 * **Decision time** `d ∈ {pre_5m, post_1m, post_15m, post_30m, post_60m}` meaning
   `t0 − 5min`, `t0 + k min`. A feature is admissible at `d` only if its own timestamp `≤ d`.
   The feature builder enforces this with an explicit `as_of` argument on every provider call;

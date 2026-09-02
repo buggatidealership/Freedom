@@ -938,3 +938,30 @@ def test_detection_never_moves_an_after_close_filing_into_the_session():
     assert r.t0 >= pd.Timestamp("2026-06-24 20:00:00", tz="UTC"), r.detail
     assert "closing auction" in r.detail or r.t0 == pd.Timestamp("2026-06-24 20:02:00", tz="UTC")
     assert not np.isnan(r.confidence)
+
+
+
+def test_merge_existing_keeps_rows_of_an_older_additive_schema(settings):
+    """An events.parquet written before a column was added is merged, not replaced."""
+    from freedom.events import EVENT_COLUMNS, _merge_existing, _write_events
+
+    old_cols = [c for c in EVENT_COLUMNS if c != E.ca_ex_date]
+    old = pd.DataFrame([{c: None for c in old_cols}]).astype(object)
+    old.loc[0, E.event_id] = "TSLA:2026-06"
+    old.loc[0, E.underlying] = "TSLA"
+    old.loc[0, E.pending] = False
+    old.loc[0, E.flags] = ""
+    old.loc[0, E.t0] = pd.Timestamp("2026-07-22 20:35", tz="UTC")
+    old.loc[0, E.report_date_ny] = pd.Timestamp("2026-07-22").date()
+    settings.ensure_dirs()
+    _write_events(settings, old[old_cols])
+    new = pd.DataFrame([{c: None for c in EVENT_COLUMNS}]).astype(object)
+    new.loc[0, E.event_id] = "NVDA:2026-07"
+    new.loc[0, E.underlying] = "NVDA"
+    new.loc[0, E.pending] = False
+    new.loc[0, E.flags] = ""
+    new.loc[0, E.t0] = pd.Timestamp("2026-08-26 20:20", tz="UTC")
+    new.loc[0, E.report_date_ny] = pd.Timestamp("2026-08-26").date()
+    merged = _merge_existing(settings, new, processed={"NVDA"}, since=None)
+    assert set(merged[E.event_id]) == {"TSLA:2026-06", "NVDA:2026-07"}
+    assert E.ca_ex_date in merged.columns

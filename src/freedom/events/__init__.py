@@ -1040,9 +1040,18 @@ def _merge_existing(settings: Settings, new: pd.DataFrame, processed: set[str],
     except Exception as exc:  # noqa: BLE001 - an unreadable old table is replaced
         log.warning("existing %s not merged: %s", settings.events_path, exc)
         return new
-    if old.attrs.get("schema_version") != SCHEMA_VERSION or list(old.columns) != list(new.columns):
-        log.warning("existing %s has another schema; replacing it", settings.events_path)
-        return new
+    if list(old.columns) != list(new.columns):
+        if set(old.columns) <= set(new.columns):
+            # additive schema change (a new column): keep the old rows, fill the new column
+            log.info("existing %s predates column(s) %s; merging with them empty",
+                     settings.events_path, sorted(set(new.columns) - set(old.columns)))
+            old = old.reindex(columns=list(new.columns))
+        else:
+            log.warning("existing %s has another schema; replacing it", settings.events_path)
+            return new
+    elif old.attrs.get("schema_version") != SCHEMA_VERSION:
+        log.info("existing %s carries schema_version %s (now %s); columns match, merging",
+                 settings.events_path, old.attrs.get("schema_version"), SCHEMA_VERSION)
     old_u = old[E.underlying].astype(str).str.upper()
     new_u = new[E.underlying].astype(str).str.upper()
     new_pending = new[E.pending].astype(bool)

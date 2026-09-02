@@ -490,6 +490,7 @@ def feature_context(settings: Settings, event: pd.Series, schedule: Schedule, *,
         event=ev, as_of=as_of, decision_time=schedule.decision, bars=bars, daily=daily,
         market_bars=market_bars, market_daily=market_daily, history=history,
         perp_ctx=load_perp_ctx(settings, event.get(E.market), as_of), horizon_hours=settings.horizon_hours,
+        p0_buffer_minutes_sec_8k=float(settings.p0_buffer_minutes_sec_8k),
         extra=extra)
 
 
