@@ -18,7 +18,8 @@ Sources, in the order tried:
   wired in here;
 * perp state: `candles/<market>/funding.parquet` from the archive (else live fundingHistory),
   the ctx snapshots under `archive_dir/ctx/<dex>/`, the market's 1d candles for the 30-day
-  notional volume, and maxLeverage from universe.parquet or the dex meta.
+  notional volume, and maxLeverage from universe.parquet or the dex meta -- the CURRENT cap,
+  not the one in force at t0 (Hyperliquid publishes no leverage history; see groups.PERP_KEYS).
 
 Every provider failure is logged and yields a None input (the features become missing);
 a dataset build never stops because one symbol could not be loaded. All windows end at or

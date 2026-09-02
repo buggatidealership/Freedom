@@ -240,14 +240,42 @@ def read_dataset(path: Path) -> tuple[pd.DataFrame, int | None]:
 
 
 def _event_meta(events: pd.DataFrame) -> pd.DataFrame:
+    """event_id + every META_COLUMNS column (NA when `events` lacks it, so downstream filters
+    on has_perp_at_t0 / t0_confidence never KeyError) + season."""
     cols = [c for c in META_COLUMNS if c in events.columns]
     meta = events[[E.event_id, *cols]].drop_duplicates(subset=E.event_id, keep="last").copy()
-    if E.t0 in meta.columns:
-        meta[E.t0] = _utc_series(meta[E.t0])
-        meta[SEASON] = [season_of(t) if pd.notna(t) else None for t in meta[E.t0]]
-    if E.has_perp_at_t0 in meta.columns:
-        meta[E.has_perp_at_t0] = meta[E.has_perp_at_t0].astype("boolean")
+    for c in META_COLUMNS:
+        if c not in meta.columns:
+            meta[c] = pd.NaT if c == E.t0 else None
+    meta = meta[[E.event_id, *META_COLUMNS]]
+    meta[E.t0] = _utc_series(meta[E.t0])
+    meta[SEASON] = [season_of(t) if pd.notna(t) else None for t in meta[E.t0]]
+    meta[E.has_perp_at_t0] = meta[E.has_perp_at_t0].astype("boolean")
     return meta
+
+
+def _dataset_columns(targets: pd.DataFrame | None, dts: list[str], groups: list[str] | None) -> list[str]:
+    """Column order of a dataset built for `dts`/`groups`: lead columns, event metadata,
+    target_missing, the features of every group admissible at one of `dts`, their __missing
+    companions, then the target columns. Used for the empty dataset so its schema matches."""
+    from .groups import GROUP_KEYS
+
+    phases = {phase_of(d) for d in dts}
+    fcols = [D.feature_prefix + k for name, (_, adm) in REGISTRY.items()
+             if (groups is None or name in groups) and phases & set(adm)
+             for k in GROUP_KEYS.get(name, ())]
+    comps = [c + D.missing_suffix for c in fcols]
+    meta = [c for c in META_COLUMNS if c != E.event_id] + [SEASON]
+    return [D.event_id, D.decision_time, D.as_of, *meta, TARGET_MISSING, *fcols, *comps,
+            *target_columns(targets)]
+
+
+def _empty_dataset(targets: pd.DataFrame | None, dts: list[str], groups: list[str] | None) -> pd.DataFrame:
+    cols = _dataset_columns(targets, dts, groups)
+    dtypes = {D.as_of: "datetime64[ns, UTC]", E.t0: "datetime64[ns, UTC]",
+              E.has_perp_at_t0: "boolean", TARGET_MISSING: "bool"}
+    dtypes.update({c: "float64" for c in cols if c.startswith(D.feature_prefix)})
+    return pd.DataFrame({c: pd.Series(dtype=dtypes.get(c, "object")) for c in cols})
 
 
 def build_dataset(settings: Settings, events: pd.DataFrame, targets: pd.DataFrame,
@@ -255,12 +283,13 @@ def build_dataset(settings: Settings, events: pd.DataFrame, targets: pd.DataFram
                   write: bool = True) -> pd.DataFrame:
     """One row per (event, decision_time) with schemas.D columns, f_* features, the target
     columns, and event metadata needed downstream (t0, t0_source, kind, timing, has_perp_at_t0,
-    season). Rows for events whose targets are all NaN are kept (they are still usable for
-    intermediate checkpoints) but flagged. Bars are loaded through targets.loaders so the
-    price source matches the targets."""
+    season; NA where `events` lacks the column). Rows for events whose targets are all NaN are
+    kept (they are still usable for intermediate checkpoints) but flagged. Events without t0 or
+    without underlying are skipped with a warning; duplicate decision times are built once.
+    Bars are loaded through targets.loaders so the price source matches the targets."""
     from .loaders import ContextLoader
 
-    dts = list(decision_times) if decision_times is not None else list(DECISION_TIMES)
+    dts = list(dict.fromkeys(decision_times)) if decision_times is not None else list(DECISION_TIMES)
     for d in dts:
         if d not in DECISION_TIMES:
             raise ValueError(f"unknown decision time {d!r}; expected one of {list(DECISION_TIMES)}")
@@ -272,6 +301,15 @@ def build_dataset(settings: Settings, events: pd.DataFrame, targets: pd.DataFram
     if targets is None:
         targets = pd.DataFrame(columns=[T.event_id])
     events = events.reset_index(drop=True)
+    if len(events):
+        required = [c for c in (E.event_id, E.underlying) if c not in events.columns]
+        if required:
+            raise ValueError(f"events lack required column(s) {required}")
+        no_underlying = events[E.underlying].isna().to_numpy()
+        if no_underlying.any():
+            log.warning("%d event(s) without underlying skipped: %s", int(no_underlying.sum()),
+                        events.loc[no_underlying, E.event_id].tolist()[:5])
+            events = events.loc[~no_underlying].reset_index(drop=True)
     horizon = int(settings.horizon_hours)
     loader = ContextLoader(settings, events)
 
@@ -301,7 +339,7 @@ def build_dataset(settings: Settings, events: pd.DataFrame, targets: pd.DataFram
         log.info("features %s done (%d rows so far)", underlying, len(rows))
 
     if not rows:
-        out = pd.DataFrame(columns=[D.event_id, D.decision_time, D.as_of, TARGET_MISSING])
+        out = _empty_dataset(targets, dts, groups)
     else:
         out = pd.DataFrame(rows)
         out[D.as_of] = _utc_series(out[D.as_of])

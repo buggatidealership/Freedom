@@ -9,6 +9,7 @@ get_json stub serving the committed fixtures for every symbol. No network.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from freedom.data.archive import archive_markets, snapshot_ctx
 from freedom.data.base import HttpClient
 from freedom.data.hyperliquid import HyperliquidClient, to_ms
 from freedom.features import (
+    META_COLUMNS,
+    SEASON,
     TARGET_MISSING,
     build_dataset,
     feature_columns,
@@ -154,7 +157,9 @@ def test_build_dataset_offline(settings, offline):
     bars = hl_bars()
     close_2000 = float(bars.loc[bars[C.t_end] <= to_utc("2026-08-26 20:00", assume_tz="UTC"), C.close].iloc[-1])
     assert r["f_ext_vol_ratio"] > 1 and r["f_gap_since_close"] == pytest.approx(math.log(210.63 / close_2000))
-    assert r["f_ret_1d"] == pytest.approx(math.log(daily_close("2026-08-25") / daily_close("2026-08-24")))
+    # an AMC release sees the release-day session (complete at 16:00 ET) in its daily returns
+    assert r["f_ret_1d"] == pytest.approx(math.log(daily_close("2026-08-26") / daily_close("2026-08-25")))
+    assert r["f_holiday_adjacent"] == 0.0
     assert r["f_mkt_ret_1d"] > 0 and r["f_vix_level"] > 0  # synthetic xyz:SP500 / xyz:VIX 1d candles
     assert not math.isnan(r["f_sector_ret_1d"])  # profile: Semiconductors -> SMH daily
     fund = funding_frame()
@@ -216,8 +221,39 @@ def test_build_dataset_defaults_groups_and_errors(settings, offline):
         build_dataset(settings, events, targets, decision_times=["post_7m"], write=False)
     with pytest.raises(ValueError):
         build_dataset(settings, events, targets, groups=["text"], write=False)
-    empty = build_dataset(settings, events.iloc[0:0], targets, write=False)
-    assert empty.empty and D.event_id in empty.columns
+    # no events: an empty frame with the full schema of the same build
+    empty = build_dataset(settings, events.iloc[0:0], targets, groups=["calendar", "reaction"], write=False)
+    assert empty.empty and list(empty.columns) == list(df.columns)
+    assert str(empty[D.as_of].dt.tz) == "UTC" and str(empty[E.has_perp_at_t0].dtype) == "boolean"
+    # the schema follows the requested decision times: a pre-only build has no post-only group
+    pre_only = build_dataset(settings, events.iloc[0:0], targets, decision_times=["pre_5m"], write=False)
+    assert "f_amc" in pre_only.columns and "f_ret_1d" in pre_only.columns and "f_r_30m" not in pre_only.columns
+    assert list(pre_only.columns) == list(build_dataset(settings, events, targets, decision_times=["pre_5m"], write=False).columns)
+
+
+def test_build_dataset_edge_cases(settings, offline, caplog):
+    events, targets = make_events(), make_targets(make_events())
+    # a duplicated decision time is built once
+    df = build_dataset(settings, events.iloc[:1], targets, decision_times=["post_30m", "post_30m"], write=False)
+    assert len(df) == 1 and df[D.decision_time].tolist() == ["post_30m"]
+    # an event without underlying is skipped with a warning, never silently dropped
+    bad = events.copy()
+    bad.loc[2, E.underlying] = None
+    with caplog.at_level(logging.WARNING, logger="freedom.features"):
+        df = build_dataset(settings, bad, targets, decision_times=["pre_5m"], write=False)
+    assert set(df[D.event_id]) == {"NVDA:2026-07", "NVDA:2026-04"}
+    assert any("without underlying" in r.getMessage() and "AAPL:2026-06" in r.getMessage() for r in caplog.records)
+    with pytest.raises(ValueError, match="required column"):
+        build_dataset(settings, events.drop(columns=[E.underlying]), targets, decision_times=["pre_5m"], write=False)
+    # slim events (no metadata columns) still yield the full metadata schema, as NA
+    slim = events[[E.event_id, E.underlying, E.market, E.t0]].iloc[:1]
+    df = build_dataset(settings, slim, targets, decision_times=["pre_5m"], write=False)
+    for c in [*META_COLUMNS, SEASON]:
+        assert c in df.columns, c
+    r = df.iloc[0]
+    assert pd.isna(r[E.has_perp_at_t0]) and pd.isna(r[E.t0_confidence]) and pd.isna(r[E.timing])
+    assert r[SEASON] == "2026Q3" and str(df[E.has_perp_at_t0].dtype) == "boolean"
+    assert r[E.t0] == T0 and r["f_amc"] == 1.0  # the timing falls back to the calendar
 
 
 def test_context_loader_bar_sources(settings, offline):

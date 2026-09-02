@@ -34,7 +34,9 @@ from freedom.features.groups import (
     X_SECTOR_DAILY,
     X_VIX_DAILY,
     cut,
+    cut_daily,
     pre_cut,
+    session_ends,
 )
 from freedom.schemas import DECISION_TIMES, C, D, E, T
 from freedom.targets import compute_targets
@@ -42,6 +44,7 @@ from freedom.timeutil import to_utc
 
 FIX = Path(__file__).parent / "fixtures"
 T0 = to_utc("2026-08-26 20:21:19", assume_tz="UTC")  # NVDA 8-K acceptance
+T0_RTH = to_utc("2026-08-26 19:16:19", assume_tz="UTC")  # 15:16 ET: in session, the day's bar still open
 PRE_GROUPS = {"calendar", "pre_price", "history", "market", "perp_state"}
 POST_GROUPS = {"surprise", "reaction"}
 POST_TIMES = [d for d in DECISION_TIMES if DECISION_TIMES[d] > 0]
@@ -169,21 +172,24 @@ def test_pre_only_vs_post_only_admissibility():
 
 
 # ---- trap 1: a bar spanning the decision instant -----------------------------------------------
-def _corrupt_after(bars: pd.DataFrame, as_of: pd.Timestamp) -> tuple[pd.DataFrame, int]:
+def _corrupt_after(bars: pd.DataFrame, as_of: pd.Timestamp, ends: pd.Series | None = None) -> tuple[pd.DataFrame, int]:
     """Absurd values in every bar that ends after as_of (including the one that started
-    before it). Returns the frame and how many bars span as_of."""
+    before it). `ends` overrides the bar end times (the session closes of daily bars).
+    Returns the frame and how many bars span as_of."""
     out = bars.copy()
-    after = out[C.t_end] > as_of
-    spanning = int((after & (out[C.t] < as_of)).sum())
+    after = ((out[C.t_end] if ends is None else ends) > as_of).to_numpy()
+    spanning = int((after & (out[C.t] < as_of).to_numpy()).sum())
     for col in (C.open, C.high, C.low, C.close):
         out.loc[after, col] = 9999.0
     out.loc[after, C.volume] = 1e12
     return out, spanning
 
 
-@pytest.mark.parametrize("decision_time", ["pre_5m", "post_1m", "post_30m"])
-def test_lookahead_trap_bar_ending_after_as_of_is_ignored(decision_time):
-    as_of = decision_as_of(T0, decision_time)
+@pytest.mark.parametrize("decision_time,t0", [("pre_5m", T0), ("post_1m", T0), ("post_30m", T0),
+                                              ("post_30m", T0_RTH)])
+def test_lookahead_trap_bar_ending_after_as_of_is_ignored(decision_time, t0):
+    ev = event() if t0 == T0 else event(**{E.t0: t0, E.timing: "RTH"})
+    as_of = decision_as_of(t0, decision_time)
     fine = hl_bars()
     daily = fmp_daily()
     fund = funding_frame()
@@ -193,7 +199,7 @@ def test_lookahead_trap_bar_ending_after_as_of_is_ignored(decision_time):
         "premium": [1e-4, 2e-4, 9.0], "mark_px": [210.0, 211.0, 9999.0], "oracle_px": [210.0, 211.0, 9999.0],
         "day_ntl_vlm": [5e7, 6e7, 1e15],
     })
-    clean = FeatureContext(event=event(), as_of=as_of, decision_time=decision_time, bars=fine,
+    clean = FeatureContext(event=ev, as_of=as_of, decision_time=decision_time, bars=fine,
                            daily=daily, market_bars=fine, market_daily=daily, history=empty_history(),
                            perp_ctx=snaps, extra={X_FUNDING: fund, X_VIX_DAILY: daily, X_SECTOR_DAILY: daily,
                                                   X_PERP_DAILY: daily})
@@ -201,11 +207,13 @@ def test_lookahead_trap_bar_ending_after_as_of_is_ignored(decision_time):
 
     bad_fine, n_span = _corrupt_after(fine, as_of)
     assert n_span == 1, "the 5-minute bar containing as_of must exist in the fixture"
-    bad_daily, n_span_daily = _corrupt_after(daily, as_of)
-    assert n_span_daily == 1  # the daily bar of the release day ends at the next NY midnight
+    # a daily bar is known from its session close (not from its next-midnight t_end): the
+    # release-day bar is still open, and so a spanning bar, only for the in-session release
+    bad_daily, n_span_daily = _corrupt_after(daily, as_of, session_ends(daily))
+    assert n_span_daily == (1 if t0 == T0_RTH else 0)
     bad_fund = fund.copy()
     bad_fund.loc[bad_fund["t"] >= as_of - pd.Timedelta(minutes=1), ["funding_rate", "premium"]] = 9.0
-    trap = FeatureContext(event=event(), as_of=as_of, decision_time=decision_time, bars=bad_fine,
+    trap = FeatureContext(event=ev, as_of=as_of, decision_time=decision_time, bars=bad_fine,
                           daily=bad_daily, market_bars=bad_fine, market_daily=bad_daily,
                           history=empty_history(), perp_ctx=snaps,
                           extra={X_FUNDING: bad_fund, X_VIX_DAILY: bad_daily, X_SECTOR_DAILY: bad_daily,
@@ -216,6 +224,9 @@ def test_lookahead_trap_bar_ending_after_as_of_is_ignored(decision_time):
     have = present(ref)
     assert "f_drift_60m" in have and "f_ret_1d" in have and "f_funding_rate" in have
     assert have["f_premium"] == 2e-4 and have["f_oi_chg_24h"] == pytest.approx(math.log(1.1))
+    # the after-close release sees the release-day session, the in-session one the day before
+    last, prev = ("2026-08-26", "2026-08-25") if t0 == T0 else ("2026-08-25", "2026-08-24")
+    assert have["f_ret_1d"] == pytest.approx(math.log(daily_close(last) / daily_close(prev)))
     if decision_time == "post_30m":
         assert "f_r_30m" in have and "f_path_max" in have and "f_vol_z" in have
 
@@ -231,6 +242,17 @@ def test_cut_uses_bar_end_times():
     assert pre_cut(ctx_for("pre_5m")) == T0 - pd.Timedelta(minutes=5)
     assert pre_cut(ctx_for("post_30m")) == T0 - pd.Timedelta(minutes=3)
     assert pre_cut(ctx_for("post_30m", event("detected"))) == T0
+    # daily bars count from their session close, not from the next-midnight t_end the loaders
+    # stamp; every fixture day is a full 16:00 ET session, 16 hours after its NY midnight
+    daily = fmp_daily()
+    assert (session_ends(daily) == daily[C.t] + pd.Timedelta(hours=16)).all()
+    assert cut_daily(daily, utc("2026-08-26 20:00"))[C.t].max() == utc("2026-08-26 04:00")
+    assert cut_daily(daily, utc("2026-08-26 19:59:59"))[C.t].max() == utc("2026-08-25 04:00")
+    assert cut(daily, utc("2026-08-26 20:00"))[C.t].max() == utc("2026-08-25 04:00")
+    assert cut_daily(None, as_of) is None and cut_daily(daily.iloc[0:0], as_of) is None
+    # perp 1d candles (UTC-midnight bars) are complete only at their t_end and keep it
+    perp = daily.assign(**{C.t: daily[C.t].dt.normalize(), C.t_end: daily[C.t].dt.normalize() + pd.Timedelta(days=1)})
+    assert (session_ends(perp) == perp[C.t_end]).all()
 
 
 # ---- trap 2: the event's own targets ---------------------------------------------------------------
@@ -325,11 +347,24 @@ def test_reaction_matches_compute_targets(source):
     assert f30["f_r_30m"] == pytest.approx(math.log(close_30m / p0))
     # r_1m on 5-minute bars: no bar ends between P0's bar and t0 + 1m for `detected`
     assert math.isnan(build_features(ctx_for("post_1m", event("detected")), groups=["reaction"])["f_r_1m"])
-    # path range and volume z-score use only bars after the P0 bar and up to as_of
-    post = bars[(bars[C.t_end] > tg[T.p0_time]) & (bars[C.t_end] <= T0 + pd.Timedelta(minutes=30))]
+    # path range and volume z-score use only bars ending after t0 and up to as_of: the 8-K
+    # buffer bar between the P0 bar and t0 is pre-release, neither path nor baseline
+    post = bars[(bars[C.t_end] > T0) & (bars[C.t_end] <= T0 + pd.Timedelta(minutes=30))]
     assert f30["f_path_max"] == pytest.approx(math.log(post[C.high].max() / p0))
     assert f30["f_path_min"] == pytest.approx(math.log(post[C.low].min() / p0))
     assert f30["f_vol_z"] > 5 and f30["f_vol_ratio"] > 5
+    if source == "sec_8k":
+        buffered = bars[(bars[C.t_end] > tg[T.p0_time]) & (bars[C.t_end] <= T0 + pd.Timedelta(minutes=30))]
+        assert len(buffered) == len(post) + 1 and buffered[C.high].max() > post[C.high].max()
+
+
+def test_reaction_refuses_coarse_bars():
+    """1h bars never resolve a reaction (targets.FINE_INTERVALS), although at post_60m a 1h bar
+    ends inside the 2-hour staleness allowance that would otherwise apply."""
+    hourly = hl_bars("candles_xyzNVDA_1h_20260824_29.json", "1h")
+    f = build_features(ctx_for("post_60m", bars=hourly), groups=["reaction"])
+    assert all(math.isnan(v) for v in values(f).values())
+    assert math.isnan(compute_targets(event(), hourly, None)[T.r("60m")])
 
 
 def test_reaction_abnormal_return_and_premium_after_release():
@@ -365,7 +400,7 @@ def test_groups_never_raise_on_empty_inputs():
     bare = pd.Series({E.event_id: "X:2026-06", E.underlying: "X", E.t0: T0})
     for d in DECISION_TIMES:
         feats = build_features(FeatureContext(event=bare, as_of=decision_as_of(T0, d), decision_time=d))
-        assert all(math.isnan(v) or k.startswith("f_hist_n") or k in {"f_amc", "f_bmo", "f_rth", "f_weekday", "f_friday", "f_hour_ny", "f_hours_to_next_open", "f_hours_to_next_close", "f_h24_closed"}
+        assert all(math.isnan(v) or k.startswith("f_hist_n") or k in {"f_amc", "f_bmo", "f_rth", "f_weekday", "f_friday", "f_hour_ny", "f_hours_to_next_open", "f_hours_to_next_close", "f_h24_closed", "f_holiday_adjacent"}
                    for k, v in values(feats).items()), d
     no_t0 = pd.Series({E.event_id: "X:2026-06", E.underlying: "X"})
     feats = build_features(FeatureContext(event=no_t0, as_of=T0, decision_time="post_30m", bars=hl_bars()))
@@ -389,20 +424,36 @@ def test_calendar_group_values():
     assert f["f_hours_to_next_open"] == pytest.approx((utc("2026-08-27 13:30") - T0) / pd.Timedelta(hours=1))
     assert f["f_hours_to_next_close"] == pytest.approx((utc("2026-08-27 20:00") - T0) / pd.Timedelta(hours=1))
     assert f["f_h24_closed"] == 1.0  # 16:21 ET the next day is after the close
+    assert f["f_holiday_adjacent"] == 0.0  # no weekday holiday around Wednesday Aug 26
     assert f["f_days_since_last_event"] == pytest.approx(98.0, abs=0.01)
     assert f["f_n_events_same_day"] == 3.0
     # timing falls back to the calendar when the event row has none; a Friday BMO release
     fri = event(**{E.t0: utc("2026-08-28 11:00"), E.timing: None})
     g = build_features(ctx_for("pre_5m", fri), groups=["calendar"])
     assert g["f_bmo"] == 1.0 and g["f_friday"] == 1.0 and g["f_h24_closed"] == 1.0
+    assert g["f_holiday_adjacent"] == 0.0  # a plain weekend is not a holiday
+    # explicit holiday adjacency: the Friday before Labor Day, the Tuesday after it, the day
+    # before Thanksgiving, Thanksgiving itself and the half day after it; a Monday after an
+    # ordinary weekend is not adjacent
+    for day, want in (("2026-09-04", 1.0), ("2026-09-08", 1.0), ("2026-11-25", 1.0),
+                      ("2026-11-26", 1.0), ("2026-11-27", 1.0), ("2026-08-31", 0.0)):
+        h = build_features(ctx_for("pre_5m", event(**{E.t0: utc(f"{day} 20:21"), E.timing: None})), groups=["calendar"])
+        assert h["f_holiday_adjacent"] == want, day
 
 
 def test_pre_price_group_values():
     f = build_features(ctx_for("pre_5m"), groups=["pre_price"])
-    # at 16:16 ET on the 26th the last complete daily bar is the 25th (its t_end is the NY midnight)
-    assert f["f_ret_1d"] == pytest.approx(math.log(daily_close("2026-08-25") / daily_close("2026-08-24")))
-    assert f["f_ret_5d"] == pytest.approx(math.log(daily_close("2026-08-25") / daily_close("2026-08-18")))
-    assert f["f_rvol_20d"] > 0 and math.isnan(f["f_ret_60d"])  # only 3 months of daily bars
+    # at 16:16 ET on the 26th the release-day session (closed 16:00 ET) is complete and known,
+    # although the loaders stamp its t_end as the next NY midnight
+    assert f["f_ret_1d"] == pytest.approx(math.log(daily_close("2026-08-26") / daily_close("2026-08-25")))
+    assert f["f_ret_5d"] == pytest.approx(math.log(daily_close("2026-08-26") / daily_close("2026-08-19")))
+    assert f["f_rvol_20d"] > 0
+    # the fixture holds exactly 61 sessions up to the 26th: 60 sessions back is June 1
+    assert f["f_ret_60d"] == pytest.approx(math.log(daily_close("2026-08-26") / daily_close("2026-06-01")))
+    # an in-session release (15:16 ET) does not see the day's bar yet (and has 60 sessions only)
+    rth = build_features(ctx_for("pre_5m", event(**{E.t0: T0_RTH, E.timing: "RTH"})), groups=["pre_price"])
+    assert rth["f_ret_1d"] == pytest.approx(math.log(daily_close("2026-08-25") / daily_close("2026-08-24")))
+    assert math.isnan(rth["f_ret_60d"])
     assert math.isnan(f["f_dist_52w_high"])  # a 52-week distance needs a year of bars
     bars = hl_bars()
     at = T0 - pd.Timedelta(minutes=5)
@@ -460,8 +511,9 @@ def test_market_group_values():
     vix[C.close] = 20.0
     f = build_features(ctx_for("pre_5m", market_daily=daily, market_bars=hl_bars(),
                                extra={X_VIX_DAILY: vix, X_SECTOR_DAILY: daily}), groups=["market"])
-    assert f["f_mkt_ret_1d"] == pytest.approx(math.log(daily_close("2026-08-25") / daily_close("2026-08-24")))
-    assert f["f_sector_ret_5d"] == pytest.approx(math.log(daily_close("2026-08-25") / daily_close("2026-08-18")))
+    # the release-day session is complete at 16:16 ET (see test_pre_price_group_values)
+    assert f["f_mkt_ret_1d"] == pytest.approx(math.log(daily_close("2026-08-26") / daily_close("2026-08-25")))
+    assert f["f_sector_ret_5d"] == pytest.approx(math.log(daily_close("2026-08-26") / daily_close("2026-08-19")))
     assert f["f_vix_level"] == 20.0 and f["f_vix_chg_5d"] == 0.0
     assert not math.isnan(f["f_mkt_drift_60m"])
     g = build_features(ctx_for("pre_5m", market_daily=None), groups=["market"])
@@ -499,6 +551,20 @@ def test_perp_state_group_values():
     assert g["f_premium"] == pytest.approx(float(settled["premium"].iloc[-1]))
     none = build_features(ctx_for("pre_5m", ev=event(**{E.listing_start: None})), groups=["perp_state"])
     assert all(math.isnan(v) for v in values(none).values())
+    # the listing age is point-in-time: a listing after the anchor is not known at the anchor
+    # (the events module fills listing_start for releases before the perp existed, which would
+    # otherwise give a negative age), and has_perp_at_t0 False means no perp to age
+    for over in ({E.listing_start: at + pd.Timedelta(minutes=1)},
+                 {E.listing_start: T0 + pd.Timedelta(days=100), E.has_perp_at_t0: True},
+                 {E.has_perp_at_t0: False}):
+        unknown = build_features(ctx_for("pre_5m", ev=event(**over)), groups=["perp_state"])
+        assert math.isnan(unknown["f_listing_age_d"]), over
+    same_day = build_features(ctx_for("pre_5m", ev=event(**{E.listing_start: at - pd.Timedelta(hours=1)})), groups=["perp_state"])
+    assert same_day["f_listing_age_d"] == pytest.approx((T0 - (at - pd.Timedelta(hours=1))) / pd.Timedelta(days=1))
+    # perp 1d candles without a close or a volume column: no notional, no exception
+    for drop in (C.close, C.volume):
+        partial = build_features(ctx_for("pre_5m", extra={X_PERP_DAILY: pdaily.drop(columns=[drop])}), groups=["perp_state"])
+        assert math.isnan(partial["f_perp_vol_30d"]), drop
 
 
 def test_surprise_group_values():

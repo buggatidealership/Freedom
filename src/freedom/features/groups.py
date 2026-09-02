@@ -5,14 +5,21 @@ Rules every group here follows:
 * Inputs are cut with `cut(frame, instant)`: only bars whose END time (t_end) is at or before
   the instant survive, so a bar that starts before the instant but ends after it is never
   used (the first look-ahead trap). Prices "at" an instant are `targets.price_at`, the same
-  rule the targets use (close of the last bar with t_end <= instant).
+  rule the targets use (close of the last bar with t_end <= instant). Daily bars of the
+  underlying and the equity proxies go through `cut_daily`: a bar labelled by a New York
+  session date ends at that session's XNYS close (`session_ends`), not at the next midnight
+  the loaders stamp as t_end, so an after-close release sees the release-day session and an
+  in-session release does not.
 * The "pre" groups (calendar, pre_price, history, market, perp_state) are anchored at
   `pre_cut(ctx) = min(as_of, t0 - p0 buffer)`: the last pre-release instant the targets module
   also treats as pre-release. A pre feature therefore has one value for every post decision
   time and never contains the reaction; the reaction group alone reads bars after t0, and only
-  up to as_of.
+  up to as_of. Like the targets, the reaction reads 1m/5m bars only (targets.FINE_INTERVALS).
 * Anything about other events comes from `ctx.history` (built by `history_view`) and nowhere
   else; the event's own targets are never an input (the second look-ahead trap).
+* Every other event attribute is point-in-time as well: the perp listing age is None when the
+  listing is after the anchor (the loaders fill listing_start for events released before the
+  perp existed). The one documented exception is max_leverage, see PERP_KEYS.
 * A missing input gives None for the feature, never an exception. Calendar lookups outside
   the exchange calendar's range also give None.
 
@@ -28,8 +35,8 @@ import math
 import numpy as np
 import pandas as pd
 
-from ..schemas import UTC, C, E, T, Timing
-from ..targets import INTERVAL_TD, max_staleness, p0_buffer_for, price_at
+from ..schemas import NY, UTC, C, E, T, Timing
+from ..targets import FINE_INTERVALS, INTERVAL_TD, max_staleness, p0_buffer_for, price_at
 from ..timeutil import (
     classify_timing,
     is_rth,
@@ -56,7 +63,7 @@ X_VIX_DAILY = "vix_daily"  # schemas.C daily bars of the VIX proxy
 X_SECTOR_DAILY = "sector_daily"  # schemas.C daily bars of the sector ETF proxy
 X_PERP_DAILY = "perp_daily"  # schemas.C 1d candles of the event's perp market
 X_FUNDING = "funding"  # market, t (settlement hour), funding_rate, premium
-X_MAX_LEVERAGE = "max_leverage"
+X_MAX_LEVERAGE = "max_leverage"  # the market's CURRENT leverage cap (not point-in-time, see PERP_KEYS)
 X_LISTING_START = "listing_start"  # fallback when the event row has none
 
 
@@ -113,12 +120,7 @@ def pre_cut(ctx: FeatureContext) -> pd.Timestamp:
     return min(as_of, t0 - p0_buffer_for(ctx.event))
 
 
-def cut(frame: pd.DataFrame | None, instant: pd.Timestamp, col: str = C.t_end) -> pd.DataFrame | None:
-    """Rows whose `col` (a bar END time by default) is <= instant, sorted by it; None when
-    nothing survives. This is the only way bars enter a feature."""
-    if frame is None or len(frame) == 0 or col not in frame.columns:
-        return None
-    ends = pd.to_datetime(frame[col], utc=True, errors="coerce")
+def _cut_by(frame: pd.DataFrame, ends: pd.Series, instant: pd.Timestamp, col: str) -> pd.DataFrame | None:
     keep = (ends <= to_utc(instant, assume_tz=UTC)).to_numpy()
     if not keep.any():
         return None
@@ -126,6 +128,46 @@ def cut(frame: pd.DataFrame | None, instant: pd.Timestamp, col: str = C.t_end) -
     if not ends[keep].is_monotonic_increasing:
         out = out.sort_values(col, kind="mergesort")
     return out
+
+
+def cut(frame: pd.DataFrame | None, instant: pd.Timestamp, col: str = C.t_end) -> pd.DataFrame | None:
+    """Rows whose `col` (a bar END time by default) is <= instant, sorted by it; None when
+    nothing survives. This (and cut_daily for daily bars) is the only way bars enter a feature."""
+    if frame is None or len(frame) == 0 or col not in frame.columns:
+        return None
+    return _cut_by(frame, pd.to_datetime(frame[col], utc=True, errors="coerce"), instant, col)
+
+
+def session_ends(frame: pd.DataFrame) -> pd.Series:
+    """Effective end time of each daily bar. The FMP/Nasdaq loaders label a session's bar with
+    t = 00:00 America/New_York of the session date and t_end = the next New York midnight, but
+    its close, high, low and volume are known at the XNYS close of that session (16:00 ET,
+    earlier on half days): such a bar ends at that close here. Any other bar (perp 1d candles
+    start at UTC midnight and are complete only at t_end) and any date the calendar does not
+    know as a session keep their t_end."""
+    ends = pd.to_datetime(frame[C.t_end], utc=True, errors="coerce")
+    if C.t not in frame.columns:
+        return ends
+    starts = pd.to_datetime(frame[C.t], utc=True, errors="coerce")
+    ny = starts.dt.tz_convert(NY)
+    labelled = starts.notna() & (ny.dt.hour == 0) & (ny.dt.minute == 0)
+    if not labelled.any():
+        return ends
+    try:
+        closes = xnys().closes
+    except Exception:  # no calendar available: the conservative calendar-day end stands
+        return ends
+    session_close = pd.to_datetime(ny.dt.tz_localize(None).dt.normalize().map(closes), utc=True,
+                                   errors="coerce")
+    use = labelled & session_close.notna() & (session_close < ends)
+    return ends.where(~use, session_close)
+
+
+def cut_daily(frame: pd.DataFrame | None, instant: pd.Timestamp) -> pd.DataFrame | None:
+    """cut() for daily bars, ending each session bar at its XNYS close (session_ends)."""
+    if frame is None or len(frame) == 0 or C.t_end not in frame.columns:
+        return None
+    return _cut_by(frame, session_ends(frame), instant, C.t_end)
 
 
 def between(frame: pd.DataFrame | None, lo: pd.Timestamp, hi: pd.Timestamp, col: str = C.t_end) -> pd.DataFrame | None:
@@ -172,8 +214,8 @@ def realised_vol(c: np.ndarray, n: int) -> float | None:
 
 
 def px(bars: pd.DataFrame | None, when: pd.Timestamp) -> tuple[float, pd.Timestamp] | None:
-    """targets.price_at on already-cut bars; None for empty inputs."""
-    if bars is None or len(bars) == 0:
+    """targets.price_at on already-cut bars; None for empty inputs or bars without a close."""
+    if bars is None or len(bars) == 0 or C.close not in bars.columns:
         return None
     return price_at(bars, when)
 
@@ -201,6 +243,22 @@ def previous_close_before(ts: pd.Timestamp) -> pd.Timestamp | None:
         return None
 
 
+def holiday_adjacent(t0: pd.Timestamp) -> float:
+    """1.0 when a weekday XNYS holiday touches the release: the New York date of t0 is itself
+    a weekday that is not a session, or a weekday holiday lies between that date and the
+    previous or the next session. Weekends alone do not count (weekday/friday carry them).
+    Raises outside the calendar range (callers wrap it in `safe`)."""
+    cal = xnys()
+    day = to_ny(t0).normalize().tz_localize(None)
+    nxt = pd.Timestamp(cal.date_to_session(day + DAY, "next"))
+    prv = pd.Timestamp(cal.date_to_session(day - DAY, "previous"))
+    d64 = np.datetime64(day.date())
+    skipped = int(np.busday_count(d64 + 1, np.datetime64(nxt.date())))  # weekdays in (day, nxt)
+    skipped += int(np.busday_count(np.datetime64(prv.date()) + 1, d64))  # weekdays in (prv, day)
+    own = day.weekday() < 5 and not cal.is_session(day)
+    return float(skipped > 0 or own)
+
+
 def safe(fn, *args):
     """Call a calendar helper; None when the calendar cannot answer."""
     try:
@@ -215,13 +273,15 @@ def none_dict(keys: tuple[str, ...] | list[str]) -> dict[str, float | None]:
 
 # ---- calendar ------------------------------------------------------------------------------------
 CALENDAR_KEYS = ("amc", "bmo", "rth", "weekday", "friday", "hour_ny", "hours_to_next_open",
-                 "hours_to_next_close", "h24_closed", "days_since_last_event", "n_events_same_day")
+                 "hours_to_next_close", "h24_closed", "holiday_adjacent", "days_since_last_event",
+                 "n_events_same_day")
 
 
 @feature_group("calendar", admissible=("pre", "post"))
 def calendar(ctx: FeatureContext) -> dict[str, float | None]:
     """AMC/BMO, weekday, clock, distance to the next session boundaries, whether XNYS is closed
-    at t0 + horizon, days since this name's last event (history only), same-day event count."""
+    at t0 + horizon, an explicit weekday-holiday adjacency flag, days since this name's last
+    event (history only), same-day event count."""
     out = none_dict(CALENDAR_KEYS)
     t0 = event_t0(ctx)
     if t0 is None:
@@ -245,6 +305,7 @@ def calendar(ctx: FeatureContext) -> dict[str, float | None]:
     open_at_h = safe(is_rth, t0 + pd.Timedelta(hours=ctx.horizon_hours))
     if open_at_h is not None:
         out["h24_closed"] = float(not open_at_h)
+    out["holiday_adjacent"] = safe(holiday_adjacent, t0)
     h = ctx.history
     if h is not None and len(h) and E.t0 in h.columns:
         last = pd.to_datetime(h[E.t0], utc=True, errors="coerce").max()
@@ -281,10 +342,11 @@ def _mean_volume(frame: pd.DataFrame | None, min_bars: int = 1) -> float | None:
 def pre_price(ctx: FeatureContext) -> dict[str, float | None]:
     """Daily-bar returns, realised vol, 52-week distances, recent volume, plus the fine-bar
     drift in the last 60/30 minutes, the gap since the last regular close and extended-hours
-    volume versus the same window one day earlier. All at pre_cut(ctx)."""
+    volume versus the same window one day earlier. All at pre_cut(ctx); daily bars count from
+    their session close (cut_daily), so an after-close release sees the release-day session."""
     out = none_dict(PRE_PRICE_KEYS)
     at = pre_cut(ctx)
-    d = cut(ctx.daily, at)
+    d = cut_daily(ctx.daily, at)
     c = closes(d)
     out["ret_1d"], out["ret_5d"] = ret_n(c, 1), ret_n(c, 5)
     out["ret_20d"], out["ret_60d"] = ret_n(c, 20), ret_n(c, 60)
@@ -297,10 +359,10 @@ def pre_price(ctx: FeatureContext) -> dict[str, float | None]:
         if np.isfinite(lo).any() and np.nanmin(lo) > 0:
             out["dist_52w_low"] = math.log(c[-1] / float(np.nanmin(lo)))
     v = closes(d, C.volume)
-    if len(v) >= 20:
+    if len(v) >= 20 and np.isfinite(v[-60:]).any() and np.isfinite(v[-5:]).any():
         base = float(np.nanmean(v[-60:]))
         recent = float(np.nanmean(v[-5:]))
-        if base > 0 and math.isfinite(recent):
+        if base > 0:
             out["dvol_5d_ratio"] = recent / base
 
     fine = cut(ctx.bars, at)
@@ -324,9 +386,10 @@ def pre_price(ctx: FeatureContext) -> dict[str, float | None]:
         if recent is not None and base is not None and len(base) >= 12:
             vr = closes(recent, C.volume)
             vb = closes(base, C.volume)
-            mb = float(np.nanmean(vb)) if len(vb) else 0.0
+            vr, vb = vr[np.isfinite(vr)], vb[np.isfinite(vb)]
+            mb = float(np.mean(vb)) if len(vb) else 0.0
             if mb > 0 and len(vr):
-                out["vol_30m_ratio"] = float(np.nanmean(vr)) / mb
+                out["vol_30m_ratio"] = float(np.mean(vr)) / mb
     return out
 
 
@@ -394,17 +457,18 @@ MARKET_KEYS = ("mkt_ret_1d", "mkt_ret_5d", "mkt_ret_20d", "mkt_rvol_20d", "vix_l
 @feature_group("market", admissible=("pre", "post"))
 def market(ctx: FeatureContext) -> dict[str, float | None]:
     """Benchmark (xyz:SP500 or SPY) daily returns and vol, VIX level and 5-day change,
-    sector-proxy returns, and the benchmark's last-hour drift from its fine bars, at pre_cut."""
+    sector-proxy returns, and the benchmark's last-hour drift from its fine bars, at pre_cut.
+    Daily bars count from their session close (cut_daily); perp 1d candles from their t_end."""
     out = none_dict(MARKET_KEYS)
     at = pre_cut(ctx)
-    c = closes(cut(ctx.market_daily, at))
+    c = closes(cut_daily(ctx.market_daily, at))
     out["mkt_ret_1d"], out["mkt_ret_5d"], out["mkt_ret_20d"] = ret_n(c, 1), ret_n(c, 5), ret_n(c, 20)
     out["mkt_rvol_20d"] = realised_vol(c, 20)
-    v = closes(cut(ctx.extra.get(X_VIX_DAILY), at))
+    v = closes(cut_daily(ctx.extra.get(X_VIX_DAILY), at))
     if len(v) and v[-1] > 0:
         out["vix_level"] = float(v[-1])
         out["vix_chg_5d"] = ret_n(v, 5)
-    s = closes(cut(ctx.extra.get(X_SECTOR_DAILY), at))
+    s = closes(cut_daily(ctx.extra.get(X_SECTOR_DAILY), at))
     out["sector_ret_1d"], out["sector_ret_5d"] = ret_n(s, 1), ret_n(s, 5)
     out["mkt_drift_60m"] = _drift(cut(ctx.market_bars, at), at, 60)
     return out
@@ -413,6 +477,10 @@ def market(ctx: FeatureContext) -> dict[str, float | None]:
 # ---- perp_state ----------------------------------------------------------------------------------
 PERP_KEYS = ("funding_rate", "funding_mean_24h", "premium", "oi_notional", "oi_chg_24h",
              "day_ntl_vlm", "perp_vol_30d", "max_leverage", "listing_age_d")
+# max_leverage is NOT point-in-time: Hyperliquid publishes no history of leverage caps, so the
+# loaders supply the cap in universe.parquet / the dex meta at build time, which may differ
+# from the cap in force at t0. It is carried as a slowly-changing market attribute; drop it
+# from a model's feature list when a cap change inside the sample would make it an era proxy.
 
 
 def _settled_funding(fund: pd.DataFrame | None, at: pd.Timestamp) -> pd.DataFrame | None:
@@ -426,7 +494,9 @@ def _settled_funding(fund: pd.DataFrame | None, at: pd.Timestamp) -> pd.DataFram
 def perp_state(ctx: FeatureContext) -> dict[str, float | None]:
     """Funding (last settled rate and its 24h mean), premium, open interest and its 24h change,
     day notional volume from the ctx snapshots, 30-day median daily notional from perp 1d
-    candles, leverage cap and listing age. Everything at pre_cut; None without a perp."""
+    candles, leverage cap (the current one, see PERP_KEYS) and listing age. Everything at
+    pre_cut; None without a perp, and the listing age is None unless the listing is known at
+    pre_cut (has_perp_at_t0 not False and listing_start <= pre_cut)."""
     out = none_dict(PERP_KEYS)
     at = pre_cut(ctx)
     fund = _settled_funding(ctx.extra.get(X_FUNDING), at)
@@ -459,24 +529,28 @@ def perp_state(ctx: FeatureContext) -> dict[str, float | None]:
         if len(pr):
             out["premium"] = fnum(pr.iloc[-1])
     pdaily = cut(ctx.extra.get(X_PERP_DAILY), at)
-    if pdaily is not None:
+    if pdaily is not None and C.volume in pdaily.columns and C.close in pdaily.columns:
         vol = closes(pdaily, C.volume)[-30:]
         cl = closes(pdaily, C.close)[-30:]
-        notional = vol * cl
-        notional = notional[np.isfinite(notional)]
-        if len(notional) >= 5:
-            out["perp_vol_30d"] = float(np.median(notional))
+        if len(vol) and len(vol) == len(cl):
+            notional = vol * cl
+            notional = notional[np.isfinite(notional)]
+            if len(notional) >= 5:
+                out["perp_vol_30d"] = float(np.median(notional))
     out["max_leverage"] = fnum(ctx.extra.get(X_MAX_LEVERAGE))
     listing = value(ctx.event, E.listing_start)
     if listing is None:
         listing = ctx.extra.get(X_LISTING_START)
     t0 = event_t0(ctx)
-    if listing is not None and t0 is not None:
+    has_perp = value(ctx.event, E.has_perp_at_t0)
+    if listing is not None and t0 is not None and (has_perp is None or bool(has_perp)):
         try:
             ls = to_utc(listing, assume_tz=UTC)
         except (TypeError, ValueError):
             ls = None
-        if ls is not None and pd.notna(ls):
+        # a listing after the anchor is not known at the anchor: the events module fills
+        # listing_start with the underlying's earliest listing even for earlier releases
+        if ls is not None and pd.notna(ls) and ls <= at:
             out["listing_age_d"] = (t0 - ls) / DAY
     return out
 
@@ -546,15 +620,17 @@ def _valid_hit(hit, p0_time: pd.Timestamp, when: pd.Timestamp, stale: pd.Timedel
 def reaction(ctx: FeatureContext) -> dict[str, float | None]:
     """Early reaction from bars ending at or before as_of: r_k for k in {1,5,15,30,60} minutes
     (only those with t0 + k <= as_of, same P0 and validity rules as targets.compute_targets),
-    the return at as_of, the post-release high/low path, volume z-score against the pre-release
-    bars, the abnormal return versus the benchmark fine bars and the perp premium after t0."""
+    the return at as_of, the post-release high/low path (bars ending after t0), volume z-score
+    against the bars up to the P0 bar, the abnormal return versus the benchmark fine bars and
+    the perp premium after t0. Like the targets, only 1m/5m bars resolve any of this: on 1h or
+    coarser bars every key is None."""
     out = none_dict(REACTION_KEYS)
     t0 = event_t0(ctx)
     if t0 is None:
         return out
     as_of = as_of_of(ctx)
     fine = cut(ctx.bars, as_of)
-    if fine is None:
+    if fine is None or interval_label(fine) not in FINE_INTERVALS:
         return out
     buffer = p0_buffer_for(ctx.event)
     stale = max_staleness(interval_label(fine))
@@ -573,7 +649,9 @@ def reaction(ctx: FeatureContext) -> dict[str, float | None]:
     out["r_now"] = r_now
     out["abs_r_now"] = abs(r_now) if r_now is not None else None
     ends = pd.to_datetime(fine[C.t_end], utc=True, errors="coerce")
-    post = fine.loc[(ends > p0_time).to_numpy()]
+    # the path is what traded after the release: bars ending after t0. Bars between the P0 bar
+    # and t0 (the 8-K buffer) belong to neither the path nor the pre-release volume baseline.
+    post = fine.loc[(ends > max(p0_time, t0)).to_numpy()]
     pre = fine.loc[(ends <= p0_time).to_numpy()]
     if len(post):
         hi, lo = closes(post, C.high), closes(post, C.low)
