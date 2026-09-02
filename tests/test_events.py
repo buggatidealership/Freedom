@@ -309,7 +309,9 @@ def test_resolver_priority_and_earlier_only_rule():
     r = resolve_release_time(report_date_ny=REPORT_DAY, sec_filings=late_8k, intraday=bars,
                              calendar_flag=None)
     assert r.t0 == pd.Timestamp("2026-08-26 20:40:00", tz="UTC") and r.confidence == CONFIDENCE["sec_8k"]
-    assert r.t0_lag_s is None or r.t0_lag_s > 15 * 60
+    # the 20:20 release bar is outside the window; anything detected is a post-acceptance
+    # reaction (negative lag) and never moves t0
+    assert r.t0_lag_s is None or r.t0_lag_s <= 0
 
     # without an 8-K the detection is the source; 6-K rows are never a time source
     r = resolve_release_time(report_date_ny=REPORT_DAY, sec_filings=tsm_filings(), intraday=bars,

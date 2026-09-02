@@ -290,12 +290,15 @@ def detect_release_from_bars(bars: pd.DataFrame, report_date_ny: pd.Timestamp,
     is_first_bar_of_session) or None. Bars must be schemas.C rows with tz-aware UTC t/t_end.
 
     Baseline = bars within +/-CLOCK_WINDOW_MINUTES of the candidate's clock minute, in the same
-    session segment (pre-market / regular / after-hours), on up to `baseline_days` prior
+    session segment (pre-market before 09:30, regular hours through the 16:00 minute that
+    carries the closing auction, after-hours from 16:01), on up to `baseline_days` prior
     sessions present in `bars`, plus the preceding same-segment bars of the report day
-    (SAME_DAY_BASELINE_BARS at most). z = (v - mean) / max(std, 0.25 mean); a candidate with
-    fewer than MIN_BASELINE_BARS baseline bars cannot be judged and is skipped. The bar return
-    is max(|close/open - 1|, |open/previous close - 1|) so a gap into the bar counts too.
-    `not_before` restricts the candidates (not the baseline) to bars starting at or after it."""
+    (SAME_DAY_BASELINE_BARS at most). The z-score is robust so that one heavy print (the
+    closing cross, an earlier release bar) cannot hide a spike: z = (v - median) /
+    max(1.4826 MAD, 0.25 median, 1). A candidate with fewer than MIN_BASELINE_BARS baseline
+    bars cannot be judged and is skipped. The bar return is max(|close/open - 1|,
+    |open/previous close - 1|) so a gap into the bar counts too. `not_before` restricts the
+    candidates (not the baseline) to bars starting at or after it."""
     if bars is None or len(bars) == 0:
         return None
     b = bars.sort_values(C.t, kind="mergesort").reset_index(drop=True)
@@ -303,7 +306,7 @@ def detect_release_from_bars(bars: pd.DataFrame, report_date_ny: pd.Timestamp,
     ny = t.dt.tz_convert(NY)
     day_key = (ny.dt.year * 10000 + ny.dt.month * 100 + ny.dt.day).to_numpy(dtype="int64")
     clock = (ny.dt.hour * 60 + ny.dt.minute).to_numpy(dtype="int64")
-    seg = np.where(clock < _RTH_OPEN_MIN, _SEG_PRE, np.where(clock < _RTH_CLOSE_MIN, _SEG_RTH, _SEG_AH))
+    seg = np.where(clock < _RTH_OPEN_MIN, _SEG_PRE, np.where(clock <= _RTH_CLOSE_MIN, _SEG_RTH, _SEG_AH))
     vol = pd.to_numeric(b[C.volume], errors="coerce").to_numpy(dtype="float64")
     opn = pd.to_numeric(b[C.open], errors="coerce").to_numpy(dtype="float64")
     close = pd.to_numeric(b[C.close], errors="coerce").to_numpy(dtype="float64")
@@ -339,10 +342,10 @@ def detect_release_from_bars(bars: pd.DataFrame, report_date_ny: pd.Timestamp,
         sample = sample[np.isfinite(sample)]
         if len(sample) < MIN_BASELINE_BARS:
             continue
-        mean = float(sample.mean())
-        std = float(sample.std(ddof=1))
-        scale = max(std, 0.25 * mean, 1.0)
-        if (vol[i] - mean) / scale >= vol_z_threshold:
+        median = float(np.median(sample))
+        mad = float(np.median(np.abs(sample - median)))
+        scale = max(1.4826 * mad, 0.25 * median, 1.0)
+        if (vol[i] - median) / scale >= vol_z_threshold:
             return pd.Timestamp(t.iloc[i]).tz_convert(UTC), i == first_idx
     return None
 
