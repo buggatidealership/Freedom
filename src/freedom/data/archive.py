@@ -33,7 +33,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from ..config import Settings
-from ..data.base import utcnow
+from ..data.base import ProviderUnavailable, utcnow
 from ..data.hyperliquid import (
     CANDLE_COLUMNS,
     FUNDING_COLUMNS,
@@ -44,7 +44,7 @@ from ..data.hyperliquid import (
     interval_ms,
     to_ms,
 )
-from ..schemas import UTC, C, PriceSource
+from ..schemas import UTC, C, PriceSource, U
 from ..timeutil import to_utc
 
 CANDLES_SUBDIR = "candles"
@@ -242,6 +242,42 @@ def snapshot_ctx(client: HyperliquidClient, settings: Settings, dex: str,
     return _summary_row(dex, CTX_SUBDIR, added, frame, len(merged), tcol="t")
 
 
+def has_event_universe(settings: Settings) -> bool:
+    """True when data/universe.parquet exists and marks at least one market as part of the
+    event universe (the scheduled job runs `freedom universe` before `freedom archive`)."""
+    path = settings.universe_path
+    if not path.exists():
+        return False
+    try:
+        if U.in_event_universe not in pq.read_schema(path).names:
+            return False
+        flags = pd.read_parquet(path, columns=[U.in_event_universe])[U.in_event_universe]
+    except (OSError, ValueError, KeyError):
+        return False
+    return bool(flags.fillna(False).astype(bool).any())
+
+
+def snapshot_consensus_row(settings: Settings, now: pd.Timestamp) -> dict:
+    """Consensus snapshot for the event universe (events.snapshot_consensus: the FMP earnings
+    calendar and the Nasdaq calendar for the coming days) appended to
+    archive/consensus/<UTC date>.parquet, as a summary row with interval='consensus'.
+
+    `archive_markets` calls this only when `has_event_universe` holds: without an event
+    universe there is nothing to snapshot consensus for. A provider that cannot run
+    (FMP_API_KEY unset, daily budget spent) or fails is recorded in the row's `error` column
+    instead of aborting the candle archive."""
+    from ..events import CONSENSUS_ITEM, consensus_path, snapshot_consensus
+
+    path = consensus_path(settings, now.date())
+    try:
+        written = snapshot_consensus(settings, now=now)
+    except (ProviderUnavailable, *RECOVERABLE_ERRORS) as exc:
+        return _summary_row(CONSENSUS_ITEM, CONSENSUS_ITEM, 0, pd.DataFrame(), archived_rows(path),
+                            error=f"{type(exc).__name__}: {exc}")
+    return _summary_row(CONSENSUS_ITEM, CONSENSUS_ITEM, len(written), written, archived_rows(path),
+                        tcol="snapshot_time")
+
+
 # ---- public API ----------------------------------------------------------------------------------
 def archive_markets(settings: Settings, markets: list[str], intervals: list[str], *,
                     client: HyperliquidClient | None = None,
@@ -249,7 +285,9 @@ def archive_markets(settings: Settings, markets: list[str], intervals: list[str]
     """Archive candles (every interval), funding and asset-context snapshots for `markets`.
 
     Returns one summary row per (market, interval) plus one per market for funding
-    (interval='funding') and one per dex for the context snapshot (interval='ctx'):
+    (interval='funding'), one per dex for the context snapshot (interval='ctx') and, when
+    data/universe.parquet has an event universe, one for the consensus snapshot (market and
+    interval='consensus', see `snapshot_consensus_row`):
     columns market, interval, rows_added, first_t, last_t, rows_total, error.
 
     `error` is None for a clean item. It reads "<ExceptionType>: ..." for an item whose fetch
@@ -278,6 +316,8 @@ def archive_markets(settings: Settings, markets: list[str], intervals: list[str]
             rows.append(snapshot_ctx(client, settings, dex, now_ts))
         except RECOVERABLE_ERRORS as exc:
             rows.append(_error_row(dex, CTX_SUBDIR, ctx_path(settings, dex, now_ts.date()), exc))
+    if has_event_universe(settings):
+        rows.append(snapshot_consensus_row(settings, now_ts))
     summary = pd.DataFrame(rows, columns=SUMMARY_COLUMNS)
     for col in ("first_t", "last_t"):
         summary[col] = pd.to_datetime(summary[col], utc=True)
