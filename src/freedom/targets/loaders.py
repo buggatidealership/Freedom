@@ -55,10 +55,16 @@ def _equity_bars(fmp, symbol: str, lo: pd.Timestamp, hi: pd.Timestamp) -> pd.Dat
 
 
 def load_event_bars(settings: Settings, event: pd.Series, *, hl, fmp, benchmark_market: str,
-                    benchmark_equity: str) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+                    benchmark_equity: str, now: pd.Timestamp | None = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     t0 = to_utc(event[E.t0])
     lo = t0 - pd.Timedelta(days=1)
     hi = t0 + pd.Timedelta(hours=settings.horizon_hours) + pd.Timedelta(hours=2)
+    now = pd.Timestamp.now(tz="UTC") if now is None else to_utc(now)
+    if t0 > now:
+        # an upcoming event has no bars yet; asking would spend a provider request on an
+        # empty answer that is cached only for the live TTL, i.e. on every run
+        cols = [C.market, C.interval, C.t, C.t_end, C.open, C.high, C.low, C.close, C.volume, C.n_trades, C.source]
+        return pd.DataFrame(columns=cols), None
     market = event.get(E.market)
     perp = _perp_bars(settings, hl, market, lo, hi) if isinstance(market, str) and market else None
     equity = _equity_bars(fmp, event[E.underlying], lo, hi)

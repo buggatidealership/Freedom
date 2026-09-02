@@ -80,7 +80,8 @@ SCORE_COLUMNS = {"accuracy": "hit", "brier": "brier", "log_loss": "ll", "mae": "
 MDE_PAIRED = "paired_se"  # MDE from the paired comparison's own standard error
 MDE_UPPER_BOUND = "closed_form_upper_bound"  # no comparison: the unpaired closed form (conservative)
 VERDICT_IDENTICAL = "identical_to_baseline"
-VERDICT_UNTRAINED = "untrained"  # zero paired SE: the model reproduced the baseline exactly
+VERDICT_UNTRAINED = "untrained"
+FALLBACK = "fallback_direction"  # prediction column: the model's direction head used the base rate  # zero paired SE: the model reproduced the baseline exactly
 MAX_NONFINITE_P_SHARE = 0.1  # a model returning more non-finite p_up than this is rejected
 HEADLINE_SOURCES = frozenset({T0Source.sec_8k.value, T0Source.manual.value, T0Source.detected.value})
 STRATA = (E.t0_source, E.kind, E.timing)
@@ -242,7 +243,8 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
         train = sub.loc[fold.train_idx]
         train = train[train[TRAINABLE]]
         test = sub.loc[fold.test_idx]
-        p, r, mag, _ = _fit_predict(name, settings.random_seed, train, test, feats)
+        p, r, mag, model = _fit_predict(name, settings.random_seed, train, test, feats)
+        fell_back = "direction" in getattr(model, "fallback_heads_", set())
         pooled = np.concatenate(residuals) if residuals else np.array([], dtype=float)
         q10, q90 = residual_band(np.zeros(len(pooled)), pooled) if len(pooled) else (math.nan, math.nan)
         frame = test[[D.event_id, D.decision_time, *META_COLUMNS]].copy()
@@ -256,12 +258,13 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
         frame[P.r_hi] = r + q90
         frame[P.r_true] = test[Y].to_numpy(dtype=float)
         frame[P.direction_true] = test[DIR].to_numpy(dtype=float)
+        frame[FALLBACK] = bool(fell_back)
         frames.append(frame)
         if fold.fold != HOLDOUT_FOLD:
             res = frame[P.r_true].to_numpy(dtype=float) - r
             residuals.append(res[np.isfinite(res)])
     cols = [P.event_id, P.decision_time, P.model, P.fold, P.test_season, P.p_up, P.r_hat, P.magnitude_hat,
-            P.r_lo, P.r_hi, P.r_true, P.direction_true, *META_COLUMNS]
+            P.r_lo, P.r_hi, P.r_true, P.direction_true, FALLBACK, *META_COLUMNS]
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=cols)
     return out[cols]
 
@@ -676,9 +679,13 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     pred_frames: list[pd.DataFrame] = []
     trade_frames: list[pd.DataFrame] = []
     for d in decision_times:
-        sub = df[df[D.decision_time] == d].drop_duplicates(D.event_id).reset_index(drop=True)
+        sub_all = df[df[D.decision_time] == d].drop_duplicates(D.event_id).reset_index(drop=True)
+        # rows without a realised target (upcoming events, or no bars) can be neither trained
+        # on nor scored; keeping them would create phantom test folds for future seasons
+        sub = sub_all[sub_all[Y].notna()].reset_index(drop=True)
+        n_unscorable = int(len(sub_all) - len(sub))
         if sub.empty:
-            raise ValueError(f"the dataset has no rows for decision_time {d!r}")
+            raise ValueError(f"the dataset has no scorable rows for decision_time {d!r}")
         folds, holdout, info, skip = _fold_plan(sub, settings)
         if not folds:
             raise ValueError(f"{d}: no season has {settings.min_train_events} trainable events before it "
@@ -686,7 +693,8 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
         if final and (holdout is None or int(sub.loc[holdout.train_idx, TRAINABLE].sum()) < settings.min_train_events):
             raise HoldoutNotReady(f"{d}: fewer than {settings.min_train_events} trainable events before the holdout season")
         folds_info[d], skipped[d] = info, skip
-        extras[d] = {"n_events": int(len(sub)), "n_trainable": int(sub[TRAINABLE].sum()),
+        extras[d] = {"n_events": int(len(sub)), "n_unscorable_excluded": n_unscorable,
+                     "n_trainable": int(sub[TRAINABLE].sum()),
                      "n_has_perp": int(sub[E.has_perp_at_t0].sum()),
                      "n_low_confidence": int((sub[E.t0_confidence] < settings.min_t0_confidence).sum()),
                      "n_target_missing": int(sub["target_missing"].sum())}
@@ -702,17 +710,20 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
                 hold_blocks[name] = preds[preds[P.fold] == HOLDOUT_FOLD].reset_index(drop=True)
         per_model, best, trades = _score_block(blocks, settings=settings, baselines=baselines, n_boot=n_boot,
                                                bar_index=bar_index, funding_fn=funding_fn)
-        # a learner that never saw MIN_TRAIN_ROWS trainable rows in any fold fell back to the
-        # base rate everywhere: its comparison says nothing about predictability
+        # a learner whose direction head fell back to the base rate in every fold (fewer than
+        # MIN_TRAIN_ROWS usable rows) was never trained: its comparison says nothing about
+        # predictability, so label it instead of judging it
         max_train = max((int(sub.loc[f.train_idx, TRAINABLE].sum()) for f in folds), default=0)
-        if max_train < MIN_TRAIN_ROWS:
-            for res in per_model.values():
-                if res.get("is_baseline"):
-                    continue
+        for name, res in per_model.items():
+            if res.get("is_baseline") or name not in blocks or FALLBACK not in blocks[name].columns:
+                continue
+            if len(blocks[name]) and bool(blocks[name][FALLBACK].all()):
+                res["untrained"] = True
                 for cell in res["subsets"].values():
                     for cmp in (cell.get("comparison") or {}).values():
                         if isinstance(cmp, dict) and "verdict" in cmp:
-                            cmp["verdict"] = f"{VERDICT_UNTRAINED} (largest training fold {max_train} < {MIN_TRAIN_ROWS})"
+                            cmp["verdict"] = (f"{VERDICT_UNTRAINED} (direction head fell back to the base rate "
+                                              f"in every fold: fewer than {MIN_TRAIN_ROWS} usable rows)")
         extras[d]["max_train_rows"] = max_train
         results[d], best_baseline[d] = per_model, best
         trade_frames.append(trades.assign(block="walk_forward"))

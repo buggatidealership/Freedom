@@ -160,3 +160,19 @@ def test_build_price_path_prefers_fine_perp_then_equity(settings):
     assert len(build_price_path(settings, ev, market_bars=coarse, equity_bars=None)) == 0
     short = fine[fine[C.t_end] <= T0 + pd.Timedelta(hours=2)]
     assert len(build_price_path(settings, ev, market_bars=short, equity_bars=None)) == 0
+
+
+
+def test_upcoming_events_never_hit_providers(settings):
+    """A release in the future has no bars; the loader must not spend a request on it."""
+    from freedom.targets.loaders import load_event_bars
+
+    class Boom:
+        def __getattr__(self, name):
+            raise AssertionError(f"provider called: {name}")
+
+    ev = pd.Series({E.event_id: "NVDA:2026-10", E.underlying: "NVDA", E.market: "xyz:NVDA",
+                    E.t0: to_utc("2026-11-18 21:05", assume_tz="UTC"), E.t0_source: "calendar_flag"})
+    path, mkt = load_event_bars(settings, ev, hl=Boom(), fmp=Boom(), benchmark_market="xyz:SP500",
+                                benchmark_equity="SPY", now=to_utc("2026-09-02 12:00", assume_tz="UTC"))
+    assert len(path) == 0 and mkt is None

@@ -91,9 +91,23 @@ over the best baseline per metric. The trading simulation fills at the open of t
 signal, charges a floor plus range-based execution cost and taker fees, accrues archived funding
 where it exists, and reports portfolio metrics under an equal-split capital rule.
 
-## Results
+## Results so far
 
-_Filled in from the first end-to-end run; see `docs/results.md`._
+First end-to-end run (2026-09-02, twelve early-listed names, 48 past events, two walk-forward
+folds, 24 out-of-sample events per cell; details and how to read them in `docs/results.md`):
+
+* Release times resolved from 8-K acceptance for all 48 events; detection moved 35 of them
+  earlier by a median of 85 s (the wire-to-filing lag).
+* At the pre-release decision time nothing beats the base rate, and the learners never trained
+  (folds of 12 and 24 rows are below the 30-row floor at which they fall back to the base
+  rate); the report labels them "untrained" rather than judging predictability.
+* After the release, the sign of the first 15–30 minutes agrees with the 24-hour direction in
+  63–67 % of events, but the 95 % interval includes 50 % and the paired comparison is
+  inconclusive at n = 24. The `always_extends` baseline is the honest comparator for the
+  continuation question and is not yet distinguishable from a coin flip.
+* Sample-size arithmetic: the minimum detectable Brier improvement at n = 24 is about 0.25
+  (unpaired bound); the full 71-name universe yields roughly 280 events a year, at which point
+  it falls to the 0.01–0.02 range where a real edge would show.
 
 ## Layout
 

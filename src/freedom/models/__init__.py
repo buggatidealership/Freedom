@@ -122,6 +122,7 @@ class BaseModel(ABC):
         self.params = params
         self.feature_names_: list[str] = []
         self.residual_q_: tuple[float, float] | None = None  # (q10, q90) of OOS residuals, set by eval
+        self.fallback_heads_: set[str] = set()  # heads that fell back to the base rate in the last fit
         self.is_fitted_: bool = False
         self.n_train_: int = 0  # rows with a finite return target
         self.n_direction_: int = 0  # rows with a +1 / -1 direction label
@@ -202,6 +203,7 @@ class BaseModel(ABC):
             raise RuntimeError(f"model {self.name!r} is not fitted")
 
     def _small_sample(self, head: str, n: int) -> None:
+        self.fallback_heads_.add(head)
         msg = (f"{self.name}: only {n} usable rows for the {head} head (< {MIN_TRAIN_ROWS}); "
                "falling back to the training base rate")
         key = (self.name, head, n)
