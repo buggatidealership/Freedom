@@ -1,10 +1,120 @@
 # Freedom
 
-A research and prediction harness for the price action of equities in the 24 hours after an
-earnings release, for every equity that trades as a perpetual on Hyperliquid (HIP-3 markets such
-as `xyz:NVDA`). The harness builds the event dataset, evaluates models honestly out of sample,
-simulates trading with fees and funding, optimises itself against that evaluation, and produces
-live predictions with the evidence behind them.
+A research and prediction harness for the price action of an equity in the 24 hours after its
+earnings release, for every equity that trades as a perpetual future on Hyperliquid (HIP-3
+markets such as `xyz:NVDA`, `xyz:AAPL`, `para:AVGO`). It builds the event dataset, evaluates
+models honestly out of sample, simulates trading with fees, slippage and funding, optimises
+itself against that evaluation, and produces live predictions with the evidence behind them.
 
-Status: scaffold. See `docs/design.md` for the design and `docs/data-sources.md` for what each
-data source was measured to provide.
+What it does **not** do: promise that post-earnings moves are predictable. Whether they are, at
+which decision time, and by how much, is an output of the harness and every result comes with a
+sample size and a minimum detectable improvement.
+
+## Read this first: what the harness assumes and what it measured
+
+* "Stocks on Hyperliquid" are perpetual futures on builder-deployed dexes (`xyz`, `para`, `io`),
+  not shares. They trade 24/7 with hourly funding; outside the cash session their price comes
+  from an oracle that follows after-hours liquidity providers and, during closures, drifts with
+  the perp's own order flow. The 24-hour window is therefore tradable end to end, but overnight
+  and weekend segments are thin.
+* The universe is small. On 2026-09-02 the live pull found 138 markets, of which 71 are
+  equities with earnings (US filers and US-listed foreign issuers). Most were listed in 2026, so
+  the perp-era event history is roughly a hundred events; older events use the underlying's
+  extended-hours equity bars as the price proxy and are labelled as such.
+* Hyperliquid serves only the most recent 5000 candles per interval (1-minute history ≈ 83
+  hours). The harness ships an archiver, and a scheduled GitHub Actions job, so that fine-grained
+  perp history accumulates from now on.
+* Release times come from SEC 8-K item 2.02 acceptance timestamps, which trail the newswire by
+  25–134 s on the filings measured, so the reference price backs off three minutes. Foreign
+  issuers' 6-K timestamps are not usable and fall back to detection from 1-minute bars.
+* Consensus estimates from vendors are their *final* values, not the consensus as of the
+  release. Historical surprise features are therefore labelled non-point-in-time; from now on the
+  archiver snapshots the calendar daily so future events have real point-in-time consensus.
+
+`docs/data-sources.md` lists every measurement behind these statements; `docs/design.md` is the
+design, including the 31 review findings that shaped it.
+
+## Definitions
+
+* **Event**: `(underlying, fiscal quarter, t0)` with `t0` the release instant in UTC.
+* **Reference price** `P0`: close of the last bar ending at or before `t0 − δ` (`δ` = 3 min for
+  8-K-timed events, 0 otherwise). Bars are half-open; a bar containing the instant is never used.
+* **Checkpoints**: +5m, +15m, +30m, +60m, +2h, next regular open, open+30m, next regular close,
+  +24h. Each is valid only if its bar ends after the `P0` bar and within max(2 × bar interval,
+  5 min) of the checkpoint.
+* **Targets**: log returns `r_h` from `P0`, abnormal returns against `xyz:SP500` (or SPY), and
+  labels `direction`, `magnitude` and `continuation_k = sign(r_k) · sign(r_24h − r_k)` for
+  k ∈ {15m, 30m} (+1 the early reaction extended, −1 it reversed).
+* **Decision times**: `pre_5m`, `post_1m`, `post_15m`, `post_30m`, `post_60m`. Every feature is
+  built `as_of` the decision instant and the models for different decision times are never mixed.
+
+## Install
+
+```bash
+uv venv && . .venv/bin/activate
+uv pip install -e ".[dev]"
+cp .env.example .env   # add FMP_API_KEY (required for equity bars and earnings history)
+freedom status
+```
+
+Keys: `FMP_API_KEY` is required (earnings history, extended-hours bars, daily bars).
+`ALPHAVANTAGE_API_KEY` is optional (report-time flag for foreign issuers; 25 requests/day on the
+free tier). Hyperliquid, SEC EDGAR and Nasdaq need no key. Yahoo Finance is not used.
+
+## Run it end to end
+
+```bash
+freedom universe                 # Hyperliquid markets -> data/universe.parquet (+ rows to verify)
+freedom archive                  # candles, funding, context and consensus snapshots (run every 12 h)
+freedom events --since 2024-01-01 --underlyings NVDA,AAPL,MSFT,AMZN,META,GOOGL,TSLA,AMD,MU,INTC
+freedom dataset --decision-times pre_5m,post_15m,post_30m
+freedom evaluate --models zero,base_rate,historical_mean,sign_of_reaction,linear,lightgbm --decision-times pre_5m,post_30m
+freedom optimize --decision-times post_30m --n-trials 50
+freedom train --model lightgbm --decision-time post_30m
+freedom upcoming --days 14
+freedom predict --event NVDA:2026-10 --decision post_30m
+```
+
+The FMP free plan allows about 250 requests a day. `events` and `dataset` treat an exhausted
+budget as a checkpoint: they write what they have, mark the rest `pending`, exit non-zero, and
+resume from the on-disk cache when rerun the next day. Building the full universe back to 2024
+takes several days of quota; a subset of underlyings, as above, fits in one.
+
+## Evaluation protocol
+
+Walk-forward by earnings season with an embargo; a **pinned holdout season**
+(`FREEDOM_HOLDOUT_SEASON`, default `2026Q3`) that `evaluate` and `optimize` never touch and that
+only `evaluate --final` scores, with every scoring logged. Metrics per decision time, for events
+with a live perp at `t0` (headline) and for all events, stratified by release-time source,
+issuer kind and timing, each with `n`, bootstrap intervals and the minimum detectable improvement
+over the best baseline per metric. The trading simulation fills at the open of the bar after the
+signal, charges a floor plus range-based execution cost and taker fees, accrues archived funding
+where it exists, and reports portfolio metrics under an equal-split capital rule.
+
+## Results
+
+_Filled in from the first end-to-end run; see `docs/results.md`._
+
+## Layout
+
+```
+src/freedom/universe   Hyperliquid markets -> classified event universe (configs/universe_overrides.yaml)
+src/freedom/data       provider clients (hyperliquid, fmp, sec, nasdaq, alphavantage), cache, budgets, archiver
+src/freedom/events     earnings events and the release-time resolver
+src/freedom/targets    price paths, checkpoints, returns, labels
+src/freedom/features   feature groups with as_of discipline, dataset builder
+src/freedom/models     baselines, linear, lightgbm, ensemble
+src/freedom/eval       walk-forward folds, metrics, trading simulation, bootstrap, reports
+src/freedom/optimize   Optuna study per decision time
+src/freedom/cli.py     the `freedom` command
+```
+
+## Known limitations
+
+* Small samples: expect most cells to be "inconclusive" until several more earnings seasons of
+  perp-era data have been archived.
+* Historical consensus is vendor-final, not point-in-time.
+* The all-in taker fee for `xyz` growth-mode markets was not measured; the simulation defaults to
+  the conservative 0.045 %.
+* Text features (guidance tone from the press release) are deferred: an LLM trained after the
+  event knows the outcome, so they cannot be made point-in-time for historical rows.
