@@ -58,10 +58,13 @@ from .report import (
 )
 from .runner import (
     DEFAULT_BASELINES,
+    TRADING_SUBSETS,
     HoldoutNotReady,
     baseline_names,
     check_holdout_ready,
+    estimate_source_counts,
     evaluate,
+    non_point_in_time_in_scope,
     prepare_dataset,
     subset_masks,
     train_final,
@@ -88,13 +91,13 @@ from .sim import (
 
 __all__ = [
     "CAPITAL_RULE", "DEFAULT_BASELINES", "FUNDING_ARCHIVE", "FUNDING_NONE", "HOLDOUT_FOLD", "MIN_BLOCKS",
-    "SIZINGS", "TRADE_COLUMNS", "Fold", "HoldoutNotReady", "archive_funding_loader", "baseline_names",
-    "bootstrap_ci", "bootstrap_distribution", "brier_scores", "calibration_table", "check_holdout_ready",
-    "choose_blocks", "classification_metrics", "dataset_sha256", "equal_split_weights", "evaluate",
-    "fill_price", "funding_sum", "git_info", "hit_scores", "leaderboard_markdown", "leg_cost_bps",
-    "loader_paths", "make_run_id", "memoised_funding", "min_detectable_improvement", "paired_mde",
-    "paired_se", "portfolio_metrics", "position_size", "prepare_dataset", "prepare_funding",
-    "regression_metrics", "residual_band", "season_end", "season_start", "seasons_of", "simulate",
-    "spearman", "subset_masks", "to_jsonable", "train_final", "verdict", "walk_forward_folds",
-    "write_reports",
+    "SIZINGS", "TRADE_COLUMNS", "TRADING_SUBSETS", "Fold", "HoldoutNotReady", "archive_funding_loader",
+    "baseline_names", "bootstrap_ci", "bootstrap_distribution", "brier_scores", "calibration_table",
+    "check_holdout_ready", "choose_blocks", "classification_metrics", "dataset_sha256", "equal_split_weights",
+    "estimate_source_counts", "evaluate", "fill_price", "funding_sum", "git_info", "hit_scores",
+    "leaderboard_markdown", "leg_cost_bps", "loader_paths", "make_run_id", "memoised_funding",
+    "min_detectable_improvement", "non_point_in_time_in_scope", "paired_mde", "paired_se",
+    "portfolio_metrics", "position_size", "prepare_dataset", "prepare_funding", "regression_metrics",
+    "residual_band", "season_end", "season_start", "seasons_of", "simulate", "spearman", "subset_masks",
+    "to_jsonable", "train_final", "verdict", "walk_forward_folds", "write_reports",
 ]

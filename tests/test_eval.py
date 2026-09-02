@@ -12,7 +12,7 @@ from freedom import models as models_mod
 from freedom.data.base import BudgetExhausted
 from freedom.eval import runner
 from freedom.eval.folds import season_start
-from freedom.schemas import C, D, E, P, T
+from freedom.schemas import SCHEMA_VERSION, C, D, E, P, T
 from tests.synth_eval import (
     PERP_LISTING,
     make_bars,
@@ -393,8 +393,13 @@ def test_evaluate_end_to_end_writes_reports(settings, dataset):
     assert summary["dataset_hash_source"] == "content" and summary["capital_rule"] == ev.CAPITAL_RULE
     assert summary["final"] is False and summary["holdout_results"] is None
     assert summary["holdout"] == {"season": "2026Q3", "scorings_before": 0, "scorings_after": 0,
-                                  "scored_now": False, "n_events": 40}
+                                  "scored_now": False, "n_events": 40, "n_unobservable_24h": 0,
+                                  "unobservable_24h": []}
     assert not settings.holdout_log_path.exists()
+    # no surprise / max_leverage column in this dataset: nothing is non-point-in-time
+    assert summary["non_point_in_time_groups"] == {} and summary["trading_subsets"] == list(ev.TRADING_SUBSETS)
+    assert summary["cohorts"]["post_30m"]["non_point_in_time_groups"] == []
+    assert not any("non-point-in-time" in n for n in summary["notes"])
 
     preds = pd.read_parquet(out / "predictions.parquet")
     assert set(preds[P.model]) == set(MODELS) and set(preds[P.decision_time]) == {"pre_5m", "post_30m"}
@@ -485,10 +490,35 @@ def test_evaluate_end_to_end_writes_reports(settings, dataset):
     assert tr["untraded_reasons"].get("no_bars", 0) == int(lin[P.r_true].isna().sum())  # no path without targets
     assert res["linear"]["trading"]["magnitude_gate"]["n_trades"] < tr["n_trades"]
     assert res["base_rate"]["trading"]["fixed"]["comparison"] is None
+    # trading statistics per subset: `trading` is the every-row simulation, `trading_subsets`
+    # holds it next to the headline slice (perp era, confident, non-calendar t0), and the
+    # paired PnL comparison is against the best baseline on the same rows
+    assert tr["subset"] == "all" and tr["n_events"] == lin[P.event_id].nunique()
+    ts = res["linear"]["trading_subsets"]
+    assert set(ts) == set(ev.TRADING_SUBSETS) and ts["all"]["fixed"] == tr
+    n_head = res["linear"]["subsets"]["headline"]["n"]
+    head = ts["headline"]["fixed"]
+    assert head["subset"] == "headline" and head["n_events"] == n_head
+    assert 0 < head["n_trades"] <= n_head < tr["n_trades"] and head["mean_pnl"]["n"] == head["n_trades"]
+    assert head["comparison"]["baseline"] in ("zero", "base_rate") and head["comparison"]["ci"][0] < head["comparison"]["ci"][1]
+    assert "headline" in trades.columns and int(fixed["headline"].sum()) == n_head
+    assert head["n_trades"] == int(taken["headline"].sum())
+    assert (fixed.loc[fixed["headline"], E.has_perp_at_t0]).all()
+    assert (fixed.loc[fixed["headline"], E.t0] >= PERP_LISTING).all()
+    # the headline slice's PnL is recomputed on its own trades, not inherited from the all-rows line
+    head_pnl = taken.loc[taken["headline"], "pnl"]
+    assert head["mean_pnl"]["point"] == pytest.approx(head_pnl.mean()) and head["mean_pnl"]["point"] != tr["mean_pnl"]["point"]
 
     md = (out / "leaderboard.md").read_text()
     assert "## post_30m" in md and "| linear |" in md and "MDE" in md and summary["run_id"] in md
     assert "magnitude MAE" in md and "block:day" in md and "‡" in md and "equal_split" in md
+    # the leaderboard's trading columns describe the rows of the row's subset (headline here)
+    post = md.split("## post_30m", 1)[1]
+    line = next(ln for ln in post.splitlines() if ln.startswith("| linear | headline |"))
+    cells = [c.strip() for c in line.split("|")[1:-1]]
+    assert cells[2] == str(n_head) and cells[-2] == f"{head['sharpe_like']:.2f}"
+    assert cells[-1] == f"{head['mean_pnl']['point'] * 1e4:.1f}"
+    assert cells[-1] != f"{tr['mean_pnl']['point'] * 1e4:.1f}"
     assert any("inconclusive" in n or "Brier comparisons" in n for n in summary["notes"])
     assert "continuation_dead_band_n" in summary["cohorts"]["post_30m"]
 
@@ -511,6 +541,7 @@ def test_trade_threshold_and_target_vol_are_settings(settings, dataset):
     assert summary["settings"]["trade_threshold"] == 0.45 and summary["settings"]["target_vol"] == 0.01
     tr = summary["results"]["post_30m"]["linear"]["trading"]
     assert tr["fixed"]["untraded_reasons"].get("below_threshold", 0) > 0
+    assert summary["results"]["post_30m"]["linear"]["trading_subsets"]["headline"]["fixed"]["untraded_reasons"].get("below_threshold", 0) > 0
     trades = pd.read_parquet(strict.reports_dir / summary["run_id"] / "trades.parquet")
     taken = trades[trades["traded"] & (trades["sizing"] == "by_magnitude")]
     assert (taken["size"] == np.minimum(1.0, 0.01 / taken[P.magnitude_hat])).all()
@@ -539,6 +570,89 @@ def test_magnitude_forecasts_reach_the_simulation_and_metrics(settings, dataset)
     cmp = res["linear"]["subsets"]["all"]["comparison"]["magnitude_mae"]
     assert cmp["baseline"] == "hist_abs_mean" and cmp["ci"][0] <= cmp["improvement"] <= cmp["ci"][1]
     assert cmp["mde"] is None  # MDE is reported for brier / accuracy only
+
+
+def test_holdout_band_pools_only_pre_holdout_residuals(settings):
+    """A dataset that holds seasons after the pinned holdout (the normal state between a season
+    closing and the human edit that advances holdout_season) must not lend the holdout's
+    r_lo/r_hi the out-of-sample errors observed after the holdout period."""
+    from tests.synth_eval import SEASONS
+
+    ds = make_dataset(seasons=[*SEASONS, "2026Q4"])
+    s = settings.model_copy(update={"holdout_season": "2026Q2"})
+    df = runner.prepare_dataset(ds, "r_24h", s)
+    sub = df[df[D.decision_time] == "post_30m"].drop_duplicates(D.event_id).reset_index(drop=True)
+    sub = sub[sub[runner.Y].notna()].reset_index(drop=True)
+    folds, holdout, _, _ = runner._fold_plan(sub, s)
+    assert holdout is not None and {"2026Q3", "2026Q4"} <= {f.test_season for f in folds}
+    preds = runner._walk_forward(sub, runner.feature_columns(df), folds, "linear", s, holdout=holdout)
+    wf = preds[preds[P.fold] != ev.HOLDOUT_FOLD]
+    res = wf[P.r_true] - wf[P.r_hat]
+    before = res[wf[P.test_season] < "2026Q2"]
+    assert set(wf.loc[before.index, P.test_season]) == {"2025Q3", "2025Q4", "2026Q1"}
+    q10, q90 = np.quantile(before, [0.1, 0.9])
+    hp = preds[preds[P.fold] == ev.HOLDOUT_FOLD]
+    assert len(hp) and (hp[P.test_season] == "2026Q2").all()
+    assert np.allclose(hp[P.r_lo] - hp[P.r_hat], q10) and np.allclose(hp[P.r_hi] - hp[P.r_hat], q90)
+    all_q10, all_q90 = np.quantile(res, [0.1, 0.9])
+    assert not (np.isclose(q10, all_q10) and np.isclose(q90, all_q90))
+    # walk-forward folds still use the residuals of the folds before them, the first has none
+    first = wf[wf[P.fold] == 0]
+    assert first[P.r_lo].isna().all()
+    for fold in sorted(set(wf[P.fold]) - {0}):
+        part = wf[wf[P.fold] == fold]
+        season = part[P.test_season].iloc[0]
+        earlier = res[wf[P.test_season] < season]
+        assert np.allclose(part[P.r_lo] - part[P.r_hat], np.quantile(earlier, 0.1))
+
+
+def test_non_point_in_time_inputs_are_marked(settings, dataset):
+    """Design §5: the surprise group (vendor-final consensus) and perp_state.max_leverage (the
+    current cap) are not point-in-time; every run that has them in scope says so, with the
+    estimate_source breakdown of the trainable events."""
+    from freedom.features.groups import NON_POINT_IN_TIME
+
+    rng = np.random.default_rng(2)
+    ds = dataset.assign(**{"f_eps_surprise": rng.normal(size=len(dataset)), "f_eps_surprise__missing": 0.0,
+                           "f_max_leverage": 10.0, "f_max_leverage__missing": 0.0})
+    assert E.estimate_source not in ds.columns
+    ids = ds[D.event_id].astype(str)
+    calendar = pd.DataFrame({E.event_id: ids.unique(), E.t0: ds.drop_duplicates(D.event_id)[E.t0].to_numpy()})
+    calendar[E.estimate_source] = np.where(np.arange(len(calendar)) % 3 == 0, "consensus_snapshot", "fmp_final")
+    calendar.loc[calendar.index[:2], E.estimate_source] = None
+    summary = ev.evaluate(settings, ds, model_names=["zero", "linear"], decision_times=["pre_5m", "post_30m"],
+                          paths=make_paths(ds), n_boot=10, events=calendar)
+    # both groups are admissible at post_30m, only perp_state at pre_5m
+    assert summary["non_point_in_time_groups"] == {g: NON_POINT_IN_TIME[g] for g in ("perp_state", "surprise")}
+    assert summary["cohorts"]["post_30m"]["non_point_in_time_groups"] == ["perp_state", "surprise"]
+    assert summary["cohorts"]["pre_5m"]["non_point_in_time_groups"] == ["perp_state"]
+    # estimate_source joined from the events calendar when the dataset predates the column
+    counts = summary["cohorts"]["post_30m"]["estimate_source"]
+    n_trainable = summary["cohorts"]["post_30m"]["n_trainable"]
+    assert set(counts) <= {"consensus_snapshot", "fmp_final", "missing"} and sum(counts.values()) == n_trainable
+    assert counts["fmp_final"] > counts["consensus_snapshot"] > 0
+    preds = pd.read_parquet(settings.reports_dir / summary["run_id"] / "predictions.parquet")
+    assert E.estimate_source in preds.columns and set(preds[E.estimate_source].dropna()) == {"consensus_snapshot", "fmp_final"}
+    notes = [n for n in summary["notes"] if "non-point-in-time" in n]
+    assert len(notes) == 2 and any(n.startswith("post_30m:") and "surprise" in n and "linear" in n for n in notes)
+    md = (settings.reports_dir / summary["run_id"] / "leaderboard.md").read_text()
+    assert "Non-point-in-time inputs: **perp_state**" in md and "**surprise**" in md
+    assert "Non-point-in-time inputs in scope at post_30m: perp_state, surprise" in md and "fmp_final:" in md
+    # a dataset that carries the column itself is used as is; without either source the count is 'unavailable'
+    with_col = ds.assign(**{E.estimate_source: "nasdaq_final"})
+    summary2 = ev.evaluate(settings, with_col, model_names=["zero"], decision_times=["post_30m"],
+                           paths=make_paths(ds), n_boot=10, events=calendar)
+    assert summary2["cohorts"]["post_30m"]["estimate_source"] == {"nasdaq_final": n_trainable}
+    assert not any("non-point-in-time" in n for n in summary2["notes"])  # no learner consumed them
+    summary3 = ev.evaluate(settings, ds, model_names=["zero"], decision_times=["post_30m"], paths=make_paths(ds), n_boot=10)
+    assert summary3["cohorts"]["post_30m"]["estimate_source"] == {"unavailable": n_trainable}
+    assert ev.non_point_in_time_in_scope(["f_a", "f_eps_surprise"], "pre_5m") == {}
+    assert list(ev.non_point_in_time_in_scope(["f_a", "f_eps_surprise"], "post_60m")) == ["surprise"]
+    assert ev.non_point_in_time_in_scope(["f_funding_rate"], "pre_5m") == {}  # perp_state without max_leverage
+    assert ev.estimate_source_counts(pd.DataFrame({E.estimate_source: ["fmp_final", None, np.nan, "fmp_final"]})) == {"fmp_final": 2, "missing": 2}
+    nullable = pd.DataFrame({E.estimate_source: pd.array(["fmp_final", pd.NA], dtype="string")})
+    assert ev.estimate_source_counts(nullable) == {"fmp_final": 1, "missing": 1}
+    assert ev.estimate_source_counts(pd.DataFrame({"x": [1, 2]})) == {"unavailable": 2}
 
 
 class _Recorder(models_mod.BaseModel):
@@ -641,14 +755,20 @@ def test_dataset_sha256_of_the_parquet_file_is_used_when_it_exists(settings, dat
 
 
 # ---- final: holdout scoring ----------------------------------------------------------------------------
-def _clean_holdout(dataset: pd.DataFrame) -> pd.DataFrame:
-    """Holdout rows with complete targets (drop the target_missing events of that season)."""
-    drop = dataset[(dataset["season"] == "2026Q3") & dataset["target_missing"]][D.event_id].unique()
-    return dataset[~dataset[D.event_id].isin(drop)].reset_index(drop=True)
+def _unobservable_24h(dataset: pd.DataFrame, event_id: str) -> pd.DataFrame:
+    """`dataset` with the event's +24h label blanked the way targets.compute_targets does when
+    the checkpoint bar is missing: price_source (and p0) resolved, r_24h / direction NaN,
+    target_missing True."""
+    out = dataset.copy()
+    rows = out[D.event_id] == event_id
+    out.loc[rows, [T.r("24h"), T.ar("24h"), T.direction, T.magnitude]] = np.nan
+    out.loc[rows, "target_missing"] = True
+    assert out.loc[rows, T.price_source].notna().all()
+    return out
 
 
 def test_final_refuses_an_open_holdout_season(settings, dataset):
-    clean = _clean_holdout(dataset)
+    clean = dataset  # the synthetic holdout season has complete targets for every event
     paths = make_paths(clean)
     with pytest.raises(ev.HoldoutNotReady, match="future"):
         ev.evaluate(settings, clean, model_names=["zero"], decision_times=["post_30m"], final=True, paths=paths,
@@ -678,14 +798,20 @@ def test_final_refuses_an_open_holdout_season(settings, dataset):
                     now=pd.Timestamp("2026-12-01", tz=UTC), n_boot=20)
     settings.events_path.unlink()
     assert not settings.holdout_log_path.exists() and not any(settings.reports_dir.iterdir())
-    # every holdout event closed, but one has missing targets
-    missing = clean.copy()
-    first_holdout = missing[missing["season"] == "2026Q3"].index[:2]
-    missing.loc[first_holdout, "target_missing"] = True
-    missing.loc[first_holdout, [T.r("24h"), T.direction]] = np.nan
+    # every holdout event closed, but one has missing targets and no resolved price path (the
+    # fetch never completed): complete the dataset first
+    first_id = str(clean.loc[clean["season"] == "2026Q3", D.event_id].iloc[0])
+    missing = _unobservable_24h(clean, first_id)
+    missing.loc[missing[D.event_id] == first_id, T.price_source] = None
     with pytest.raises(ev.HoldoutNotReady, match="missing or pending"):
         ev.evaluate(settings, missing, model_names=["zero"], decision_times=["post_30m"], final=True,
                     paths=make_paths(missing), now=pd.Timestamp("2026-12-01", tz=UTC), n_boot=20)
+    # a resolved path whose p0 could not be found is a gap too, not an unobservable label
+    with_p0 = _unobservable_24h(clean, first_id).assign(**{T.p0: 100.0})
+    with_p0.loc[with_p0[D.event_id] == first_id, T.p0] = np.nan
+    with pytest.raises(ev.HoldoutNotReady, match="missing or pending"):
+        ev.check_holdout_ready(runner.prepare_dataset(with_p0, "r_24h", settings), settings,
+                               pd.Timestamp("2026-12-01", tz=UTC))
     pending = clean.copy()
     pending[E.pending] = pending["season"] == "2026Q3"
     with pytest.raises(ev.HoldoutNotReady, match="missing or pending"):
@@ -699,14 +825,22 @@ def test_final_refuses_an_open_holdout_season(settings, dataset):
 
 
 def test_final_scores_the_holdout_once_and_logs_it(settings, dataset):
-    clean = _clean_holdout(dataset)
+    # one holdout event has a resolved FMP-proxy path but no +24h label by construction (a
+    # Friday AMC release: t0 + 24h falls on Saturday, design §2); it must not block the run
+    holdout_ids = dataset.loc[dataset["season"] == "2026Q3", D.event_id].astype(str).unique()
+    gone = str(holdout_ids[3])
+    clean = _unobservable_24h(dataset, gone)
     paths, funding = make_paths(clean), make_funding()
     now = pd.Timestamp("2026-12-01", tz=UTC)
     summary = ev.evaluate(settings, clean, model_names=MODELS, decision_times=["post_30m"], final=True, paths=paths,
                           funding=funding, n_boot=30, now=now)
-    n_holdout = clean[(clean["season"] == "2026Q3") & (clean[D.decision_time] == "post_30m")][D.event_id].nunique()
+    hold_rows = clean[(clean["season"] == "2026Q3") & (clean[D.decision_time] == "post_30m")]
+    n_holdout = hold_rows.loc[~hold_rows["target_missing"], D.event_id].nunique()
+    assert n_holdout == len(holdout_ids) - 1
     assert summary["final"] is True and summary["holdout"]["scorings_before"] == 0
     assert summary["holdout"]["scorings_after"] == 1 and summary["holdout"]["scored_now"] is True
+    assert summary["holdout"]["n_unobservable_24h"] == 1 and summary["holdout"]["unobservable_24h"] == [gone]
+    assert any("no +24h label by construction" in n and gone in n for n in summary["notes"])
     hold = summary["holdout_results"]["post_30m"]["models"]
     cell = hold["linear"]["subsets"]["all"]
     assert cell["n"] == n_holdout
@@ -727,7 +861,13 @@ def test_final_scores_the_holdout_once_and_logs_it(settings, dataset):
     preds = pd.read_parquet(settings.reports_dir / summary["run_id"] / "predictions.parquet")
     hp = preds[preds[P.fold] == ev.HOLDOUT_FOLD]
     assert set(hp[P.test_season]) == {"2026Q3"} and len(hp) == n_holdout * len(MODELS)
+    assert gone not in set(hp[P.event_id].astype(str))
     assert (preds.loc[preds[P.fold] >= 0, P.test_season] != "2026Q3").all()
+    # the holdout band comes from the walk-forward residuals, all of which precede the holdout here
+    wf = preds[(preds[P.model] == "linear") & (preds[P.fold] >= 0)]
+    lin_h = hp[hp[P.model] == "linear"]
+    q10 = np.quantile(wf[P.r_true] - wf[P.r_hat], 0.1)
+    assert np.allclose(lin_h[P.r_lo] - lin_h[P.r_hat], q10)
     lines = [json.loads(ln) for ln in settings.holdout_log_path.read_text().splitlines() if ln.strip()]
     assert len(lines) == 1
     rec = lines[0]
@@ -752,7 +892,7 @@ def test_train_final_saves_model_with_provenance(settings, dataset):
     assert meta["decision_time"] == "post_30m" and meta["model"] == "linear" and meta["target"] == "r_24h"
     assert len(meta["dataset_sha256"]) == 64 and meta["git_sha"] and len(meta["config_hash"]) == 64
     assert meta["dataset_hash_source"] == "content"  # no dataset.parquet in this data_dir
-    assert meta["trained_at"] and meta["schema_version"] == 2
+    assert meta["trained_at"] and meta["schema_version"] == SCHEMA_VERSION
     sub = dataset[(dataset[D.decision_time] == "post_30m") & (dataset["season"] != "2026Q3")]
     trainable = sub[(sub[E.t0_confidence] >= settings.min_t0_confidence) & ~sub["target_missing"]]
     perp = trainable[trainable[E.has_perp_at_t0]]

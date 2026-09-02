@@ -47,9 +47,11 @@ REGISTRY: dict[str, tuple[GroupFn, tuple[str, ...]]] = {}
 PHASES = ("pre", "post")
 TARGET_MISSING = "target_missing"  # dataset column: True when r_24h is NaN
 SEASON = "season"
-# event metadata carried into the dataset next to the features (docs/design.md §6, §8)
+# event metadata carried into the dataset next to the features (docs/design.md §6, §8);
+# estimate_source says whether the surprise inputs were point-in-time (consensus_snapshot) or the
+# vendor's final value, so evaluate / optimize can report the breakdown (groups.NON_POINT_IN_TIME)
 META_COLUMNS: list[str] = [E.underlying, E.market, E.t0, E.t0_source, E.t0_confidence, E.kind,
-                           E.timing, E.has_perp_at_t0]
+                           E.timing, E.has_perp_at_t0, E.estimate_source]
 
 
 def feature_group(name: str, admissible: tuple[str, ...] = ("pre", "post")):

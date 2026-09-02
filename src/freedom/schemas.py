@@ -211,7 +211,10 @@ class P:
     direction_true = "direction_true"
 
 
-SCHEMA_VERSION = 2  # bump when any artifact's columns change; written into every parquet's metadata
+SCHEMA_VERSION = 3  # bump when any artifact's columns change; written into every parquet's metadata
+# 3 (2026-09-02): estimate_source joins dataset.parquet and predictions.parquet, trades.parquet gains
+# `headline`; a dataset stamped 2 still evaluates (eval.runner.attach_estimate_source fills the
+# column from the events calendar, else reports it as 'unavailable').
 
 
 def season_of(ts) -> str:

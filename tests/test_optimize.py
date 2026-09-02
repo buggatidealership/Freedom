@@ -202,10 +202,15 @@ def fake_regression_metrics(r_hat, r_true):
 
 @pytest.fixture
 def fake_features(monkeypatch):
-    """The v1 groups registered with their admissibility and declared keys (FAKE_GROUPS)."""
+    """The v1 groups registered with their admissibility and declared keys (FAKE_GROUPS); the
+    non-point-in-time declarations are the real ones (features.groups)."""
+    from freedom.features import groups as real_groups
+
     monkeypatch.setattr(features_mod, "REGISTRY", {name: ((lambda ctx: {}), adm) for name, (adm, _) in FAKE_GROUPS.items()})
     monkeypatch.setattr(features_mod, "groups",
-                        SimpleNamespace(GROUP_KEYS={name: keys for name, (_, keys) in FAKE_GROUPS.items()}),
+                        SimpleNamespace(GROUP_KEYS={name: keys for name, (_, keys) in FAKE_GROUPS.items()},
+                                        NON_POINT_IN_TIME=dict(real_groups.NON_POINT_IN_TIME),
+                                        NON_POINT_IN_TIME_KEYS=dict(real_groups.NON_POINT_IN_TIME_KEYS)),
                         raising=False)
     return monkeypatch
 
@@ -383,17 +388,24 @@ def test_run_study_persists_reports_and_never_scores_the_holdout(patched, small_
     assert board["state"].eq("complete").sum() == res["n_trials"]
     assert not any(forbidden & set(json.loads(p)) for p in board["params"])
     assert board.loc[board["rank"] == 1, "value"].iloc[0] == pytest.approx(res["best_value"])
-    # baseline comparison and noise probability
+    # baseline comparison and noise probability: four test seasons are too few for season
+    # blocks (eval.MIN_BLOCKS), so the paired bootstrap blocks by UTC day of t0 as evaluate does
     assert res["baseline_name"] in {"zero", "base_rate"}
     assert res["improvement"] == pytest.approx(res["baseline_value"] - res["best_value"])
-    assert 0.0 <= res["p_noise"] <= 1.0
+    assert 0.0 <= res["p_noise"] <= 1.0 and res["n_folds"] < eval_mod.MIN_BLOCKS <= res["n_seasons"]
+    assert res["p_noise_resampling"] == "block:day"
+    # nothing non-point-in-time is admissible at pre_5m; this dataset predates estimate_source
+    assert res["non_point_in_time_groups"] == []
+    assert res["estimate_source_counts"] == {"unavailable": res["n_events"]}
     # reports
     out = small_settings.reports_dir / "optimize" / "freedom_pre_5m_brier"
     text = (out / "leaderboard.md").read_text()
     assert "never scored" in text and f"holdout {HOLDOUT}" in text and "p_noise" in text
+    assert "resampling block:day" in text and "non-point-in-time groups: none" in text
     best = json.loads((out / "best_params.json").read_text())
     assert best["best_params"] == res["best_params"] and best["test_set_hash"] == res["test_set_hash"]
-    assert best["n_trials"] == res["n_trials"]
+    assert best["n_trials"] == res["n_trials"] and best["p_noise_resampling"] == "block:day"
+    assert best["non_point_in_time_groups"] == [] and best["estimate_source_counts"] == res["estimate_source_counts"]
 
 
 def test_resume_adds_trials_to_the_same_study(patched, small_settings):
@@ -403,6 +415,29 @@ def test_resume_adds_trials_to_the_same_study(patched, small_settings):
     assert second["n_trials"] + second["n_pruned"] + second["n_failed"] == 6
     assert second["test_set_hash"] == first["test_set_hash"]
     assert len(opt.leaderboard(small_settings, "post_30m")) == 6
+
+
+def test_non_point_in_time_groups_are_marked(patched, small_settings):
+    """The surprise group (vendor-final consensus) is admissible at post_30m: the result and
+    the leaderboard list it, and a best trial that used it is flagged."""
+    ds = make_dataset()
+    ds[E.estimate_source] = np.where(ds[D.event_id].str.endswith("-1"), "consensus_snapshot", "fmp_final")
+    res = opt.run_study(small_settings, ds, decision_time="post_30m", n_trials=6)
+    assert res["non_point_in_time_groups"] == ["surprise"]
+    assert set(res["estimate_source_counts"]) == {"consensus_snapshot", "fmp_final"}
+    assert sum(res["estimate_source_counts"].values()) == res["n_events"]
+    text = (small_settings.reports_dir / "optimize" / "freedom_post_30m_brier" / "leaderboard.md").read_text()
+    assert "non-point-in-time groups: surprise" in text and "fmp_final:" in text and "vendor's final consensus" in text
+    flagged = "⚠ uses non-point-in-time groups: surprise" in text
+    assert flagged == bool(res["best_params"].get("use_surprise"))
+    best = json.loads((small_settings.reports_dir / "optimize" / "freedom_post_30m_brier" / "best_params.json").read_text())
+    assert best["non_point_in_time_groups"] == ["surprise"]
+    # the attribution follows the declared keys, not the group name
+    groups = {"surprise": ["f_eps_surprise", "f_eps_surprise__missing"], "perp_state": ["f_funding_rate"],
+              "calendar": ["f_amc"]}
+    assert opt.non_point_in_time_groups(groups) == ["surprise"]
+    groups["perp_state"].append("f_max_leverage")
+    assert opt.non_point_in_time_groups(groups) == ["perp_state", "surprise"]
 
 
 def test_resumed_study_on_a_different_test_set_aborts(patched, small_settings):
@@ -452,5 +487,38 @@ def test_p_noise_is_low_for_a_clear_edge_and_high_for_none(patched):
                           "test_season": np.repeat(["a", "b", "c", "d"], n // 4),
                           "p_up": np.where(y > 0, 0.8, 0.2), "r_hat": 0.0, "r_true": y * 0.01, "direction_true": y})
     base = frame.assign(p_up=0.5)
-    assert opt.p_noise_bootstrap(frame, base, "brier", n=200) == 0.0
-    assert opt.p_noise_bootstrap(base, base, "brier", n=200) == 1.0
+    # four seasons and no t0: neither block structure has MIN_BLOCKS labels, so events are iid
+    assert opt.p_noise_bootstrap(frame, base, "brier", n=200) == (0.0, "iid")
+    assert opt.p_noise_bootstrap(base, base, "brier", n=200) == (1.0, "iid")
+
+
+def test_p_noise_uses_the_evaluate_resampling_scheme(patched):
+    """docs/design.md §8: season blocks with at least MIN_BLOCKS seasons, else UTC-day-of-t0
+    blocks (same-day dependence kept), else iid rows; the scheme is reported."""
+    rng = np.random.default_rng(2)
+    n = 200
+    y = rng.choice([-1.0, 1.0], size=n)
+    signal = np.where(y > 0, 0.53, 0.47) + rng.normal(scale=0.15, size=n)  # a faint edge: p_noise mid-range
+    frame = pd.DataFrame({"event_id": [f"e{i}" for i in range(n)], "fold": 0,
+                          "test_season": np.repeat(["a", "b", "c", "d"], n // 4),
+                          "p_up": np.clip(signal, 0.01, 0.99), "r_hat": 0.0, "r_true": y * 0.01, "direction_true": y})
+    base = frame.assign(p_up=0.5)
+    assert eval_mod.MIN_BLOCKS == 5
+    # four seasons, ten distinct UTC days: day blocks
+    days = pd.Timestamp("2026-03-02", tz="UTC") + pd.to_timedelta(np.arange(n) % 10, unit="D")
+    with_days = frame.assign(t0=days)
+    p_day, scheme_day = opt.p_noise_bootstrap(with_days, base.assign(t0=days), "brier", n=300)
+    assert scheme_day == "block:day" and 0.0 < p_day < 1.0
+    # five seasons: season blocks take precedence over the day labels
+    five = frame.assign(test_season=np.repeat(["a", "b", "c", "d", "e"], n // 5), t0=days)
+    p_season, scheme_season = opt.p_noise_bootstrap(five, base.assign(test_season=five["test_season"], t0=days), "brier", n=300)
+    assert scheme_season == "block:season" and 0.0 < p_season < 1.0
+    # the same t0 on every row gives one day label: iid rows, never a degenerate one-block draw
+    same_day = frame.assign(t0=pd.Timestamp("2026-03-02 20:30", tz="UTC"))
+    p_iid, scheme_iid = opt.p_noise_bootstrap(same_day, base.assign(t0=same_day["t0"]), "brier", n=300)
+    assert scheme_iid == "iid" and 0.0 < p_iid < 1.0
+    # the three schemes really resample differently, and a run is reproducible
+    assert len({round(p_day, 6), round(p_season, 6), round(p_iid, 6)}) == 3
+    assert opt.p_noise_bootstrap(with_days, base.assign(t0=days), "brier", n=300) == (p_day, scheme_day)
+    with pytest.raises(opt.TestSetMismatch):
+        opt.p_noise_bootstrap(frame, base.iloc[:-1], "brier", n=10)

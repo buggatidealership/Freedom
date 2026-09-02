@@ -194,11 +194,28 @@ def leaderboard_markdown(summary: dict[str, Any]) -> str:
                  "holdout can never use season blocks).")
     lines.append("")
     if summary.get("capital_rule"):
-        lines.append(f"Trading columns: {summary['capital_rule']}.")
+        lines.append(f"Trading columns: {summary['capital_rule']}. They are computed on the rows of the row's "
+                     "`subset` (summary `trading_subsets`); trades.parquet keeps every simulated row with a "
+                     "`headline` flag.")
         lines.append("")
+    non_pit = summary.get("non_point_in_time_groups") or {}
+    if non_pit:
+        lines.append("Non-point-in-time inputs: " + "; ".join(f"**{g}**: {reason}" for g, reason in non_pit.items())
+                     + ". Every learner is fitted on every feature column, so the trained models below consumed "
+                     "them; the estimate_source counts under each decision time say how many trainable events "
+                     "carried a vendor-final consensus instead of a point-in-time snapshot.")
+        lines.append("")
+    cohorts = summary.get("cohorts") or {}
     for d, per_model in (summary.get("results") or {}).items():
         lines.append(f"## {d}")
         lines.append("")
+        cohort = cohorts.get(d) or {}
+        in_scope = cohort.get("non_point_in_time_groups") or []
+        if in_scope or cohort.get("estimate_source"):
+            counts = ", ".join(f"{k}: {v}" for k, v in (cohort.get("estimate_source") or {}).items()) or "–"
+            lines.append(f"Non-point-in-time inputs in scope at {d}: {', '.join(in_scope) or 'none'} · "
+                         f"estimate_source of trainable events: {counts}")
+            lines.append("")
         lines.append("| model | subset | n | resampling | accuracy [95% CI] | brier [95% CI] | IC | MAE | magnitude MAE | Δbrier vs best baseline [95% CI] | MDE (brier) | verdict | sharpe (fixed) | mean net (bp, fixed) |")
         lines.append("|---|---|---:|---|---|---|---:|---:|---:|---|---:|---|---:|---:|")
         for model, res in per_model.items():
@@ -206,7 +223,8 @@ def leaderboard_markdown(summary: dict[str, Any]) -> str:
             subset = "headline" if subsets.get("headline", {}).get("n") else "all"
             cell = subsets.get(subset) or {}
             comp = (cell.get("comparison") or {}).get("brier")
-            trading = (res.get("trading") or {}).get("fixed") or {}
+            # the trading columns describe the same rows as the metric cell of this row
+            trading = (((res.get("trading_subsets") or {}).get(subset) or res.get("trading") or {}).get("fixed") or {})
             mean_pnl = (trading.get("mean_pnl") or {}).get("point")
             if comp:
                 delta = f"{_fmt(comp.get('improvement'), 4)}{_fmt_ci(comp.get('ci'), 4)} vs {comp.get('baseline')}"

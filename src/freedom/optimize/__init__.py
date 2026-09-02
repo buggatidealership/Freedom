@@ -26,9 +26,14 @@ How a trial is scored
   features registry (features.groups.GROUP_KEYS), not by a naming convention; a column no
   registered group declares is an error, never a group of its own.
 * Baselines (models registry, docs/design.md §7) are scored on the same folds; the best one per
-  objective is the reference. `p_noise` is the share of season-block bootstrap resamples in
-  which the best trial does not beat that baseline (paired, same events). It does not correct
-  for the best-of-N selection over trials, and the leaderboard says so.
+  objective is the reference. `p_noise` is the share of paired bootstrap resamples (same
+  events; the §8 scheme shared with evaluate: season blocks with at least eval.MIN_BLOCKS
+  seasons, else UTC-day-of-t0 blocks, else iid rows, recorded as `p_noise_resampling`) in
+  which the best trial does not beat that baseline. It does not correct for the best-of-N
+  selection over trials, and the leaderboard says so.
+* Groups that are not point-in-time (features.groups.NON_POINT_IN_TIME: surprise, and
+  perp_state through max_leverage) are listed in the result and the leaderboard, and a best
+  trial that used one is flagged, with the estimate_source breakdown of the scored rows.
 """
 
 from __future__ import annotations
@@ -229,6 +234,32 @@ def feature_groups(columns, decision_time: str) -> dict[str, list[str]]:
     return {g: sorted(cols) for g, cols in sorted(out.items())}
 
 
+def non_point_in_time_groups(groups: dict[str, list[str]]) -> list[str]:
+    """The groups among `groups` (feature_groups output) whose columns include a
+    non-point-in-time key as the features module declares them
+    (features.groups.NON_POINT_IN_TIME_KEYS): the surprise group, and perp_state when it
+    carries max_leverage. Sorted; empty when the features module declares none."""
+    declared = getattr(getattr(features_mod, "groups", None), "NON_POINT_IN_TIME_KEYS", None) or {}
+    prefix, suffix = D.feature_prefix, D.missing_suffix
+    out = []
+    for g, cols in groups.items():
+        keys = set(declared.get(g, ()))
+        if keys and any(str(c)[len(prefix):].removesuffix(suffix) in keys for c in cols):
+            out.append(g)
+    return sorted(out)
+
+
+def non_point_in_time_reasons() -> dict[str, str]:
+    """features.groups.NON_POINT_IN_TIME as the features module declares it ({} when absent)."""
+    return dict(getattr(getattr(features_mod, "groups", None), "NON_POINT_IN_TIME", None) or {})
+
+
+def estimate_source_counts(rows: pd.DataFrame) -> dict[str, int]:
+    """{estimate_source: n} over the scored rows (eval.estimate_source_counts: 'missing' for an
+    event without a value, 'unavailable' when the dataset predates the column)."""
+    return eval_mod.estimate_source_counts(rows)
+
+
 # ---- data preparation --------------------------------------------------------------------------
 def prepare_rows(settings: Settings, dataset: pd.DataFrame, decision_time: str) -> pd.DataFrame:
     """Rows of one decision time that can be scored: confidence floor applied, r_24h present,
@@ -328,6 +359,7 @@ def oos_predictions(settings: Settings, rows: pd.DataFrame, groups: dict[str, li
             raise TrialFailed(f"fold {fold.fold}: model returned {len(p_up)}/{len(r_hat)} predictions for {len(test)} rows")
         out.append(pd.DataFrame({
             P.event_id: test[D.event_id].to_numpy(), P.fold: fold.fold, P.test_season: fold.test_season,
+            E.t0: test[E.t0].to_numpy(),  # the p_noise bootstrap blocks by UTC day of t0 when seasons are few
             P.p_up: p_up, P.r_hat: r_hat,
             P.r_true: test[LABEL_RETURN].astype(float).to_numpy(),
             P.direction_true: test[LABEL_DIRECTION].astype(float).to_numpy(),
@@ -351,36 +383,39 @@ def improvement_of(value: float, baseline: float, objective: str) -> float:
 
 
 def p_noise_bootstrap(best: pd.DataFrame, base: pd.DataFrame, objective: str, *,
-                      n: int = N_BOOTSTRAP, seed: int = 7) -> float:
-    """Share of paired bootstrap resamples in which the best trial fails to beat the baseline.
-    Blocks are test seasons when there are at least three of them, single events otherwise."""
+                      n: int = N_BOOTSTRAP, seed: int = 7) -> tuple[float, str]:
+    """(p_noise, resampling): the share of paired bootstrap resamples in which the best trial
+    fails to beat the baseline, and the scheme used. The blocks are the ones evaluate uses
+    (docs/design.md §8, eval.choose_blocks): test seasons when at least eval.MIN_BLOCKS of them
+    exist, else UTC days of t0 (same-day dependence kept; needs the t0 column oos_predictions
+    writes), else iid events. Resamples whose score is degenerate (one class only, non-finite)
+    are skipped, not counted."""
     m = best.merge(base[[P.event_id, P.p_up, P.r_hat]], on=P.event_id, suffixes=("", "_base"))
     if len(m) != len(best) or len(m) != len(base):
         raise TestSetMismatch("best trial and baseline were scored on different event sets")
-    seasons = m[P.test_season].to_numpy()
-    blocks = [np.flatnonzero(seasons == s) for s in np.unique(seasons)]
-    if len(blocks) < 3:
-        blocks = [np.array([i]) for i in range(len(m))]
-    rng = np.random.default_rng(seed)
+    season = m[P.test_season].astype(str)
+    if E.t0 in m.columns:
+        day = pd.to_datetime(m[E.t0], utc=True).dt.strftime("%Y-%m-%d").fillna("NaT")
+    else:
+        day = pd.Series("NaT", index=m.index)
+    scheme, block = eval_mod.choose_blocks([("block:season", season), ("block:day", day)])
     base_cols = pd.DataFrame({P.p_up: m[P.p_up + "_base"], P.r_hat: m[P.r_hat + "_base"],
                               P.r_true: m[P.r_true], P.direction_true: m[P.direction_true]})
     best_cols = m[[P.p_up, P.r_hat, P.r_true, P.direction_true]]
-    worse = 0
-    done = 0
-    for _ in range(n):
-        pick = rng.integers(0, len(blocks), size=len(blocks))
-        idx = np.concatenate([blocks[i] for i in pick])
+
+    def stat(v: pd.Series) -> float:
+        idx = v.to_numpy(dtype=int)
         try:
-            v_best = score(best_cols.iloc[idx], objective)
-            v_base = score(base_cols.iloc[idx], objective)
-        except ValueError:  # a degenerate resample (one class only) is skipped, not counted
-            continue
+            v_best, v_base = score(best_cols.iloc[idx], objective), score(base_cols.iloc[idx], objective)
+        except ValueError:
+            return math.nan
         if not (math.isfinite(v_best) and math.isfinite(v_base)):
-            continue
-        done += 1
-        if improvement_of(v_best, v_base, objective) <= 0:
-            worse += 1
-    return worse / done if done else float("nan")
+            return math.nan
+        return improvement_of(v_best, v_base, objective)
+
+    dist = eval_mod.bootstrap_distribution(pd.Series(np.arange(len(m))), stat, n=n, block=block, seed=seed)
+    finite = dist[np.isfinite(dist)]
+    return (float(np.mean(finite <= 0)) if len(finite) else float("nan"), scheme)
 
 
 # ---- study --------------------------------------------------------------------------------------
@@ -445,8 +480,11 @@ def run_study(settings: Settings, dataset: pd.DataFrame, *, decision_time: str, 
     ar_24h), training-window length in seasons. Persists to settings.optuna_db under study name
     f"freedom_{decision_time}_{objective}". Writes reports/optimize/<study>/leaderboard.md and
     best_params.json; returns {study, best_value, best_params, n_trials, baseline_value,
-    improvement, p_noise} where p_noise is the bootstrap probability that the improvement over
-    the best baseline is noise."""
+    improvement, p_noise, p_noise_resampling, non_point_in_time_groups, estimate_source_counts,
+    ...} where p_noise is the bootstrap probability that the improvement over the best baseline
+    is noise (p_noise_bootstrap), non_point_in_time_groups the admissible groups that carry an
+    input not knowable at t0 and estimate_source_counts the consensus provenance of the scored
+    rows."""
     if objective not in OBJECTIVES:
         raise ValueError(f"unknown objective {objective!r}; choose from {sorted(OBJECTIVES)}")
     direction = OBJECTIVES[objective][1]
@@ -521,10 +559,12 @@ def run_study(settings: Settings, dataset: pd.DataFrame, *, decision_time: str, 
         "holdout_season": settings.holdout_season, "test_set_hash": ref_hash,
         "dataset_hash": dataset_hash(rows), "groups": list(groups), "targets": list(targets),
         "has_perp_share": share_true(rows[E.has_perp_at_t0]) if E.has_perp_at_t0 in rows.columns else float("nan"),
+        "non_point_in_time_groups": non_point_in_time_groups(groups),
+        "estimate_source_counts": estimate_source_counts(rows),
         "best_value": None, "best_params": None, "best_trial": None,
         "baseline_name": base[0] if base else None, "baseline_value": base[1] if base else None,
         "baselines": {k: v[0] for k, v in scores.items()},
-        "improvement": None, "p_noise": None,
+        "improvement": None, "p_noise": None, "p_noise_resampling": None,
         "report_dir": str(report_dir(settings, decision_time, objective)),
     }
     if complete:
@@ -534,7 +574,8 @@ def run_study(settings: Settings, dataset: pd.DataFrame, *, decision_time: str, 
             result["improvement"] = improvement_of(float(best.value), base[1], objective)
             cfg = TrialConfig.from_params(best.params, list(groups))
             best_preds = oos_predictions(settings, rows, groups, cfg, folds)
-            result["p_noise"] = p_noise_bootstrap(best_preds, base[2], objective, seed=settings.random_seed)
+            result["p_noise"], result["p_noise_resampling"] = p_noise_bootstrap(
+                best_preds, base[2], objective, seed=settings.random_seed)
     write_reports(settings, study, result)
     return result
 
@@ -584,20 +625,31 @@ def leaderboard_markdown(study: optuna.Study, result: dict) -> str:
                  f"dataset hash `{result['dataset_hash'][:12]}`")
     lines.append(f"- subset: t0_confidence ≥ floor, r_24h present, all price sources; "
                  f"has_perp_at_t0 share {_fmt(result['has_perp_share'], 2)}")
+    non_pit = list(result.get("non_point_in_time_groups") or [])
+    reasons = non_point_in_time_reasons()
     lines.append(f"- admissible feature groups at {d}: {', '.join(result['groups'])}; "
-                 f"target variants: {', '.join(result['targets'])}")
+                 f"target variants: {', '.join(result['targets'])}; non-point-in-time groups: "
+                 f"{', '.join(non_pit) or 'none'}")
+    if non_pit:
+        lines.append("- non-point-in-time inputs (docs/design.md §5, §6): "
+                     + "; ".join(f"{g}: {reasons.get(g, 'not knowable at t0')}" for g in non_pit)
+                     + "; estimate_source of the scored rows: "
+                     + (", ".join(f"{k}: {v}" for k, v in (result.get("estimate_source_counts") or {}).items()) or "n/a"))
     if result["best_value"] is not None:
         bp = result["best_params"]
         used = [g for g in result["groups"] if bp.get(f"use_{g}")]
+        tainted = [g for g in used if g in non_pit]
         lines.append(f"- best trial #{result['best_trial']}: {obj} {_fmt(result['best_value'])} "
                      f"({bp.get('model')}, target {bp.get('target')}, window {bp.get('train_window_seasons')} seasons, "
-                     f"groups {'+'.join(used) or 'none'})")
+                     f"groups {'+'.join(used) or 'none'})"
+                     + (f" ⚠ uses non-point-in-time groups: {', '.join(tainted)}" if tainted else ""))
     else:
         lines.append("- no trial completed; nothing to rank")
     if result["baseline_name"] is not None:
         lines.append(f"- best baseline: {result['baseline_name']} {_fmt(result['baseline_value'])} → improvement "
                      f"{_fmt(result['improvement'])} with {result['n_trials']} trials; "
-                     f"p_noise = {_fmt(result['p_noise'], 3)} ({N_BOOTSTRAP} paired season-block bootstraps)")
+                     f"p_noise = {_fmt(result['p_noise'], 3)} ({N_BOOTSTRAP} paired bootstraps, resampling "
+                     f"{result.get('p_noise_resampling') or 'n/a'})")
         lines.append("- read p_noise as: the chance the best trial's edge over that baseline on these "
                      "events is a resampling accident. It does not correct for choosing the best of "
                      f"{result['n_trials']} trials; only `freedom evaluate --final` scores the holdout.")

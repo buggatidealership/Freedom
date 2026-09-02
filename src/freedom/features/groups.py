@@ -704,3 +704,16 @@ GROUP_KEYS: dict[str, tuple[str, ...]] = {
     "market": MARKET_KEYS, "perp_state": PERP_KEYS, "surprise": SURPRISE_KEYS,
     "reaction": REACTION_KEYS,
 }
+
+# Inputs that are NOT point-in-time (docs/design.md §5, §6), by the group that emits them, with
+# the reason the reports print next to any run or trial that consumed them. NON_POINT_IN_TIME_KEYS
+# names the offending keys: every surprise key (the vendor's final consensus, not the consensus at
+# t0, for rows whose estimate_source is not consensus_snapshot) and perp_state's max_leverage
+# (the current cap). A dataset that carries none of these columns is not marked.
+NON_POINT_IN_TIME: dict[str, str] = {
+    "surprise": ("built from the vendor's final consensus for past events (estimate_source fmp_final / "
+                 "nasdaq_final; fmp_calendar for upcoming ones), not the consensus at t0; only "
+                 "consensus_snapshot rows are point-in-time"),
+    "perp_state": "max_leverage is the market's CURRENT leverage cap; Hyperliquid publishes no history",
+}
+NON_POINT_IN_TIME_KEYS: dict[str, tuple[str, ...]] = {"surprise": SURPRISE_KEYS, "perp_state": ("max_leverage",)}
