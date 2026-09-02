@@ -7,7 +7,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# Anchored to the repo root: an unanchored `data/` would also ignore src/freedom/data/.
 /data/
 !/data/.gitkeep
-reports/
+/reports/
 .env
