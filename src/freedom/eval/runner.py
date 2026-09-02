@@ -79,7 +79,8 @@ HIGHER_IS_BETTER = {"accuracy": True, "balanced_accuracy": True, "brier": False,
 SCORE_COLUMNS = {"accuracy": "hit", "brier": "brier", "log_loss": "ll", "mae": "ae", "magnitude_mae": "mag_ae"}
 MDE_PAIRED = "paired_se"  # MDE from the paired comparison's own standard error
 MDE_UPPER_BOUND = "closed_form_upper_bound"  # no comparison: the unpaired closed form (conservative)
-VERDICT_IDENTICAL = "identical_to_baseline"  # zero paired SE: the model reproduced the baseline exactly
+VERDICT_IDENTICAL = "identical_to_baseline"
+VERDICT_UNTRAINED = "untrained"  # zero paired SE: the model reproduced the baseline exactly
 MAX_NONFINITE_P_SHARE = 0.1  # a model returning more non-finite p_up than this is rejected
 HEADLINE_SOURCES = frozenset({T0Source.sec_8k.value, T0Source.manual.value, T0Source.detected.value})
 STRATA = (E.t0_source, E.kind, E.timing)
@@ -701,6 +702,18 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
                 hold_blocks[name] = preds[preds[P.fold] == HOLDOUT_FOLD].reset_index(drop=True)
         per_model, best, trades = _score_block(blocks, settings=settings, baselines=baselines, n_boot=n_boot,
                                                bar_index=bar_index, funding_fn=funding_fn)
+        # a learner that never saw MIN_TRAIN_ROWS trainable rows in any fold fell back to the
+        # base rate everywhere: its comparison says nothing about predictability
+        max_train = max((int(sub.loc[f.train_idx, TRAINABLE].sum()) for f in folds), default=0)
+        if max_train < MIN_TRAIN_ROWS:
+            for res in per_model.values():
+                if res.get("is_baseline"):
+                    continue
+                for cell in res["subsets"].values():
+                    for cmp in (cell.get("comparison") or {}).values():
+                        if isinstance(cmp, dict) and "verdict" in cmp:
+                            cmp["verdict"] = f"{VERDICT_UNTRAINED} (largest training fold {max_train} < {MIN_TRAIN_ROWS})"
+        extras[d]["max_train_rows"] = max_train
         results[d], best_baseline[d] = per_model, best
         trade_frames.append(trades.assign(block="walk_forward"))
         if final:
@@ -757,12 +770,12 @@ def _notes(results: dict[str, Any], extras: dict[str, Any], scorings_before: int
                     continue
                 n_cells += 1
                 n_inconclusive += str(cmp["verdict"]).startswith("inconclusive")
-                n_identical += str(cmp["verdict"]) == VERDICT_IDENTICAL
+                n_identical += str(cmp["verdict"]) == VERDICT_IDENTICAL or str(cmp["verdict"]).startswith(VERDICT_UNTRAINED)
         n_perp = extras.get(d, {}).get("n_has_perp", 0)
         if n_cells:
             note = (f"{d}: {n_inconclusive} of {n_cells} Brier comparisons are inconclusive at their n"
-                    + (f" and {n_identical} reproduced their baseline exactly (learners fall back to the "
-                       f"base rate below {MIN_TRAIN_ROWS} training rows)" if n_identical else "")
+                    + (f" and {n_identical} come from learners that were never trained (every fold below "
+                       f"{MIN_TRAIN_ROWS} training rows, so they reproduce the base rate)" if n_identical else "")
                     + f"; the perp-era cohort (has_perp_at_t0) holds {n_perp} events")
             if 2 * (n_inconclusive + n_identical) >= n_cells:
                 note += (", so with listings only since Nov 2025 this report is mostly inconclusive, "
