@@ -73,6 +73,11 @@ Every statement here was verified by a live request from the build environment o
   with no zone suffix.
 * `stable/historical-price-eod/full?symbol=&from=&to=`: daily bars back to at least 2020.
 * `stable/profile`, `stable/quote`, `stable/aftermarket-trade` (live after-hours trade) work.
+* `stable/splits?symbol=` lists splits (NFLX 10:1 on 2025-11-17). **Both EOD and intraday bars
+  are split-adjusted**: NFLX closed 2025-11-14 at 111.22 and opened 2025-11-17 at 110.75 in the
+  EOD series, and the 04:00 ET bar of 2025-11-14 prints 115.20, all on the post-split basis.
+  `xyz:NFLX` had no candles in November 2025 (listed later), so no perp split discontinuity has
+  been observed yet; the harness still flags events with an ex-date inside the window.
 * `stable/earning-call-transcript` is **restricted** on this plan. Rate-limit headers are not
   exposed; the free plan is documented at 250 requests/day (*assumed*). The client caches every
   response on disk and budgets requests per run.
