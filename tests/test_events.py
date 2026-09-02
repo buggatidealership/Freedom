@@ -31,6 +31,7 @@ from freedom.events import (
     CONFIDENCE_UNKNOWN,
     EVENT_COLUMNS,
     SNAPSHOT_COLUMNS,
+    UPCOMING_COLUMNS,
     ResolvedT0,
     build_events,
     consensus_path,
@@ -38,6 +39,7 @@ from freedom.events import (
     detect_release_from_bars,
     detect_release_live,
     expected_release_clock,
+    expected_t0_for,
     fiscal_period_for,
     load_events,
     project_quarter_end,
@@ -826,6 +828,62 @@ def test_upcoming_expected_t0_fallbacks(settings, fake):
     up = upcoming_events(settings, days=14).set_index(E.underlying)
     assert up.loc["TSM", "expected_t0"] == pd.Timestamp("2026-09-11 12:30", tz="UTC")
     assert up.loc["TSM", "expected_t0_source"] == "events table: manual"
+
+
+def _sec_8k_row(event_id: str, day: str, acceptance_utc: str, **over) -> dict:
+    acc = pd.Timestamp(acceptance_utc, tz="UTC")
+    row = {E.event_id: event_id, E.underlying: "NVDA", E.market: XYZ_NVDA, E.report_date_ny: date.fromisoformat(day),
+           E.t0: acc, "t0_acceptance": acc, E.t0_source: "sec_8k", E.timing: "AMC", E.pending: False, E.flags: ""}
+    row.update(over)
+    return row
+
+
+def test_expected_release_clock_before_gate_and_expected_t0_chain():
+    # New York clocks: 16:30 (Feb), 16:20 (May), the event's own 16:50 (Aug), a later 16:40 (Nov)
+    ev = pd.DataFrame([_sec_8k_row("NVDA:2026-01", "2026-02-25", "2026-02-25 21:30:00"),
+                       _sec_8k_row("NVDA:2026-04", "2026-05-28", "2026-05-28 20:20:00"),
+                       _sec_8k_row("NVDA:2026-07", "2026-08-26", "2026-08-26 20:50:00"),
+                       _sec_8k_row("NVDA:2026-10", "2026-11-18", "2026-11-18 21:40:00")])
+    assert expected_release_clock(ev, "NVDA") == ("16:35", "median of 4 sec_8k acceptances")
+    before = pd.Timestamp("2026-08-26 20:00", tz="UTC")  # the pre_5m decision clock of the August event
+    assert expected_release_clock(ev, "NVDA", before=before) == ("16:25", "median of 2 sec_8k acceptances")
+    assert expected_release_clock(ev, "NVDA", before=pd.Timestamp("2026-01-01", tz="UTC")) is None
+    assert expected_release_clock(ev.drop(columns=[E.t0_source]), "NVDA") is None
+    # the gate flows through expected_t0_for
+    d = date(2026, 8, 26)
+    assert expected_t0_for(ev, "NVDA", d, before=before) == (ny("2026-08-26 16:25"), "median of 2 sec_8k acceptances")
+    # a resolved row's own t0 never seeds the expectation: the event's AMC/BMO class, else the AMC default
+    own = ev.iloc[[2]]
+    assert expected_t0_for(own, "NVDA", d, before=before, timing="BMO") == (ny("2026-08-26 07:00"),
+                                                                            "calendar-flag default for BMO")
+    assert expected_t0_for(own, "NVDA", d, before=before) == (ny("2026-08-26 16:05"), "calendar default (AMC)")
+    assert expected_t0_for(own, "NVDA", d, "time-pre-market", before=before, timing="AMC") == (
+        ny("2026-08-26 07:00"), "nasdaq flag 'time-pre-market' (BMO default)")
+    # a manual override on the row wins over everything; a calendar flag on it beats the defaults
+    manual = ev.assign(**{E.t0_source: ["sec_8k", "sec_8k", "manual", "sec_8k"]})
+    assert expected_t0_for(manual, "NVDA", d, before=before) == (pd.Timestamp("2026-08-26 20:50", tz="UTC"),
+                                                                 "events table: manual")
+    flagged = own.assign(**{E.t0_source: "calendar_flag", E.t0: ny("2026-08-26 07:00"), E.flags: "upcoming"})
+    assert expected_t0_for(flagged, "NVDA", d, before=before) == (ny("2026-08-26 07:00"), "events table: calendar_flag")
+
+
+def test_upcoming_events_carry_the_events_table_id(settings, fake):
+    write_universe(settings)
+
+    def cal_row(sym: str, day: str) -> dict:
+        return {"symbol": sym, "date": day, "epsActual": None, "epsEstimated": 2.47,
+                "revenueActual": None, "revenueEstimated": 1.0e11, "lastUpdated": "2026-09-02"}
+
+    fake.calendar = [cal_row("NVDA", "2026-11-18"), cal_row("TSM", "2026-09-11")]
+    build_events(settings, underlyings=["NVDA"], since=pd.Timestamp("2026-01-01"))
+    up = upcoming_events(settings, days=90)
+    assert list(up.columns) == UPCOMING_COLUMNS and up.columns[0] == E.event_id
+    by = up.set_index(E.underlying)
+    # the table's projected fiscal quarter (off-calendar fiscal year), not the calendar quarter's NVDA:2026-09
+    assert by.loc["NVDA", E.event_id] == "NVDA:2026-10" and pd.isna(by.loc["TSM", E.event_id])
+    from freedom.live import with_event_ids
+
+    assert with_event_ids(up)[E.event_id].tolist() == ["TSM:2026-06", "NVDA:2026-10"]
 
 
 def test_archiver_records_a_consensus_summary_row(settings, fake, monkeypatch):

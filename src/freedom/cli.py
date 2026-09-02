@@ -1,8 +1,10 @@
 """`freedom` command line. Every command is thin: parse args, call a module, print a table.
 
 Exit codes: 0 success; 2 a prerequisite is missing (an artifact another command writes, an API
-key, an exhausted daily budget) — the message names the command to run first; 3 nothing to
-predict yet (no release detected on the live bars). Anything else (a KeyError from a dataset
+key, an exhausted daily budget, too few events for a walk-forward fold) — the message names
+the command to run or the knob to change first; 3 nothing to predict yet (no release detected
+on the live bars); 4 `freedom archive --strict` finished but at least one item errored or lost
+bars past the server horizon (see the error column). Anything else (a KeyError from a dataset
 without target columns, an unknown model name, ...) is a bug or a data-shape problem and
 propagates with its traceback instead of a misleading "run X first" hint.
 """
@@ -26,6 +28,13 @@ console = Console()
 
 EXIT_PREREQUISITE = 2
 EXIT_NOTHING_TO_PREDICT = 3
+EXIT_ARCHIVE_INCOMPLETE = 4
+
+# `freedom evaluate --models` default: every registered baseline (eval.runner.DEFAULT_BASELINES,
+# so the magnitude forecasts are scored against hist_abs_mean / vol_scaled and the
+# continuation question against always_extends / surprise_sign) plus the two learners.
+DEFAULT_EVALUATE_MODELS = ("zero,base_rate,historical_mean,hist_abs_mean,vol_scaled,sign_of_reaction,"
+                           "always_extends,surprise_sign,linear,lightgbm")
 
 # artifact file/dir name -> the command that creates it (used to complete error messages)
 ARTIFACT_COMMANDS: dict[str, str] = {
@@ -158,7 +167,7 @@ def universe(verify_only: bool = typer.Option(False, help="Print only rows needi
 
     s = get_settings()
     with _guard():
-        u = universe_mod.build_universe(s)
+        u = universe_mod.build_universe(s, write=not verify_only)  # a report only: leave the file alone
     report = universe_mod.verification_report(u)
     if verify_only:
         _print_frame(report, title=f"{len(report)} markets need human verification "
@@ -178,6 +187,8 @@ def universe(verify_only: bool = typer.Option(False, help="Print only rows needi
 def archive(
     intervals: str = typer.Option("1m,5m,15m,1h", help="Comma-separated candle intervals"),
     markets: str = typer.Option("", help="Comma-separated markets; default: every market in data/universe.parquet"),
+    strict: bool = typer.Option(False, "--strict", help="Exit 4 when any item reported an error or a coverage "
+                                                        "gap (for scheduled runs)"),
 ) -> None:
     """Archive recent candles and funding for every universe market (run at least every 3 days)."""
     import pandas as pd
@@ -198,8 +209,13 @@ def archive(
     _print_frame(summary, title=f"freedom archive: {len(names)} markets -> {s.archive_dir}")
     n_problems = int(summary["error"].notna().sum())
     if n_problems:
+        # the table truncates the error column; the full strings are what a cron log needs
+        for r in summary[summary["error"].notna()].itertuples(index=False):
+            console.print(f"{r.market} {r.interval}: {r.error}", style="yellow", markup=False)
         console.print(f"{n_problems} of {len(summary)} items reported an error or a coverage gap "
                       "(see the error column).", style="yellow")
+        if strict:
+            raise typer.Exit(code=EXIT_ARCHIVE_INCOMPLETE)
 
 
 # ---- events -------------------------------------------------------------------------------------------
@@ -311,7 +327,7 @@ def _print_summary(summary: dict, title: str, report_dir: Path | None = None) ->
 
 
 @app.command()
-def evaluate(models: str = typer.Option("zero,base_rate,historical_mean,sign_of_reaction,linear,lightgbm"),
+def evaluate(models: str = typer.Option(DEFAULT_EVALUATE_MODELS),
              decision_times: str = typer.Option("pre_5m,post_30m"),
              final: bool = typer.Option(False, "--final", help="Also score the pinned holdout season once (logged)"),
              target: str = typer.Option("r_24h", help="Training target: r_24h or ar_24h")) -> None:
@@ -322,7 +338,14 @@ def evaluate(models: str = typer.Option("zero,base_rate,historical_mean,sign_of_
     dts = _decision_times(decision_times)
     ds = _load_dataset(s)
     with _guard():
-        summary = eval_mod.evaluate(s, ds, model_names=_csv(models), decision_times=dts, final=final, target=target)
+        try:
+            summary = eval_mod.evaluate(s, ds, model_names=_csv(models), decision_times=dts, final=final,
+                                        target=target)
+        except eval_mod.HoldoutNotReady as exc:
+            _fail(f"holdout not ready: {exc}")
+        except ValueError as exc:  # no fold / no scorable rows: the same prerequisite `optimize` maps to exit 2
+            _fail(f"{exc}\nWith a small dataset lower FREEDOM_MIN_TRAIN_EVENTS (default {s.min_train_events}; "
+                  "the first-run reports used 12) or add underlyings / extend `freedom events --since`.")
     run_id = summary.get("run_id")
     _print_summary(summary, title="freedom evaluate" + (" --final" if final else ""),
                    report_dir=s.reports_dir / str(run_id) if run_id else None)
@@ -403,6 +426,9 @@ def _print_prediction(res: dict) -> None:
     _print_kv(head, title="freedom predict")
     if row["off_schedule"]:
         console.print("OFF SCHEDULE: this row is recorded but must not be traded.", style="yellow")
+    if row.get("replay"):
+        console.print(f"REPLAY: `now` was overridden to {_cell(row.get('now_override'))}; the row is recorded "
+                      "with replay=True and does not count as a live prediction.", style="yellow", markup=False)
     if res["contributions"]:
         _print_rows(res["contributions"], title="top feature contributions (importance-ranked)")
     _print_kv(res["consensus"], title="consensus provenance")

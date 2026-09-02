@@ -51,6 +51,19 @@ def test_archive_reports_errors_without_failing_the_run(data_dir, fake):
     assert (data_dir / "archive" / "candles" / "xyz_NVDA" / "1h.parquet").exists()
 
 
+def test_archive_strict_exits_4_after_archiving_the_other_items(data_dir, fake):
+    fake.fail_markets.add("xyz:BAD")
+    result = CliRunner().invoke(app, ["archive", "--strict", "--intervals", "1h", "--markets",
+                                      f"{NVDA},xyz:BAD"])
+    assert result.exit_code == 4, result.output
+    # the full error string is printed (the table truncates it) and the good market was still archived
+    assert "xyz:BAD 1h: ConnectError: simulated network failure" in result.output
+    assert (data_dir / "archive" / "candles" / "xyz_NVDA" / "1h.parquet").exists()
+    assert (data_dir / "archive" / "candles" / "xyz_NVDA" / "funding.parquet").exists()
+    result = CliRunner().invoke(app, ["archive", "--strict", "--intervals", "1h", "--markets", NVDA])
+    assert result.exit_code == 0, result.output  # a clean run is unaffected by --strict
+
+
 def test_archive_without_universe_exits_with_message(data_dir, fake):
     result = CliRunner().invoke(app, ["archive"])
     assert result.exit_code != 0

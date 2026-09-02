@@ -55,7 +55,12 @@ Implementation notes (what the code below relies on):
   ``{"NVDA:2026-07": "2026-08-26T20:20:00Z"}`` (keys may also be ``"NVDA:2026-08-26"``).
 * ``upcoming_events`` takes ``expected_t0`` from, in order: a manual override recorded on the
   matching upcoming row of events.parquet, the issuer's median sec_8k acceptance clock, the
-  calendar-flag time of that upcoming row, the Nasdaq calendar's time flag, the AMC default.
+  calendar-flag time of that upcoming row, the Nasdaq calendar's time flag, the AMC default
+  (``expected_t0_for``, which ``freedom predict`` also runs with the decision clock as
+  ``before`` so a replay never sees a later acceptance). Each upcoming row carries the
+  events.parquet ``event_id`` of the matching row when there is one, so the id ``freedom
+  upcoming`` prints is the one the table uses (off-calendar fiscal years differ from the
+  calendar quarter).
 """
 
 from __future__ import annotations
@@ -109,9 +114,12 @@ EVENT_COLUMNS: list[str] = [
     E.listing_start, E.pending, E.flags, E.ca_ex_date, *EXTRA_COLUMNS,
 ]
 UPCOMING_COLUMNS: list[str] = [
-    E.underlying, E.market, E.kind, E.report_date_ny, "expected_t0", "expected_t0_source",
+    E.event_id, E.underlying, E.market, E.kind, E.report_date_ny, "expected_t0", "expected_t0_source",
     E.eps_estimate, E.rev_estimate, E.n_estimates, E.estimate_source, E.estimate_snapshot_time,
 ]
+# events.parquet rows whose release time is a schedule (known before the release), as opposed
+# to sec_8k / detected rows whose t0 IS the release: only these may seed an expected t0
+SCHEDULE_T0_SOURCES = frozenset({T0Source.manual.value, T0Source.calendar_flag.value})
 DATETIME_COLUMNS = (E.t0, E.estimate_snapshot_time, E.listing_start, E.ca_ex_date, "t0_acceptance")
 CORPORATE_ACTION_LOOKBACK = pd.Timedelta(days=60)  # design §2: ex-date in [t0 - 60 d, t0 + horizon]
 FLAG_CORPORATE_ACTION = "corporate_action"
@@ -1161,11 +1169,16 @@ def load_events(settings: Settings) -> pd.DataFrame:
     return df
 
 
-def expected_release_clock(events: pd.DataFrame, underlying: str) -> tuple[str, str] | None:
+def expected_release_clock(events: pd.DataFrame, underlying: str, *,
+                           before: pd.Timestamp | None = None) -> tuple[str, str] | None:
     """(HH:MM America/New_York, source) = the issuer's median acceptance clock over its past
     sec_8k events, or None when it has none (caller falls back to the calendar-flag default).
-    Used by `freedom predict` for pre-release decision times (docs/design.md §10)."""
-    if events is None or len(events) == 0:
+    Used by `freedom predict` for pre-release decision times (docs/design.md §10).
+
+    `before` is the decision clock: only acceptances at or before it count, so a replay of a
+    pre-release decision (`predict --now`) for an event `freedom events` has since resolved
+    never learns the clock from that event's own 8-K or from later ones."""
+    if events is None or len(events) == 0 or E.t0_source not in events.columns:
         return None
     e = events[(events[E.underlying].astype(str).str.upper() == underlying.upper())
                & (events[E.t0_source].astype(str) == T0Source.sec_8k.value)]
@@ -1177,6 +1190,8 @@ def expected_release_clock(events: pd.DataFrame, underlying: str) -> tuple[str, 
     src = pd.to_datetime(src, utc=True, errors="coerce")
     fallback = pd.to_datetime(e[E.t0], utc=True, errors="coerce")
     inst = src.where(src.notna(), fallback).dropna()
+    if before is not None:
+        inst = inst[inst <= to_utc(before, assume_tz=UTC)]
     if len(inst) == 0:
         return None
     ny = inst.dt.tz_convert(NY)
@@ -1197,23 +1212,49 @@ def detect_release_live(bars: pd.DataFrame, expected_date_ny: pd.Timestamp, **kw
     return None if hit is None else hit[0]
 
 
-def _events_table_clock(events: pd.DataFrame | None, underlying: str, d: date) -> tuple[time, str, str] | None:
-    """(clock America/New_York, t0_source, label) of the completed events.parquet row for
-    (underlying, report date within a day) whose release time has a real source -- a manual
-    override or a calendar flag -- or None when there is no such row or it only carries the
-    timing_unknown default."""
-    if events is None or len(events) == 0:
+def _events_table_rows(events: pd.DataFrame | None, underlying: str, d: date) -> pd.DataFrame | None:
+    """The non-pending events.parquet rows of `underlying` reported within DATE_CONFLICT_DAYS
+    of `d`, nearest first (column `_apart`); None when there are none."""
+    if events is None or len(events) == 0 or E.report_date_ny not in events.columns:
         return None
-    e = events[(events[E.underlying].astype(str).str.upper() == underlying.upper())
-               & ~events[E.pending].astype(bool) & events[E.t0].notna()]
+    mask = events[E.underlying].astype(str).str.upper() == underlying.upper()
+    if E.pending in events.columns:
+        mask &= ~events[E.pending].fillna(False).astype(bool)
+    e = events[mask]
     if len(e) == 0:
         return None
     apart = e[E.report_date_ny].map(lambda x: _days_apart(x, d))
     e = e.assign(_apart=apart)[(apart <= DATE_CONFLICT_DAYS).fillna(False).to_numpy()]
     if len(e) == 0:
         return None
-    row = e.sort_values("_apart", kind="mergesort").iloc[0]
-    flags = set(str(row[E.flags]).split(";"))
+    return e.sort_values("_apart", kind="mergesort")
+
+
+def _events_table_id(events: pd.DataFrame | None, underlying: str, d: date) -> str | None:
+    """event_id of the events.parquet row for (underlying, report date within a day), or None:
+    the id `freedom upcoming` prints must be the table's (an issuer with an off-calendar fiscal
+    year gets NVDA:2026-10 for a November report, not the calendar quarter's NVDA:2026-09)."""
+    e = _events_table_rows(events, underlying, d)
+    if e is None or E.event_id not in e.columns:
+        return None
+    eid = e.iloc[0][E.event_id]
+    return None if _isna(eid) else str(eid)
+
+
+def _events_table_clock(events: pd.DataFrame | None, underlying: str, d: date) -> tuple[time, str, str] | None:
+    """(clock America/New_York, t0_source, label) of the completed events.parquet row for
+    (underlying, report date within a day) whose release time is a schedule -- a manual
+    override or a calendar flag (SCHEDULE_T0_SOURCES) -- or None when there is no such row or
+    it only carries the timing_unknown default. A resolved row (sec_8k, detected) never
+    qualifies: its t0 is the release itself, which a replay must not be told."""
+    e = _events_table_rows(events, underlying, d)
+    if e is None or E.t0 not in e.columns or E.t0_source not in e.columns:
+        return None
+    e = e[e[E.t0].notna() & e[E.t0_source].astype(str).isin(SCHEDULE_T0_SOURCES)]
+    if len(e) == 0:
+        return None
+    row = e.iloc[0]
+    flags = set(str(row[E.flags]).split(";")) if E.flags in e.columns else set()
     if "timing_unknown" in flags:
         return None
     src = str(row[E.t0_source])
@@ -1222,24 +1263,29 @@ def _events_table_clock(events: pd.DataFrame | None, underlying: str, d: date) -
 
 
 def expected_t0_for(events: pd.DataFrame | None, underlying: str, report_date_ny: Any,
-                    nasdaq_flag: Any = None) -> tuple[pd.Timestamp, str]:
-    """(expected_t0 UTC, source) for an upcoming event, in order: a manual override recorded on
-    the matching events.parquet row, the issuer's median sec_8k acceptance clock, the
+                    nasdaq_flag: Any = None, *, before: pd.Timestamp | None = None,
+                    timing: str | None = None) -> tuple[pd.Timestamp, str]:
+    """(expected_t0 UTC, source) for an event, in order: a manual override recorded on the
+    matching events.parquet row, the issuer's median sec_8k acceptance clock, the
     calendar-flag time of the matching events.parquet row, the Nasdaq calendar's time flag
-    (BMO 07:00 / AMC 16:05), else the AMC default."""
+    (BMO 07:00 / AMC 16:05), the event's own AMC/BMO class `timing` when given, else the AMC
+    default. `before` gates the median clock (expected_release_clock): pass the decision
+    clock so a replay never uses acceptances it could not have seen."""
     d = _as_date(report_date_ny)
     table = _events_table_clock(events, underlying, d)
     if table is not None and table[1] == T0Source.manual.value:
         return to_utc(pd.Timestamp.combine(d, table[0]), assume_tz=NY), table[2]
-    clock = expected_release_clock(events, underlying) if events is not None else None
+    clock = expected_release_clock(events, underlying, before=before) if events is not None else None
     if clock is not None:
         hh, mm = (int(x) for x in clock[0].split(":"))
         return to_utc(pd.Timestamp.combine(d, time(hh, mm)), assume_tz=NY), clock[1]
     if table is not None:
         return to_utc(pd.Timestamp.combine(d, table[0]), assume_tz=NY), table[2]
-    timing = timing_from_flag(nasdaq_flag)
-    if timing is not None:
-        return calendar_default_t0(d, timing), f"nasdaq flag {str(nasdaq_flag)!r} ({timing} default)"
+    flag_timing = timing_from_flag(nasdaq_flag)
+    if flag_timing is not None:
+        return calendar_default_t0(d, flag_timing), f"nasdaq flag {str(nasdaq_flag)!r} ({flag_timing} default)"
+    if timing in CALENDAR_DEFAULT_CLOCK:
+        return calendar_default_t0(d, timing), f"calendar-flag default for {timing}"
     return calendar_default_t0(d, "AMC"), "calendar default (AMC)"
 
 
@@ -1283,6 +1329,7 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
         expected_t0, expected_src = expected_t0_for(events, sym, d, nasdaq_flag(sym, d))
         snap = consensus_before(snapshots, sym, d, None)
         rows.append({
+            E.event_id: _events_table_id(events, sym, d),  # None until `freedom events` has the row
             E.underlying: sym, E.market: u[U.market], E.kind: u[U.kind], E.report_date_ny: d,
             "expected_t0": expected_t0, "expected_t0_source": expected_src,
             E.eps_estimate: snap["eps_estimate"] if snap else r[E.eps_estimate],
