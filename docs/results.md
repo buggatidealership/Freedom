@@ -13,7 +13,7 @@ reproducible from the commands in the README and about 190 FMP requests.
 | Hyperliquid markets pulled | 138 (71 in the event universe, 15 flagged for human verification) |
 | events resolved | 48 past + 12 upcoming; 48 from 8-K acceptance times, 0 pending |
 | release times refined by detection | 35 of 48, median lag between wire and 8-K acceptance 85 s (IQR 32–257 s) |
-| price paths | 47 events on FMP 1-minute extended-hours bars, 1 (NVDA 2026-08-26) on live 5-minute perp candles |
+| price paths | 47 events on FMP 1-minute extended-hours bars, 1 (NVDA 2026-08-26) on archived 1-minute perp candles |
 | 24-hour label coverage | 48 of 48 past events |
 | dataset | 180 rows (60 events × 3 decision times), 78 features, 8 never populated (open interest and VIX: no archive yet; surprise z-scores: no history; `r_60m` at earlier decision times by construction) |
 | walk-forward | 2 folds (test 2026Q1 trained on 12 events; test 2026Q2 trained on 24), holdout 2026Q3 never scored |
