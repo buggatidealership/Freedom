@@ -2,13 +2,22 @@
 
 Bar convention everywhere: half-open [t, t_end). A price "at" instant `when` is the close of the
 last bar whose t_end <= when, so a bar that contains `when` is never used. The reference price
-p0 additionally backs off by a source-dependent buffer: 3 minutes when t0 comes from an 8-K
-acceptance time (measured acceptance-minus-wire lags of 25-134 s), 0 otherwise.
+p0 additionally backs off by a source-dependent buffer: `Settings.p0_buffer_minutes_sec_8k`
+(default 3 minutes) when t0 comes from an 8-K acceptance time (measured acceptance-minus-wire
+lags of 25-134 s), 0 otherwise.
 
 Validity rules (from review): a checkpoint is NaN unless the bar used ends after the p0 bar
 and its staleness (t0+h minus bar end) is within max(2 x interval, 5 min). Only 1m/5m bars
 resolve prices; 1h or coarser candles are never used for p0, checkpoints or fills. One price
 source per event, never mixed inside the window.
+
+Corporate actions (docs/design.md §2): when the event carries a split ex-date
+(schemas.E.ca_ex_date, set by the events builder from the FMP splits calendar) inside
+[p0_time, t0 + horizon], the headline +24h checkpoint and the labels derived from it are NaN.
+FMP bars are split-adjusted, so the proxy path keeps its intermediate checkpoints; a perp path
+is not adjusted, so every checkpoint whose bar ends at or after the ex-date is NaN too (the
+design's "used only if measured continuous" condition has no measurement yet, so the
+conservative branch is the only one implemented).
 """
 
 from __future__ import annotations
@@ -20,7 +29,16 @@ import numpy as np
 import pandas as pd
 
 from ..config import Settings
-from ..schemas import CHECKPOINTS, CONTINUATION_DEAD_BAND, C, E, T
+from ..schemas import (
+    CHECKPOINTS,
+    CONTINUATION_DEAD_BAND,
+    HEADLINE_CHECKPOINT,
+    NY,
+    C,
+    E,
+    PriceSource,
+    T,
+)
 from ..timeutil import is_rth, next_close_after, next_open_after, to_utc
 
 log = logging.getLogger(__name__)
@@ -28,7 +46,9 @@ log = logging.getLogger(__name__)
 INTERVAL_TD = {"1m": pd.Timedelta(minutes=1), "5m": pd.Timedelta(minutes=5),
                "15m": pd.Timedelta(minutes=15), "1h": pd.Timedelta(hours=1)}
 FINE_INTERVALS = ("1m", "5m")  # the only intervals allowed to resolve p0, checkpoints and fills
-P0_BUFFER_BY_SOURCE = {"sec_8k": pd.Timedelta(minutes=3)}  # others: no buffer
+P0_BUFFER_MINUTES_SEC_8K = 3.0  # default of Settings.p0_buffer_minutes_sec_8k; other sources: none
+P0_BUFFER_SOURCES = ("sec_8k",)  # t0 sources whose P0 backs off by the buffer
+PERP_SOURCES = (PriceSource.hl_archive.value, PriceSource.hl_live.value)  # unadjusted across splits
 MIN_STALENESS = pd.Timedelta(minutes=5)
 
 
@@ -38,9 +58,28 @@ def max_staleness(interval: str) -> pd.Timedelta:
     return max(2 * td, MIN_STALENESS)
 
 
-def p0_buffer_for(event: pd.Series) -> pd.Timedelta:
+def p0_buffer_for(event: pd.Series, sec_8k_minutes: float = P0_BUFFER_MINUTES_SEC_8K) -> pd.Timedelta:
+    """P0 backs off by `sec_8k_minutes` (Settings.p0_buffer_minutes_sec_8k) when t0 comes from
+    an 8-K acceptance time, by nothing otherwise."""
     src = event.get(E.t0_source) if hasattr(event, "get") else None
-    return P0_BUFFER_BY_SOURCE.get(str(src), pd.Timedelta(0))
+    if str(src) in P0_BUFFER_SOURCES:
+        return pd.Timedelta(minutes=float(sec_8k_minutes))
+    return pd.Timedelta(0)
+
+
+def corporate_action_ex(event: pd.Series) -> pd.Timestamp | None:
+    """UTC instant of the split ex-date carried by the event (schemas.E.ca_ex_date), or None.
+    A bare date is read as 00:00 America/New_York on that day."""
+    v = event.get(E.ca_ex_date) if hasattr(event, "get") else None
+    if v is None or (not isinstance(v, str) and pd.isna(v)):
+        return None
+    try:
+        t = pd.Timestamp(v)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(t):
+        return None
+    return to_utc(t, assume_tz=NY)
 
 
 def checkpoint_times(t0: pd.Timestamp, horizon_hours: int = 24) -> dict[str, pd.Timestamp]:
@@ -134,14 +173,18 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
     ar_<cp> = r_<cp> - r_<cp>(market); labels direction/magnitude and
     continuation_k = sign(r_k) * sign(r_24h - r_k) for k in {15m, 30m} (NaN inside the dead band).
     Every checkpoint records the bar end used (t_<cp>) and staleness in minutes (s_<cp>);
-    invalid checkpoints stay NaN."""
+    invalid checkpoints stay NaN. An event without t0 (a pending row) yields the all-NaN row.
+    A split ex-date (E.ca_ex_date) inside [p0_time, t0 + horizon] NaNs the headline checkpoint
+    and its labels; on a perp path every checkpoint from the ex-date on (module docstring)."""
     if p0_buffer is None:
         p0_buffer = p0_buffer_for(event)
-    t0 = to_utc(event[E.t0])
+    t0_raw = event.get(E.t0) if hasattr(event, "get") else event[E.t0]
+    t0 = None if t0_raw is None or pd.isna(t0_raw) else to_utc(t0_raw)
     out: dict[str, object] = {T.event_id: event[E.event_id], T.p0: np.nan, T.p0_time: pd.NaT,
                               T.p0_staleness_min: np.nan, T.price_source: None, T.price_interval: None,
                               T.price_market: None, T.horizon_actual_h: np.nan,
-                              T.h24_in_closure: not is_rth(t0 + pd.Timedelta(hours=horizon_hours))}
+                              T.h24_in_closure: (not is_rth(t0 + pd.Timedelta(hours=horizon_hours)))
+                              if t0 is not None else pd.NA}
     for cp in CHECKPOINTS:
         out[T.r(cp)] = np.nan
         out[T.ar(cp)] = np.nan
@@ -152,7 +195,7 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
     out[T.magnitude] = np.nan
     out[T.continuation_15m] = np.nan
     out[T.continuation_30m] = np.nan
-    if path is None or len(path) == 0:
+    if t0 is None or path is None or len(path) == 0:
         return pd.Series(out)
 
     interval = _interval_of(path)
@@ -188,6 +231,19 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
             mh = price_at(market_path, when)
             if mh is not None and mh[1] > mref[1] and when - mh[1] <= m_stale:
                 out[T.ar(cp)] = r - math.log(mh[0] / mref[0])
+    ex = corporate_action_ex(event)
+    if ex is not None and p0_time <= ex <= t0 + pd.Timedelta(hours=horizon_hours):
+        # design §2: an ex-date inside [P0, t0 + horizon] leaves no headline label. The FMP
+        # proxy is split-adjusted, so its intermediate checkpoints stand; a perp path is not,
+        # so nothing measured at or after the ex-date is comparable with p0.
+        void = [HEADLINE_CHECKPOINT]
+        if out[T.price_source] in PERP_SOURCES:
+            void += [cp for cp in CHECKPOINTS if cp != HEADLINE_CHECKPOINT
+                     and not pd.isna(out[T.t(cp)]) and out[T.t(cp)] >= ex]
+        for cp in void:
+            out[T.r(cp)], out[T.ar(cp)], out[T.p(cp)], out[T.t(cp)], out[T.s(cp)] = np.nan, np.nan, np.nan, pd.NaT, np.nan
+        log.info("%s: split ex-date %s inside the target window; %s left NaN",
+                 event[E.event_id], ex.tz_convert(NY).date(), ", ".join(void))
     r24 = out[T.r("24h")]
     if not (isinstance(r24, float) and math.isnan(r24)):
         out[T.horizon_actual_h] = (out[T.t("24h")] - p0_time) / pd.Timedelta(hours=1)
@@ -203,7 +259,9 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
 def build_targets(settings: Settings, events: pd.DataFrame, *, write: bool = True,
                   benchmark_market: str = "xyz:SP500", benchmark_equity: str = "SPY") -> pd.DataFrame:
     """Compute targets for every event. Perp bars come from the archive, then the live
-    candleSnapshot window; otherwise the underlying's FMP 1-minute extended-hours bars."""
+    candleSnapshot window; otherwise the underlying's FMP 1-minute extended-hours bars.
+    Pending rows (no t0: `freedom events` stopped at the budget before them) get the all-NaN
+    row without any provider request, so the table keeps one row per event_id."""
     from ..data.base import ProviderUnavailable
     from ..data.hyperliquid import HyperliquidClient
     from .loaders import load_event_bars
@@ -217,15 +275,23 @@ def build_targets(settings: Settings, events: pd.DataFrame, *, write: bool = Tru
         fmp = FMPClient(settings)
     except ProviderUnavailable as exc:
         log.warning("FMP unavailable (%s): events before perp listing will have no targets", exc)
+    horizon = settings.horizon_hours
     rows = []
     for _, ev in events.iterrows():
+        buffer = p0_buffer_for(ev, settings.p0_buffer_minutes_sec_8k)
+        t0, pending = ev.get(E.t0), ev.get(E.pending, False)
+        pending = pending is not None and not pd.isna(pending) and bool(pending)
+        if pending or t0 is None or pd.isna(t0):
+            log.warning("%s: no t0 (pending), targets left NaN", ev.get(E.event_id))
+            rows.append(compute_targets(ev, pd.DataFrame(), None, horizon_hours=horizon, p0_buffer=buffer))
+            continue
         try:
             path, mpath = load_event_bars(settings, ev, hl=hl, fmp=fmp,
                                           benchmark_market=benchmark_market, benchmark_equity=benchmark_equity)
-            rows.append(compute_targets(ev, path, mpath, horizon_hours=settings.horizon_hours))
+            rows.append(compute_targets(ev, path, mpath, horizon_hours=horizon, p0_buffer=buffer))
         except Exception as exc:  # one bad event must not kill the run
             log.warning("targets failed for %s: %s", ev.get(E.event_id), exc)
-            empty = compute_targets(ev, pd.DataFrame(), None, horizon_hours=settings.horizon_hours)
+            empty = compute_targets(ev, pd.DataFrame(), None, horizon_hours=horizon, p0_buffer=buffer)
             rows.append(empty)
     out = pd.DataFrame(rows)
     if write:

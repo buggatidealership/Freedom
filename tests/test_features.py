@@ -345,8 +345,13 @@ def test_reaction_matches_compute_targets(source):
     assert tg[T.p0] == pytest.approx(p0)
     close_30m = float(bars.loc[bars[C.t_end] <= T0 + pd.Timedelta(minutes=30), C.close].iloc[-1])
     assert f30["f_r_30m"] == pytest.approx(math.log(close_30m / p0))
-    # r_1m on 5-minute bars: no bar ends between P0's bar and t0 + 1m for `detected`
-    assert math.isnan(build_features(ctx_for("post_1m", event("detected")), groups=["reaction"])["f_r_1m"])
+    # r_1m on 5-minute bars: no bar ending after t0 has closed by t0 + 1m for either source. With
+    # the 8-K buffer the bar between the P0 bar and t0 ends before the release: it must not
+    # pass as the 1-minute reaction (nor as r_now / the path at post_1m)
+    for src in ("detected", "sec_8k"):
+        f1 = build_features(ctx_for("post_1m", event(src)), groups=["reaction"])
+        assert math.isnan(f1["f_r_1m"]) and math.isnan(f1["f_r_now"]), src
+        assert math.isnan(f1["f_path_max"]) and math.isnan(f1["f_vol_z"]), src
     # path range and volume z-score use only bars ending after t0 and up to as_of: the 8-K
     # buffer bar between the P0 bar and t0 is pre-release, neither path nor baseline
     post = bars[(bars[C.t_end] > T0) & (bars[C.t_end] <= T0 + pd.Timedelta(minutes=30))]
@@ -356,6 +361,23 @@ def test_reaction_matches_compute_targets(source):
     if source == "sec_8k":
         buffered = bars[(bars[C.t_end] > tg[T.p0_time]) & (bars[C.t_end] <= T0 + pd.Timedelta(minutes=30))]
         assert len(buffered) == len(post) + 1 and buffered[C.high].max() > post[C.high].max()
+
+
+def test_p0_buffer_setting_flows_through_the_context():
+    """FeatureContext.p0_buffer_minutes_sec_8k (Settings.p0_buffer_minutes_sec_8k) moves P0 for
+    8-K events in the reaction group and the anchor of the pre-release groups alike."""
+    bars = hl_bars()
+    ev = event("sec_8k")
+    close_30m = float(bars.loc[bars[C.t_end] <= T0 + pd.Timedelta(minutes=30), C.close].iloc[-1])
+    f_default = build_features(ctx_for("post_30m", ev, bars=bars), groups=["reaction"])
+    f_zero = build_features(ctx_for("post_30m", ev, bars=bars, p0_buffer_minutes_sec_8k=0.0), groups=["reaction"])
+    assert f_default["f_r_30m"] == pytest.approx(math.log(close_30m / 210.63))
+    assert f_zero["f_r_30m"] == pytest.approx(math.log(close_30m / 211.07))
+    assert pre_cut(ctx_for("post_30m", ev)) == T0 - pd.Timedelta(minutes=3)
+    assert pre_cut(ctx_for("post_30m", ev, p0_buffer_minutes_sec_8k=0.0)) == T0
+    assert pre_cut(ctx_for("post_30m", ev, p0_buffer_minutes_sec_8k=1.0)) == T0 - pd.Timedelta(minutes=1)
+    # a detected time never backs off
+    assert pre_cut(ctx_for("post_30m", event("detected"), p0_buffer_minutes_sec_8k=7.0)) == T0
 
 
 def test_reaction_refuses_coarse_bars():

@@ -116,7 +116,13 @@ class E:
     has_perp_at_t0 = "has_perp_at_t0"  # t0 >= earliest listing_start over all markets of the underlying
     listing_start = "listing_start"
     pending = "pending"  # True when data fetching stopped (budget) before this row was completed
-    flags = "flags"  # ';'-joined: date_conflict, fiscal_period_derived, detection_first_bar, ...
+    # ';'-joined: date_conflict, fiscal_period_derived, detection_first_bar, upcoming,
+    # corporate_action (a split ex-date inside [t0 - 60 d, t0 + horizon], docs/design.md §2), ...
+    flags = "flags"
+    # UTC instant of 00:00 America/New_York on the split ex-date nearest t0 when the
+    # corporate_action flag is set, else NaT; targets NaN the headline label when it falls in
+    # [p0_time, t0 + horizon]
+    ca_ex_date = "corporate_action_ex_date"
 
 
 # ---- targets ----------------------------------------------------------------------------------

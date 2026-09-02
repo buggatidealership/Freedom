@@ -341,7 +341,7 @@ class ContextLoader:
         try:
             path, mpath = load_event_bars(self.settings, event, hl=self.hl, fmp=self.fmp,
                                           benchmark_market=self.benchmark_market,
-                                          benchmark_equity=self.benchmark_equity)
+                                          benchmark_equity=self.benchmark_equity, now=self.now)
         except Exception as exc:
             log.warning("%s: load_event_bars failed: %s", value(event, E.event_id), exc)
             path, mpath = pd.DataFrame(), None
@@ -353,6 +353,11 @@ class ContextLoader:
         t0 = to_utc(event[E.t0], assume_tz=UTC)
         lo = t0 - pd.Timedelta(days=1)
         hi = t0 + pd.Timedelta(hours=self.settings.horizon_hours) + pd.Timedelta(hours=2)
+        if lo > self.now:
+            # the whole [t0 - 1d, t0 + horizon + 2h] window is in the future: no bars exist yet,
+            # and asking would spend a provider request (cached only for the live TTL) on every
+            # run. `lo` rather than `t0` keeps live `predict` fetching the pre-release bars.
+            return None
         market = value(event, E.market)
         if isinstance(market, str) and market:
             try:
@@ -404,6 +409,7 @@ class ContextLoader:
                               bars=bars, daily=uinputs.daily, market_bars=market_bars,
                               market_daily=einputs.market_daily, history=history,
                               perp_ctx=einputs.perp_ctx, horizon_hours=int(self.settings.horizon_hours),
+                              p0_buffer_minutes_sec_8k=float(self.settings.p0_buffer_minutes_sec_8k),
                               extra=extra)
 
     def context_for(self, event: pd.Series, decision_time: str, *, events: pd.DataFrame,

@@ -48,10 +48,12 @@ class Settings(BaseSettings):
 
     # --- target and evaluation defaults -------------------------------------------------------
     horizon_hours: int = 24
-    p0_buffer_minutes_sec_8k: float = 3.0  # 8-K acceptance trails the wire by 25-134 s (measured)
+    # P0 back-off for 8-K times (targets.p0_buffer_for; the reaction and pre-release feature
+    # groups read it through FeatureContext): acceptance trails the wire by 25-134 s (measured)
+    p0_buffer_minutes_sec_8k: float = 3.0
     taker_fee_bps: float = 4.5  # conservative; HIP-3 growth-mode fees are lower, see docs
     slippage_floor_bps: float = 5.0  # per leg, floor of the execution-cost model
-    slippage_range_coeff: float = 0.25  # per leg: + coeff * (high-low)/open of the execution bar
+    slippage_range_coeff: float = 0.25  # per leg: + coeff * range_bps, range_bps = 1e4*(high-low)/open of the execution bar
     max_fill_lag_minutes: float = 5.0  # a fill later than this after the signal is not traded
     gross_exposure_cap: float = 1.0  # equal_split capital rule across overlapping positions
     trade_threshold: float = 0.0  # simulation: no trade unless |p_up - 0.5| >= this

@@ -8,6 +8,8 @@ parameter (see docs/data-sources.md for what was measured):
   America/New_York timestamps, pre-market and after-hours bars 04:00-19:55 ET)
 * ``stable/historical-price-eod/full?symbol=&from=&to=``
 * ``stable/profile?symbol=`` and ``stable/aftermarket-trade?symbol=``
+* ``stable/splits?symbol=`` (split ex-dates; intraday and EOD bars are already split-adjusted,
+  the calendar only flags events whose window straddles an ex-date)
 
 Conventions:
 
@@ -56,6 +58,7 @@ CANDLE_COLUMNS: list[str] = [
     C.market, C.interval, C.t, C.t_end, C.open, C.high, C.low, C.close, C.volume, C.n_trades,
     C.source,
 ]
+SPLIT_COLUMNS: list[str] = ["symbol", "ex_date", "numerator", "denominator"]
 
 # FMP path segment -> (harness interval label as used by the archive, bar length)
 _INTERVALS: dict[str, tuple[str, pd.Timedelta]] = {
@@ -287,6 +290,29 @@ def _earnings_frame(records: list[dict]) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def _splits_frame(records: list[dict]) -> pd.DataFrame:
+    """SPLIT_COLUMNS from ``stable/splits`` records: ``ex_date`` is the New York calendar date
+    of the split (``date``), numerator/denominator the ratio (10:1 forward -> 10, 1). Rows
+    without a parseable date are dropped; sorted oldest-first, one row per (symbol, ex_date)."""
+    if not records:
+        return pd.DataFrame({
+            "symbol": pd.Series(dtype="str"),
+            "ex_date": pd.Series(dtype="object"),
+            "numerator": pd.Series(dtype="float64"),
+            "denominator": pd.Series(dtype="float64"),
+        })[SPLIT_COLUMNS]
+    raw = pd.DataFrame.from_records(records).reindex(columns=["symbol", "date", "numerator", "denominator"])
+    df = pd.DataFrame({
+        "symbol": ["" if s is None else str(s).strip().upper() for s in raw["symbol"]],
+        "ex_date": _to_dates(raw["date"]),
+        "numerator": pd.to_numeric(raw["numerator"], errors="coerce").astype("float64").to_numpy(),
+        "denominator": pd.to_numeric(raw["denominator"], errors="coerce").astype("float64").to_numpy(),
+    })[SPLIT_COLUMNS]
+    df = df[df["ex_date"].notna()]
+    df = df.sort_values(["symbol", "ex_date"], kind="mergesort").drop_duplicates(subset=["symbol", "ex_date"], keep="last")
+    return df.reset_index(drop=True)
+
+
 # ---- client ---------------------------------------------------------------------------------------
 class FMPClient:
     def __init__(self, settings: Settings, cache: DiskCache | None = None):
@@ -402,7 +428,14 @@ class FMPClient:
             raise ValueError(f"end_day {last} is before start_day {first}")
         path = f"stable/historical-chart/{api_interval}"
         frames: list[pd.DataFrame] = []
+        today = _today_ny()
         for a, b in _day_chunks(first, last, MAX_INTRADAY_DAYS_BY_INTERVAL.get(interval, MAX_INTRADAY_DAYS_PER_REQUEST)):
+            if a > today:
+                # a chunk entirely in the future has no bars: FMP would answer with the latest
+                # sessions (which the day filter discards) at the cost of a budgeted request
+                # that the live TTL re-spends on every run
+                frames.append(_empty_candles())
+                continue
             params = {
                 "symbol": symbol,
                 "from": a.isoformat(),
@@ -439,6 +472,15 @@ class FMPClient:
         t = _ny_naive_to_utc(days)
         t_end = _ny_naive_to_utc(days + pd.Timedelta(days=1))
         return _finish_candles([_candles(symbol, "1d", t, t_end, raw, DAILY_SOURCE)])
+
+    # ---- corporate actions -------------------------------------------------------------------
+    def splits(self, symbol: str) -> pd.DataFrame:
+        """`stable/splits`: SPLIT_COLUMNS (symbol, ex_date as a New York ``datetime.date``,
+        numerator, denominator), oldest-first. Cached for ``settings.cache_ttl_seconds`` like
+        the earnings history: one request per underlying per week, not per event."""
+        symbol = _norm_symbol(symbol)
+        payload = self._get("stable/splits", {"symbol": symbol}, cache_ttl=self.settings.cache_ttl_seconds)
+        return _splits_frame(self._records(payload, "stable/splits"))
 
     # ---- reference / live --------------------------------------------------------------------
     def profile(self, symbol: str) -> dict:

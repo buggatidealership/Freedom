@@ -36,6 +36,7 @@ import pandas as pd
 
 from ..config import Settings
 from ..schemas import CHECKPOINTS, DECISION_TIMES, SCHEMA_VERSION, D, E, T, season_of
+from ..targets import P0_BUFFER_MINUTES_SEC_8K
 from ..timeutil import to_utc
 
 log = logging.getLogger(__name__)
@@ -74,6 +75,8 @@ class FeatureContext:
     history: pd.DataFrame | None = None  # from history_view(): events+targets with t0 + horizon <= as_of
     perp_ctx: pd.DataFrame | None = None  # archived ctx snapshots (funding, premium, OI) with t <= as_of
     horizon_hours: int = 24
+    # Settings.p0_buffer_minutes_sec_8k: the P0 back-off for 8-K times, shared with the targets
+    p0_buffer_minutes_sec_8k: float = P0_BUFFER_MINUTES_SEC_8K
     extra: dict = field(default_factory=dict)
 
 

@@ -34,6 +34,7 @@ from freedom.events import (
     ResolvedT0,
     build_events,
     consensus_path,
+    corporate_action_near,
     detect_release_from_bars,
     detect_release_live,
     expected_release_clock,
@@ -103,6 +104,8 @@ class FakeHttp:
         }
         self.intraday_budget: int | None = None  # BudgetExhausted after this many 1min requests
         self.n_intraday = 0
+        self.splits: dict[str, list[dict]] = {"NFLX": load("fmp", "splits_NFLX.json")}  # symbol -> stable/splits rows
+        self.splits_errors: set[str] = set()  # symbols whose splits request answers an error payload
         self.intraday_errors: set[str] = set()  # symbols whose 1min request answers an error payload
         self.earnings_budget_exhausted = False  # every earnings-history request hits the budget
         self.tickers_extra: dict[str, int] = {}  # ticker -> CIK appended to the SEC ticker map
@@ -159,6 +162,10 @@ class FakeHttp:
                 if params["symbol"] in self.intraday_errors:
                     return {"Error Message": "Invalid symbol"}
                 return self.intraday.get((params["symbol"], params["from"]), [])
+            if path == "stable/splits":
+                if params["symbol"] in self.splits_errors:
+                    return {"Error Message": "Invalid symbol"}
+                return self.splits.get(params["symbol"], [])
             raise AssertionError(f"unexpected FMP path {path}")
         if url.startswith(NASDAQ_URL):
             rows = self.nasdaq.get(params["date"])
@@ -603,6 +610,48 @@ def test_fmp_error_on_one_intraday_request_does_not_abort_the_build(settings, fa
     nvda = by.loc["NVDA:2026-07"]
     assert "intraday_error" not in nvda[E.flags].split(";")
     assert "fmp_intraday" in nvda[E.sources_used].split(";")
+
+
+def test_corporate_action_flag_from_the_splits_calendar(settings, fake):
+    write_universe(settings)
+    # a 10:1 split whose ex-date is the morning after the NVDA Q2 release (t0 2026-08-26 20:20 UTC)
+    fake.splits["NVDA"] = [{"symbol": "NVDA", "date": "2026-08-27", "numerator": 10, "denominator": 1,
+                            "splitType": "forward"}]
+    df = build_events(settings, underlyings=["NVDA", "AAPL"], since=pd.Timestamp("2026-01-01"))
+    assert list(df.columns) == EVENT_COLUMNS and str(df[E.ca_ex_date].dtype) == "datetime64[ns, UTC]"
+    by = df.set_index(E.event_id)
+    q2 = by.loc["NVDA:2026-07"]
+    assert "corporate_action" in q2[E.flags].split(";")
+    assert q2[E.ca_ex_date] == ny("2026-08-27 00:00")
+    # the same ex-date is outside [t0 - 60 d, t0 + 24 h] of the May event and of the upcoming one
+    for eid in ("NVDA:2026-04", "NVDA:2026-10", "AAPL:2026-06"):
+        assert "corporate_action" not in by.loc[eid, E.flags].split(";"), eid
+        assert pd.isna(by.loc[eid, E.ca_ex_date]), eid
+    # one splits request per underlying, not per event
+    splits_calls = [c for c in fake.calls if c["url"].endswith("stable/splits")]
+    assert sorted(c["params"]["symbol"] for c in splits_calls) == ["AAPL", "NVDA"]
+    back = load_events(settings).set_index(E.event_id)
+    assert back.loc["NVDA:2026-07", E.ca_ex_date] == ny("2026-08-27 00:00")
+    assert pd.isna(back.loc["AAPL:2026-06", E.ca_ex_date])
+    # an error payload on the splits request is not a checkpoint: flagged, the build goes on
+    fake.splits_errors.add("AAPL")
+    df2 = build_events(settings, underlyings=["AAPL"], since=pd.Timestamp("2026-01-01"))
+    assert not df2[E.pending].any()
+    assert "splits_error" in df2.set_index(E.event_id).loc["AAPL:2026-06", E.flags].split(";")
+
+
+def test_corporate_action_near_picks_the_ex_date_nearest_t0():
+    splits = fmp_mod._splits_frame(load("fmp", "splits_NFLX.json"))
+    ex = ny("2025-11-17 00:00")
+    assert corporate_action_near(splits, pd.Timestamp("2025-11-18 21:05", tz="UTC"), 24) == ex
+    assert corporate_action_near(splits, pd.Timestamp("2025-11-16 21:05", tz="UTC"), 24) == ex  # ex-date inside t0 + 24h
+    assert corporate_action_near(splits, pd.Timestamp("2026-01-15 21:05", tz="UTC"), 24) == ex  # 59 days after
+    assert corporate_action_near(splits, pd.Timestamp("2026-01-20 21:05", tz="UTC"), 24) is None  # 64 days after
+    assert corporate_action_near(splits, pd.Timestamp("2025-11-15 21:05", tz="UTC"), 24) is None  # 27 h before
+    assert corporate_action_near(None, pd.Timestamp("2025-11-18", tz="UTC"), 24) is None
+    two = fmp_mod._splits_frame(load("fmp", "splits_NFLX.json") + [
+        {"symbol": "NFLX", "date": "2025-10-01", "numerator": 2, "denominator": 1}])
+    assert corporate_action_near(two, pd.Timestamp("2025-10-20", tz="UTC"), 24) == ny("2025-10-01 00:00")
 
 
 def test_budget_exhaustion_before_any_history_yields_placeholders(settings, fake):

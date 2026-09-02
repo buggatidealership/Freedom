@@ -29,6 +29,7 @@ from freedom.data.fmp import (
     EARNINGS_COLUMNS,
     IMMUTABLE_TTL_SECONDS,
     MAX_INTRADAY_DAYS_PER_REQUEST,
+    SPLIT_COLUMNS,
     FMPClient,
     FMPError,
 )
@@ -44,6 +45,7 @@ FIXTURE_BY_PATH = {
     "stable/historical-price-eod/full": "historical-price-eod_NVDA_20260601_0901.json",
     "stable/profile": "profile_NVDA.json",
     "stable/aftermarket-trade": "aftermarket-trade_NVDA.json",
+    "stable/splits": "splits_NFLX.json",
 }
 
 
@@ -313,6 +315,38 @@ def test_intraday_extended_flag_and_cache_ttl_policy(client, fake_http, monkeypa
     client.intraday("NVDA", "5min", pd.Timestamp("2026-08-26"), pd.Timestamp("2026-08-27"),
                     cache_ttl=30)
     assert fake_http.calls[0]["cache_ttl"] == 30
+
+
+def test_intraday_never_requests_a_chunk_in_the_future(client, fake_http, monkeypatch):
+    """FMP answers a future range with its latest sessions (discarded by the day filter) at
+    the price of a request that the live TTL re-spends on every run: skip such chunks."""
+    monkeypatch.setattr(fmp_mod, "_today_ny", lambda: date(2026, 9, 2))
+    df = client.intraday("NVDA", "1min", pd.Timestamp("2026-11-17"), pd.Timestamp("2026-11-19"))
+    assert df.empty and list(df.columns) == CANDLE_COLUMNS
+    assert fake_http.calls == []
+    # a window straddling today: the chunk that starts today is requested, the next one is not
+    client.intraday("NVDA", "1min", pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-04"))
+    windows = [(c["cache_params"]["from"], c["cache_params"]["to"]) for c in fake_http.calls]
+    assert windows == [("2026-09-01", "2026-09-03")]
+
+
+# ---- corporate actions -----------------------------------------------------------------------------
+def test_splits_contract(client, fake_http):
+    df = client.splits("nflx")
+    assert list(df.columns) == SPLIT_COLUMNS and len(df) == 1
+    row = df.iloc[0]
+    assert row["symbol"] == "NFLX" and row["ex_date"] == date(2025, 11, 17)
+    assert (row["numerator"], row["denominator"]) == (10.0, 1.0)
+    (call,) = fake_http.calls
+    assert call["url"] == f"{BASE}/stable/splits"
+    assert call["cache_params"] == {"symbol": "NFLX"}
+    assert call["params"] == {"symbol": "NFLX", "apikey": "test"}
+    assert call["cache_ttl"] == client.settings.cache_ttl_seconds  # once a week per underlying
+    fake_http.responses["stable/splits"] = []
+    empty = client.splits("NVDA")
+    assert list(empty.columns) == SPLIT_COLUMNS and empty.empty
+    fake_http.responses["stable/splits"] = [{"symbol": "X", "date": "not a date", "numerator": 2, "denominator": 1}]
+    assert client.splits("X").empty
 
 
 # ---- daily ---------------------------------------------------------------------------------------

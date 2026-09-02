@@ -1,0 +1,9 @@
+[
+  {
+    "symbol": "NFLX",
+    "date": "2025-11-17",
+    "numerator": 10,
+    "denominator": 1,
+    "splitType": "forward"
+  }
+]

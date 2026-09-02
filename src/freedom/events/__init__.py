@@ -45,6 +45,12 @@ Implementation notes (what the code below relies on):
 * An FMP error on one event's intraday request (a bad symbol, a transport failure) is not a
   checkpoint: the event is resolved without bars (``flags += intraday_error;no_intraday``)
   and the build goes on. Only ProviderUnavailable / BudgetExhausted stop it.
+* Corporate actions (docs/design.md §2): the FMP splits calendar is fetched once per
+  underlying (cached for a week); an ex-date inside ``[t0 - 60 d, t0 + horizon]`` sets
+  ``flags += corporate_action`` and ``corporate_action_ex_date`` (the ex-date nearest t0, as
+  00:00 New York in UTC). The targets NaN the headline label when it lies in
+  ``[p0_time, t0 + horizon]``. A failed splits request is ``flags += splits_error``, not a
+  checkpoint; budget exhaustion on it is one, like the intraday request.
 * Optional manual overrides live in ``configs/t0_overrides.yaml`` as
   ``{"NVDA:2026-07": "2026-08-26T20:20:00Z"}`` (keys may also be ``"NVDA:2026-08-26"``).
 * ``upcoming_events`` takes ``expected_t0`` from, in order: a manual override recorded on the
@@ -100,13 +106,15 @@ EVENT_COLUMNS: list[str] = [
     E.report_date_ny, E.t0, E.t0_confidence, E.t0_source, E.timing, E.eps_actual, E.eps_estimate,
     E.eps_surprise_pct, E.rev_actual, E.rev_estimate, E.rev_surprise_pct, E.n_estimates,
     E.estimate_source, E.estimate_snapshot_time, E.sources_used, E.has_perp_at_t0,
-    E.listing_start, E.pending, E.flags, *EXTRA_COLUMNS,
+    E.listing_start, E.pending, E.flags, E.ca_ex_date, *EXTRA_COLUMNS,
 ]
 UPCOMING_COLUMNS: list[str] = [
     E.underlying, E.market, E.kind, E.report_date_ny, "expected_t0", "expected_t0_source",
     E.eps_estimate, E.rev_estimate, E.n_estimates, E.estimate_source, E.estimate_snapshot_time,
 ]
-DATETIME_COLUMNS = (E.t0, E.estimate_snapshot_time, E.listing_start, "t0_acceptance")
+DATETIME_COLUMNS = (E.t0, E.estimate_snapshot_time, E.listing_start, E.ca_ex_date, "t0_acceptance")
+CORPORATE_ACTION_LOOKBACK = pd.Timedelta(days=60)  # design §2: ex-date in [t0 - 60 d, t0 + horizon]
+FLAG_CORPORATE_ACTION = "corporate_action"
 
 _AMC_FLAGS = frozenset({"amc", "post-market", "postmarket", "after-hours", "afterhours",
                         "after market close", "after-market", "post market"})
@@ -659,7 +667,21 @@ class _Providers:
         self._av: dict[str, pd.DataFrame | None] = {}
         self._nasdaq: dict[date, pd.DataFrame | None] = {}
         self._nasdaq_by_symbol: dict[str, list[dict]] = {}
+        self._splits: dict[str, pd.DataFrame | None] = {}
         self.nasdaq_failed = 0
+
+    def splits(self, symbol: str) -> pd.DataFrame | None:
+        """The FMP splits calendar of `symbol` (memoised: one request per underlying per run,
+        one per week through the cache); None when FMP answered with an error. Budget
+        exhaustion propagates: it is a checkpoint like the intraday request."""
+        symbol = symbol.upper()
+        if symbol not in self._splits:
+            try:
+                self._splits[symbol] = self.fmp.splits(symbol)
+            except (FMPError, httpx.HTTPError, ValueError) as exc:
+                log.warning("FMP splits unavailable for %s: %s", symbol, exc)
+                self._splits[symbol] = None
+        return self._splits[symbol]
 
     def sec_data(self, cik: int | None) -> _SecData:
         if cik is None:
@@ -758,8 +780,26 @@ def _base_row(ev: _Event) -> dict[str, Any]:
         E.rev_surprise_pct: _surprise_pct(ev.rev_actual, ev.rev_estimate), E.n_estimates: pd.NA,
         E.estimate_source: "fmp_final", E.estimate_snapshot_time: pd.NaT, E.sources_used: "fmp",
         E.has_perp_at_t0: False, E.listing_start: n.earliest_listing, E.pending: False,
-        E.flags: "", "t0_acceptance": pd.NaT, "t0_lag_s": math.nan, "t0_detail": "",
+        E.flags: "", E.ca_ex_date: pd.NaT, "t0_acceptance": pd.NaT, "t0_lag_s": math.nan,
+        "t0_detail": "",
     }
+
+
+def corporate_action_near(splits: pd.DataFrame | None, t0: pd.Timestamp, horizon_hours: int) -> pd.Timestamp | None:
+    """UTC instant (00:00 America/New_York) of the split ex-date nearest t0 inside
+    [t0 - CORPORATE_ACTION_LOOKBACK, t0 + horizon_hours]; None when there is none."""
+    if splits is None or len(splits) == 0 or "ex_date" not in splits.columns:
+        return None
+    t0 = to_utc(t0, assume_tz=UTC)
+    lo, hi = t0 - CORPORATE_ACTION_LOOKBACK, t0 + pd.Timedelta(hours=horizon_hours)
+    best: pd.Timestamp | None = None
+    for d in splits["ex_date"]:
+        if d is None or _isna(d):
+            continue
+        ex = to_utc(pd.Timestamp(_as_date(d)), assume_tz=NY)
+        if lo <= ex <= hi and (best is None or abs(ex - t0) < abs(best - t0)):
+            best = ex
+    return best
 
 
 def _pending_row(ev: _Event, providers: _Providers | None, *, today_ny: date | None = None) -> dict[str, Any]:
@@ -879,6 +919,17 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
     if date_conflict:
         row[E.t0_confidence] = 0.0
     row[E.timing] = _timing_of(t0)
+
+    # corporate actions: a split ex-date near the release (design §2); the targets decide
+    # from E.ca_ex_date whether the headline label survives
+    splits = providers.splits(name.underlying)
+    if splits is None:
+        flags.append("splits_error")
+    else:
+        ex = corporate_action_near(splits, t0, providers.settings.horizon_hours)
+        if ex is not None:
+            flags.append(FLAG_CORPORATE_ACTION)
+            row[E.ca_ex_date] = ex
 
     # consensus provenance: an archived snapshot captured before t0 beats the vendor's final value
     snap = consensus_before(snapshots, name.underlying, d_eff, t0)

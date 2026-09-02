@@ -117,7 +117,7 @@ def pre_cut(ctx: FeatureContext) -> pd.Timestamp:
     t0 = event_t0(ctx)
     if t0 is None:
         return as_of
-    return min(as_of, t0 - p0_buffer_for(ctx.event))
+    return min(as_of, t0 - p0_buffer_for(ctx.event, ctx.p0_buffer_minutes_sec_8k))
 
 
 def _cut_by(frame: pd.DataFrame, ends: pd.Series, instant: pd.Timestamp, col: str) -> pd.DataFrame | None:
@@ -608,10 +608,12 @@ REACTION_KEYS = tuple(f"r_{k}m" for k in REACTION_HORIZONS_MIN) + (
     "premium_post")
 
 
-def _valid_hit(hit, p0_time: pd.Timestamp, when: pd.Timestamp, stale: pd.Timedelta) -> float | None:
-    """Close of a checkpoint bar under the targets' validity rule: the bar must end after the
-    P0 bar and no more than `stale` before the instant."""
-    if hit is None or hit[1] <= p0_time or when - hit[1] > stale:
+def _valid_hit(hit, post_from: pd.Timestamp, when: pd.Timestamp, stale: pd.Timedelta) -> float | None:
+    """Close of a reaction bar: it must end after `post_from` = max(P0 bar end, t0) -- after the
+    P0 bar as in the targets' validity rule, and after the release itself -- and no more than
+    `stale` before the instant. With the 8-K buffer on 5-minute bars the bar between the P0 bar
+    and t0 ends at or before t0: it is pre-release drift, not a reaction."""
+    if hit is None or hit[1] <= post_from or when - hit[1] > stale:
         return None
     return float(hit[0])
 
@@ -619,11 +621,13 @@ def _valid_hit(hit, p0_time: pd.Timestamp, when: pd.Timestamp, stale: pd.Timedel
 @feature_group("reaction", admissible=("post",))
 def reaction(ctx: FeatureContext) -> dict[str, float | None]:
     """Early reaction from bars ending at or before as_of: r_k for k in {1,5,15,30,60} minutes
-    (only those with t0 + k <= as_of, same P0 and validity rules as targets.compute_targets),
-    the return at as_of, the post-release high/low path (bars ending after t0), volume z-score
-    against the bars up to the P0 bar, the abnormal return versus the benchmark fine bars and
-    the perp premium after t0. Like the targets, only 1m/5m bars resolve any of this: on 1h or
-    coarser bars every key is None."""
+    (only those with t0 + k <= as_of, same P0 and validity rules as targets.compute_targets,
+    plus: the bar must end after t0), the return at as_of, the post-release high/low path (bars
+    ending after t0), volume z-score against the bars up to the P0 bar, the abnormal return
+    versus the benchmark fine bars and the perp premium after t0. r_k is None when no bar
+    ending after t0 has closed by t0 + k: on 5-minute paths r_1m is always None and, at
+    post_1m, so is the whole group. Like the targets, only 1m/5m bars resolve any of this: on
+    1h or coarser bars every key is None."""
     out = none_dict(REACTION_KEYS)
     t0 = event_t0(ctx)
     if t0 is None:
@@ -632,26 +636,29 @@ def reaction(ctx: FeatureContext) -> dict[str, float | None]:
     fine = cut(ctx.bars, as_of)
     if fine is None or interval_label(fine) not in FINE_INTERVALS:
         return out
-    buffer = p0_buffer_for(ctx.event)
+    buffer = p0_buffer_for(ctx.event, ctx.p0_buffer_minutes_sec_8k)
     stale = max_staleness(interval_label(fine))
     ref = px(fine, t0 - buffer)
     if ref is None or not ref[0] > 0:
         return out
     p0, p0_time = float(ref[0]), ref[1]
+    # a reaction bar must end after the release, not merely after the P0 bar: with the 8-K
+    # buffer on 5m bars the bar between them ends at or before t0 and is not a reaction
+    post_from = max(p0_time, t0)
     for k in REACTION_HORIZONS_MIN:
         when = t0 + pd.Timedelta(minutes=k)
         if when > as_of:
             continue
-        p = _valid_hit(px(fine, when), p0_time, when, stale)
+        p = _valid_hit(px(fine, when), post_from, when, stale)
         out[f"r_{k}m"] = log_ret(p, p0)
-    p_now = _valid_hit(px(fine, as_of), p0_time, as_of, stale)
+    p_now = _valid_hit(px(fine, as_of), post_from, as_of, stale)
     r_now = log_ret(p_now, p0)
     out["r_now"] = r_now
     out["abs_r_now"] = abs(r_now) if r_now is not None else None
     ends = pd.to_datetime(fine[C.t_end], utc=True, errors="coerce")
     # the path is what traded after the release: bars ending after t0. Bars between the P0 bar
     # and t0 (the 8-K buffer) belong to neither the path nor the pre-release volume baseline.
-    post = fine.loc[(ends > max(p0_time, t0)).to_numpy()]
+    post = fine.loc[(ends > post_from).to_numpy()]
     pre = fine.loc[(ends <= p0_time).to_numpy()]
     if len(post):
         hi, lo = closes(post, C.high), closes(post, C.low)

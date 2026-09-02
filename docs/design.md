@@ -85,11 +85,16 @@ behind them. Whether anything is predictable is an output of the harness, not an
   inside a 25 bp dead band; the count of dead-band events is reported). `post_15m` reports
   `continuation_15m`, later decision times `continuation_30m`.
 * **Corporate actions**: price inputs within one source are put on the as-of basis using the
-  FMP splits calendar (measured 2026-09-02: FMP intraday and EOD bars are already
-  split-adjusted for NFLX's 10:1 split; see data-sources.md). Events with a split or spin-off
-  ex-date inside `[t0 − 60 d, t0 + 24 h]` get `flags += corporate_action`; those with the
-  ex-date inside `[P0, t0 + 24 h]` have NaN headline targets. A perp path across a split is used
-  only if measured continuous.
+  FMP splits calendar (`stable/splits`, fetched once per underlying; measured 2026-09-02: FMP
+  intraday and EOD bars are already split-adjusted for NFLX's 10:1 split; see
+  data-sources.md). Events with a split ex-date inside `[t0 − 60 d, t0 + 24 h]` get
+  `flags += corporate_action` and carry the ex-date nearest `t0` as
+  `corporate_action_ex_date` (00:00 America/New_York); those with the ex-date inside
+  `[P0, t0 + 24 h]` have NaN headline targets (`r_24h` and the labels derived from it). The
+  FMP proxy keeps its intermediate checkpoints because its bars are adjusted; a perp path is
+  not adjusted and no perp split has been measured continuous yet, so on a perp path every
+  checkpoint whose bar ends at or after the ex-date is NaN as well. A failed splits request is
+  `flags += splits_error` and leaves the event unchecked.
 * **Decision time** `d ∈ {pre_5m, post_1m, post_15m, post_30m, post_60m}` meaning
   `t0 − 5min`, `t0 + k min`. A feature is admissible at `d` only if its own timestamp `≤ d`.
   The feature builder enforces this with an explicit `as_of` argument on every provider call;
@@ -174,7 +179,7 @@ alternate's candles are used and recorded in `price_market`.
 | market | `xyz:SP500` / SPY 1/5 d returns, `xyz:VIX` level and 5 d change, sector proxy (SMH, XLE, XBI) returns | pre |
 | perp_state | funding rate, premium (mark−oracle), open-interest change 24 h, 30-day volume, listing age (None when the listing is after `d`), leverage cap (the **current** cap — Hyperliquid publishes no history, so this one feature is not point-in-time) | pre (when perp exists) |
 | surprise | EPS and revenue surprise %, standardised against the name's own surprise history, sign agreement | post |
-| reaction | `r_1m…r_k`, path high/low range, volume z-score, perp premium after release | post_k |
+| reaction | `r_1m…r_k`, path high/low range, volume z-score, perp premium after release; `r_k` is NaN when no bar ending after `t0` has closed by `t0 + k` (on 5-minute paths `r_1m` is always NaN and the whole group is NaN at `post_1m`, so the 8-K buffer bar before `t0` is never reported as a reaction) | post_k |
 | text (deferred) | guidance change and tone from the 8-K EX-99.1 via an LLM; **not built in v1** because an LLM trained after the event knows the outcome, so the feature cannot be made point-in-time for historical rows | — |
 
 Missing features are explicit (`NaN` + indicator), never imputed silently. Daily bars of the
@@ -226,8 +231,9 @@ trained model and added to `r_hat` at prediction time.
   at or before `x`, so a fill is always strictly later than the signal it acts on. `fill_lag`
   is recorded per trade; trades whose lag exceeds `max_fill_lag_minutes` (default 5) are not
   taken and their count is reported. Execution cost per leg is
-  `slip_bps = slippage_floor_bps + slippage_range_coeff × (high − low)/open` of the execution
-  bar (defaults 5 bp and 0.25), plus the taker fee (`taker_fee_bps`, default 4.5). Funding is
+  `slip_bps = slippage_floor_bps + slippage_range_coeff × range_bps`, where
+  `range_bps = 1e4 × (high − low)/open` of the execution bar (defaults 5 bp and 0.25, i.e. a
+  quarter of the bar's range in bp), plus the taker fee (`taker_fee_bps`, default 4.5). Funding is
   accrued hourly from the archive only when the perp existed at `t0` and archived funding covers
   `[d, t0+24h]`; otherwise zero, with `funding_source ∈ {archive, none}` recorded and the share of
   events (and of PnL) with real funding reported. Side = sign(`p_up` − 0.5) when

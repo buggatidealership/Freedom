@@ -7,7 +7,15 @@ import pandas as pd
 import pytest
 
 from freedom.schemas import CONTINUATION_DEAD_BAND, C, E, T
-from freedom.targets import build_price_path, checkpoint_times, compute_targets, price_at
+from freedom.targets import (
+    build_price_path,
+    build_targets,
+    checkpoint_times,
+    compute_targets,
+    corporate_action_ex,
+    p0_buffer_for,
+    price_at,
+)
 from freedom.timeutil import to_utc
 
 FIX = Path(__file__).parent / "fixtures" / "hyperliquid"
@@ -176,3 +184,155 @@ def test_upcoming_events_never_hit_providers(settings):
     path, mkt = load_event_bars(settings, ev, hl=Boom(), fmp=Boom(), benchmark_market="xyz:SP500",
                                 benchmark_equity="SPY", now=to_utc("2026-09-02 12:00", assume_tz="UTC"))
     assert len(path) == 0 and mkt is None
+
+
+class Recorder:
+    """Provider stand-in that records the method asked for and refuses to answer."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name):
+        self.calls.append(name)
+        raise AssertionError(f"provider called: {name}")
+
+
+def test_context_loader_never_asks_for_a_window_entirely_in_the_future(settings):
+    """The feature loader's fallback (raw bars around the release when no source covers the
+    target window) must not spend a request on an upcoming event either; a release later
+    today still gets its pre-release bars."""
+    from freedom.features.loaders import ContextLoader, EventInputs, UnderlyingInputs
+
+    ev = pd.Series({E.event_id: "NVDA:2026-10", E.underlying: "NVDA", E.market: "xyz:NVDA",
+                    E.t0: to_utc("2026-11-18 21:05", assume_tz="UTC"), E.t0_source: "calendar_flag",
+                    E.has_perp_at_t0: True})
+    events = pd.DataFrame([ev])
+    hl, fmp = Recorder(), Recorder()
+    loader = ContextLoader(settings, events, hl=hl, fmp=fmp, now=to_utc("2026-09-02 12:00", assume_tz="UTC"))
+    assert loader.event_bars(ev) == (None, None)
+    assert hl.calls == [] and fmp.calls == []
+    # the context carries the P0 buffer setting to the feature groups
+    settings.p0_buffer_minutes_sec_8k = 1.5
+    ctx = loader.context(ev, "post_30m", ev[E.t0] + pd.Timedelta(minutes=30), history=None, bars=None,
+                         market_bars=None, uinputs=UnderlyingInputs(underlying="NVDA"), einputs=EventInputs())
+    assert ctx.p0_buffer_minutes_sec_8k == 1.5 and ctx.horizon_hours == settings.horizon_hours
+    # the release is later today: [t0 - 1d, ...] has started, the pre-release bars are wanted
+    later_today = ContextLoader(settings, events, hl=Recorder(), fmp=fmp,
+                                now=to_utc("2026-11-18 12:00", assume_tz="UTC"))
+    assert later_today.event_bars(ev) == (None, None)  # the fakes refuse, the loader degrades
+    assert "intraday" in fmp.calls
+
+
+def _resolved_events(*rows: pd.Series) -> pd.DataFrame:
+    return pd.DataFrame(list(rows))
+
+
+def test_p0_buffer_setting_reaches_the_targets(settings, monkeypatch):
+    """Settings.p0_buffer_minutes_sec_8k is part of the config hash, so it must change P0."""
+    from freedom.targets import loaders
+
+    bars = _hl_bars("candles_xyzNVDA_5m_20260826.json", "5m")
+    monkeypatch.setattr(loaders, "load_event_bars", lambda *_a, **_k: (bars, None))
+    detected = _event("detected")
+    detected[E.event_id] = "NVDA:detected"
+    events = _resolved_events(_event("sec_8k"), detected)
+    default = build_targets(settings, events, write=False).set_index(T.event_id)
+    assert default.loc["NVDA:2026-07", T.p0_time] == to_utc("2026-08-26 20:15", assume_tz="UTC")
+    assert default.loc["NVDA:2026-07", T.p0] == pytest.approx(210.63)
+    settings.p0_buffer_minutes_sec_8k = 0.0
+    zero = build_targets(settings, events, write=False).set_index(T.event_id)
+    assert zero.loc["NVDA:2026-07", T.p0_time] == to_utc("2026-08-26 20:20", assume_tz="UTC")  # last bar ending <= t0
+    assert zero.loc["NVDA:2026-07", T.p0] == pytest.approx(211.07)
+    assert zero.loc["NVDA:2026-07", T.p0_staleness_min] == pytest.approx(79 / 60, abs=0.01)
+    # other sources never back off, whatever the setting
+    for tg in (default, zero):
+        assert tg.loc["NVDA:detected", T.p0_time] == to_utc("2026-08-26 20:20", assume_tz="UTC")
+    assert p0_buffer_for(_event("sec_8k"), 1.5) == pd.Timedelta(minutes=1.5)
+    assert p0_buffer_for(_event("sec_8k")) == pd.Timedelta(minutes=3)
+    assert p0_buffer_for(_event("manual"), 1.5) == pd.Timedelta(0)
+
+
+def test_pending_rows_get_nan_targets_without_a_provider_request(settings, monkeypatch):
+    """`freedom events` writes pending rows (t0 NaT) at budget exhaustion; the targets pass
+    must keep one row per event_id and not die on them."""
+    from freedom.targets import loaders
+
+    bars = _hl_bars("candles_xyzNVDA_5m_20260826.json", "5m")
+    asked: list[str] = []
+
+    def fake_load(_settings, ev, **_kw):
+        asked.append(ev[E.event_id])
+        return bars, None
+
+    monkeypatch.setattr(loaders, "load_event_bars", fake_load)
+    placeholder = pd.Series({E.event_id: "AAPL:pending", E.underlying: "AAPL", E.market: "xyz:AAPL",
+                             E.t0: pd.NaT, E.t0_source: None, E.pending: True,
+                             E.flags: "pending;earnings_history_pending"})
+    pending = pd.Series({E.event_id: "NVDA:2026-04", E.underlying: "NVDA", E.market: "xyz:NVDA",
+                         E.t0: pd.NaT, E.t0_source: None, E.pending: True, E.flags: "pending"})
+    resolved = _event("sec_8k")
+    resolved[E.pending] = False
+    events = _resolved_events(placeholder, pending, resolved)  # newest first, like the table
+    settings.fmp_api_key = None
+    tg = build_targets(settings, events, write=True)
+    assert list(tg[T.event_id]) == ["AAPL:pending", "NVDA:2026-04", "NVDA:2026-07"]
+    assert tg[T.r("24h")].isna().tolist() == [True, True, False]
+    assert tg[T.h24_in_closure].isna().tolist() == [True, True, False]
+    assert asked == ["NVDA:2026-07"]
+    back = pd.read_parquet(settings.targets_path)
+    assert len(back) == 3 and back[T.p0].isna().tolist() == [True, True, False]
+    # the empty row can be built without a t0 (this is what the failure handler falls back to)
+    row = compute_targets(pending, pd.DataFrame(), None)
+    assert row[T.event_id] == "NVDA:2026-04" and np.isnan(row[T.p0]) and np.isnan(row[T.r("24h")])
+    assert pd.isna(row[T.h24_in_closure]) and pd.isna(row[T.p0_time])
+    # ... and the resolved row with a NaN pending column is still resolved
+    resolved[E.pending] = np.nan
+    assert not np.isnan(build_targets(settings, _resolved_events(resolved), write=False)[T.r("24h")].iloc[0])
+
+
+def _split_path(bars: pd.DataFrame, ex: pd.Timestamp, ratio: float = 10.0) -> pd.DataFrame:
+    """An unadjusted perp path across a `ratio`:1 forward split at `ex`."""
+    out = bars.copy()
+    after = (out[C.t] >= ex).to_numpy()
+    for col in (C.open, C.high, C.low, C.close):
+        out.loc[after, col] = out.loc[after, col] / ratio
+    return out
+
+
+def test_split_ex_date_inside_the_window_voids_the_headline_label():
+    bars = _hl_bars("candles_xyzNVDA_5m_20260826.json", "5m")
+    ex = to_utc("2026-08-27 00:00", assume_tz="America/New_York")  # 04:00 UTC, between t0 and t0 + 24h
+    clean = compute_targets(_event(), bars, None)
+    # the hazard: an unadjusted perp path across a 10:1 split reads as a -230% day
+    naive = compute_targets(_event(), _split_path(bars, ex), None)
+    assert naive[T.r("24h")] < -2 and naive[T.direction] == -1.0
+    for ex_value in (ex, ex.tz_convert("America/New_York").date(), "2026-08-27"):
+        ev = _event()
+        ev[E.ca_ex_date] = ex_value
+        assert corporate_action_ex(ev) == ex
+        tg = compute_targets(ev, _split_path(bars, ex), None)
+        for cp in ("5m", "15m", "30m", "60m", "2h"):  # bars before the ex-date: same as the clean path
+            assert tg[T.r(cp)] == pytest.approx(clean[T.r(cp)]), cp
+        for cp in ("next_open", "next_open_30m", "next_close", "24h"):  # perp bars from the ex-date on
+            assert np.isnan(tg[T.r(cp)]) and pd.isna(tg[T.t(cp)]) and np.isnan(tg[T.s(cp)]), cp
+        assert np.isnan(tg[T.direction]) and np.isnan(tg[T.magnitude])
+        assert np.isnan(tg[T.continuation_15m]) and np.isnan(tg[T.continuation_30m])
+        assert np.isnan(tg[T.horizon_actual_h]) and tg[T.p0] == pytest.approx(clean[T.p0])
+    # the FMP proxy is split-adjusted: only the headline label goes, the intermediate checkpoints stay
+    proxy = bars.copy()
+    proxy[C.source] = "fmp_intraday"
+    ev = _event()
+    ev[E.ca_ex_date] = ex
+    tg = compute_targets(ev, proxy, None)
+    assert np.isnan(tg[T.r("24h")]) and np.isnan(tg[T.direction])
+    for cp in ("5m", "2h", "next_open", "next_close"):
+        assert tg[T.r(cp)] == pytest.approx(clean[T.r(cp)]), cp
+    # an ex-date before the P0 bar (whole path on the new basis) or after the horizon changes nothing
+    for outside in ("2026-08-26", "2026-08-28"):
+        ev = _event()
+        ev[E.ca_ex_date] = outside
+        pd.testing.assert_series_equal(compute_targets(ev, bars, None), clean)
+    ev = _event()
+    ev[E.ca_ex_date] = pd.NaT
+    pd.testing.assert_series_equal(compute_targets(ev, bars, None), clean)
+    assert corporate_action_ex(ev) is None and corporate_action_ex(_event()) is None

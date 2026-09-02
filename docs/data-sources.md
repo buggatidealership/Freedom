@@ -83,7 +83,11 @@ Every statement here was verified by a live request from the build environment o
   are split-adjusted**: NFLX closed 2025-11-14 at 111.22 and opened 2025-11-17 at 110.75 in the
   EOD series, and the 04:00 ET bar of 2025-11-14 prints 115.20, all on the post-split basis.
   `xyz:NFLX` had no candles in November 2025 (listed later), so no perp split discontinuity has
-  been observed yet; the harness still flags events with an ex-date inside the window.
+  been observed yet. The harness fetches the calendar once per underlying (`FMPClient.splits`,
+  cached a week), flags events with an ex-date inside `[t0 − 60 d, t0 + 24 h]`
+  (`corporate_action`, `corporate_action_ex_date`), NaNs the headline target when the ex-date
+  lies in `[P0, t0 + 24 h]`, and on a perp path (not adjusted) NaNs every checkpoint from the
+  ex-date on. Fixture: `tests/fixtures/fmp/splits_NFLX.json`.
 * `stable/earning-call-transcript` is **restricted** on this plan. Rate-limit headers are not
   exposed; the free plan is documented at 250 requests/day (*assumed*). The client caches every
   response on disk and budgets requests per run.
