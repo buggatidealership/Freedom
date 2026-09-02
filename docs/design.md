@@ -290,15 +290,20 @@ that the improvement is noise.
 ## 10. Live prediction
 
 `freedom upcoming` lists universe events in the next N days (FMP calendar with the newest
-archived consensus snapshot). `freedom predict --event <event_id> --decision <d>` builds
-features `as_of` a well-defined instant and loads the trained model for `d`:
+archived consensus snapshot) under the `event_id` of the matching `events.parquet` row when
+there is one — an off-calendar fiscal year makes it differ from the calendar quarter — else a
+minted `<underlying>:<calendar quarter>`. `freedom predict --event <event_id> --decision <d>`
+builds features `as_of` a well-defined instant and loads the trained model for `d`:
 
 * **pre_5m**: `as_of = expected_t0 − 5 min`, where `expected_t0` is the issuer's median
   acceptance clock time over its past `sec_8k` events (a manual override on the matching
   upcoming row of `events.parquet` wins; fallbacks in order: that row's calendar-flag time,
-  the Nasdaq calendar's time flag, the AMC default).
-  The live row stores `as_of`, `expected_t0`, and, once the 8-K arrives, `t0_actual` and
-  `t0_lag_s`.
+  the Nasdaq calendar's time flag, the event's own AMC/BMO class, the AMC default). Only
+  acceptances at or before the decision clock count, and a resolved row's own `t0` never
+  seeds the expectation, so replaying a decision for an event the table has since resolved
+  cannot learn the clock from that event. The live row stores `as_of`, `expected_t0`, the
+  stratum key `t0_source_live` (`expected_manual`, `expected_sec_8k`, `expected_calendar_flag`)
+  and, once the 8-K arrives, `t0_actual` and `t0_lag_s`.
 * **post_k**: `t0_live` comes from the live detector on 1-minute perp or FMP bars (the same
   code as the historical detector); the 8-K acceptance is back-filled afterwards and the row is
   scored in the `detected` stratum. `predict` marks the row `off_schedule` (and does not trade)
@@ -306,8 +311,13 @@ features `as_of` a well-defined instant and loads the trained model for `d`:
 * Every live row records `model_id`, the data sources used, `input_lag_s` per source (FMP bar
   availability, Hyperliquid candle, SEC submissions), and is appended to
   `data/live_predictions.parquet`; `freedom evaluate --live` later scores those rows against
-  realised targets and compares live and backtest decision instants. The one-off measurement of
-  input lags during an earnings evening is recorded in data-sources.md when done.
+  realised targets and compares live and backtest decision instants. `run_at` is always the
+  wall clock; a run with `--now` (a replay) records the override as `now_override` and sets
+  `replay = True`, and `evaluate --live` keeps replays out of the headline live score as a
+  separate stratum. The features are built from the same loader inputs as the dataset
+  (funding, perp candles, leverage, sector and VIX bars, same-day count), so the model never
+  scores a live row whose whole loader block is missing. The one-off measurement of input
+  lags during an earnings evening is recorded in data-sources.md when done.
 * Output: `p_up`, expected `r_24h`, residual-based 10/90 % band, top feature contributions,
   consensus provenance, and the model's walk-forward record for `d`.
 

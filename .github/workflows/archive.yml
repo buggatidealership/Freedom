@@ -26,8 +26,12 @@ jobs:
         # of that name from any earlier run, which is how the archive accumulates.
         run: gh run download -n candle-archive -D data/archive -R "${{ github.repository }}" || echo "no previous archive (first run)"
       - run: uv run freedom universe
-      - run: uv run freedom archive
+      # --strict: exit 4 (a red run, so GitHub notifies) when any item errored or 1-minute
+      # bars were lost past the server horizon; the archive is uploaded regardless so a
+      # failed run never stops it accumulating.
+      - run: uv run freedom archive --strict
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: candle-archive
           path: data/archive

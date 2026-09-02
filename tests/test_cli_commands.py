@@ -17,7 +17,7 @@ import freedom.live as live_mod
 import freedom.optimize as optimize_mod
 import freedom.targets as targets_mod
 import freedom.universe as universe_mod
-from freedom.cli import _summary_rows, app
+from freedom.cli import DEFAULT_EVALUATE_MODELS, _csv, _summary_rows, app
 from freedom.data.base import BudgetExhausted, DailyBudget, ProviderUnavailable
 from freedom.schemas import D, E, T, U
 
@@ -61,13 +61,20 @@ def _dataset() -> pd.DataFrame:
 
 # ---- universe -----------------------------------------------------------------------------------------
 def test_universe_prints_summary_and_verify_only_rows(dirs, monkeypatch):
-    monkeypatch.setattr(universe_mod, "build_universe", lambda s, write=True: _universe())
+    writes = []
+
+    def build(s, write=True):
+        writes.append(write)
+        return _universe()
+
+    monkeypatch.setattr(universe_mod, "build_universe", build)
     result = runner.invoke(app, ["universe"])
     assert result.exit_code == 0, result.output
     assert "equity_us" in result.output and "1 rows need verification" in result.output
     result = runner.invoke(app, ["universe", "--verify-only"])
     assert result.exit_code == 0, result.output
     assert "zzz:FOO" in result.output and "xyz:NVDA" not in result.output
+    assert writes == [True, False]  # a report only: data/universe.parquet is left alone
 
 
 def test_universe_without_fmp_is_fine_but_provider_failures_exit_2(dirs, monkeypatch):
@@ -214,6 +221,41 @@ def test_evaluate_prints_leaderboard_and_final_holdout_count(dirs, monkeypatch):
     (reports / "holdout_scorings.jsonl").write_text('{"a":1}\n{"b":2}\n')
     result = runner.invoke(app, ["evaluate", "--final"])
     assert result.exit_code == 0 and seen["final"] is True and "scored 2 time(s)" in result.output
+    assert seen["models"] == _csv(DEFAULT_EVALUATE_MODELS)
+
+
+def test_evaluate_default_models_cover_every_baseline():
+    """The magnitude baselines (hist_abs_mean, vol_scaled) and the continuation ones must be in
+    the default run, or the report's best baseline per metric understates the bar."""
+    assert set(_csv(DEFAULT_EVALUATE_MODELS)) >= set(eval_mod.DEFAULT_BASELINES)
+    assert {"linear", "lightgbm"} <= set(_csv(DEFAULT_EVALUATE_MODELS))
+
+
+def test_evaluate_prerequisite_failures_exit_2_like_optimize(dirs, monkeypatch):
+    data, _ = dirs
+    _dataset().to_parquet(data / "dataset.parquet", index=False)
+
+    def no_fold(s, ds, **kw):
+        raise ValueError("pre_5m: no season has 120 trainable events before it (seasons: 2025Q4, 2026Q1)")
+
+    monkeypatch.setattr(eval_mod, "evaluate", no_fold)
+    result = runner.invoke(app, ["evaluate"])
+    assert result.exit_code == 2, result.output
+    assert "no season has 120 trainable events" in result.output and "FREEDOM_MIN_TRAIN_EVENTS" in result.output
+
+    def not_ready(s, ds, **kw):
+        raise eval_mod.HoldoutNotReady("the holdout season 2026Q3 is not closed")
+
+    monkeypatch.setattr(eval_mod, "evaluate", not_ready)
+    result = runner.invoke(app, ["evaluate", "--final"])
+    assert result.exit_code == 2 and "holdout not ready" in result.output and "2026Q3" in result.output
+
+    def bug(s, ds, **kw):  # an unknown model name is a KeyError: still a traceback, not a hint
+        raise KeyError("unknown model 'nope'")
+
+    monkeypatch.setattr(eval_mod, "evaluate", bug)
+    result = runner.invoke(app, ["evaluate", "--models", "nope"])
+    assert result.exit_code == 1 and isinstance(result.exception, KeyError)
 
 
 # ---- optimize -----------------------------------------------------------------------------------------
@@ -274,9 +316,11 @@ def test_train_saves_and_prints_model_metadata(dirs, monkeypatch):
 
 
 # ---- predict ------------------------------------------------------------------------------------------
-def _prediction() -> dict:
+def _prediction(replay: bool = False) -> dict:
     as_of = pd.Timestamp("2026-08-26 20:00", tz="UTC")
     row = {E.event_id: "NVDA:2026-07", E.market: "xyz:NVDA", "decision_time": "pre_5m", "as_of": as_of,
+           "run_at": pd.Timestamp("2026-09-02 12:00", tz="UTC"), "replay": replay,
+           "now_override": as_of - pd.Timedelta(minutes=30) if replay else pd.NaT,
            "t0_used": as_of + pd.Timedelta(minutes=5), "t0_source_live": "expected_sec_8k", "off_schedule": False,
            "p_up": 0.62, "r_hat": 0.011, "r_lo": -0.04, "r_hi": 0.07, "magnitude_hat": 0.011,
            "model_id": "pre_5m/linear@abcdef01", "sources_used": "hyperliquid", "bar_source": "hyperliquid",
@@ -293,7 +337,7 @@ def test_predict_prints_the_prediction(dirs, monkeypatch):
 
     def predict_event(s, *, event_id, decision, model_name=None, now=None, append=True, **kw):
         seen.update(event_id=event_id, decision=decision, model_name=model_name, now=now, append=append)
-        return _prediction()
+        return _prediction(replay=now is not None)
 
     monkeypatch.setattr(live_mod, "predict_event", predict_event)
     result = runner.invoke(app, ["predict", "--event", "NVDA:2026-07", "--decision", "pre_5m", "--model", "linear",
@@ -303,6 +347,9 @@ def test_predict_prints_the_prediction(dirs, monkeypatch):
                     "now": "2026-08-26T19:30:00Z", "append": True}
     assert "0.62" in result.output and "consensus_snapshot" in result.output and "f_pre_price_x" in result.output
     assert "live_predictions.parquet" in result.output
+    assert "REPLAY" in result.output and "2026-08-26 19:30" in result.output  # a --now run is labelled as such
+    result = runner.invoke(app, ["predict", "--event", "NVDA:2026-07", "--decision", "pre_5m", "--model", "linear"])
+    assert result.exit_code == 0 and "REPLAY" not in result.output
     assert runner.invoke(app, ["predict", "--event", "x", "--decision", "noon"]).exit_code == 2
 
 
@@ -345,8 +392,8 @@ def test_predict_failure_modes_have_distinct_exit_codes(dirs, monkeypatch):
 
 # ---- upcoming -----------------------------------------------------------------------------------------
 def test_upcoming_lists_events_with_the_id_predict_takes(dirs, monkeypatch):
-    def upcoming(s, days=14):  # the events implementation's columns: no event_id
-        return pd.DataFrame({E.underlying: ["NVDA"], E.market: ["xyz:NVDA"], E.kind: ["equity_us"],
+    def upcoming(s, days=14, event_id=None):  # the events implementation's columns: event_id None until the table has the row
+        return pd.DataFrame({E.event_id: [event_id], E.underlying: ["NVDA"], E.market: ["xyz:NVDA"], E.kind: ["equity_us"],
                              E.report_date_ny: [pd.Timestamp("2026-11-18").date()],
                              "expected_t0": [pd.Timestamp("2026-11-18 21:05", tz="UTC")],
                              "expected_t0_source": ["calendar default (AMC)"], E.eps_estimate: [1.3]})
@@ -354,6 +401,9 @@ def test_upcoming_lists_events_with_the_id_predict_takes(dirs, monkeypatch):
     monkeypatch.setattr(events_mod, "upcoming_events", upcoming)
     result = runner.invoke(app, ["upcoming", "--days", "30"])
     assert result.exit_code == 0 and "NVDA:2026-09" in result.output and "30 days" in result.output
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: upcoming(s, days, "NVDA:2026-10"))
+    result = runner.invoke(app, ["upcoming"])  # the events table's id (off-calendar fiscal year) is printed as is
+    assert result.exit_code == 0 and "NVDA:2026-10" in result.output and "NVDA:2026-09" not in result.output
     monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: pd.DataFrame())
     assert "no universe events" in runner.invoke(app, ["upcoming"]).output
 

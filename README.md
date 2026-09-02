@@ -68,12 +68,16 @@ freedom universe                 # Hyperliquid markets -> data/universe.parquet 
 freedom archive                  # candles, funding, context and consensus snapshots (run every 12 h)
 freedom events --since 2024-01-01 --underlyings NVDA,AAPL,MSFT,AMZN,META,GOOGL,TSLA,AMD,MU,INTC
 freedom dataset --decision-times pre_5m,post_15m,post_30m
-freedom evaluate --models zero,base_rate,historical_mean,sign_of_reaction,linear,lightgbm --decision-times pre_5m,post_30m
+freedom evaluate --models zero,base_rate,historical_mean,hist_abs_mean,vol_scaled,sign_of_reaction,always_extends,surprise_sign,linear,lightgbm --decision-times pre_5m,post_30m
 freedom optimize --decision-times post_30m --n-trials 50
 freedom train --model lightgbm --decision-time post_30m
 freedom upcoming --days 14
 freedom predict --event NVDA:2026-10 --decision post_30m
 ```
+
+The ten-name/2024 example yields fewer than the default 120 trainable events per walk-forward
+fold, so `evaluate` and `optimize` need `FREEDOM_MIN_TRAIN_EVENTS=12` (what the first-run
+reports in `docs/results.md` used); without it they exit 2 and say so.
 
 The FMP free plan allows about 250 requests a day. `events` and `dataset` treat an exhausted
 budget as a checkpoint: they write what they have, mark the rest `pending`, exit non-zero, and

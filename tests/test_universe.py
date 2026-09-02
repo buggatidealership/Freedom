@@ -3,8 +3,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from freedom import universe as universe_mod
+from freedom.data import archive as archive_mod
 from freedom.schemas import U
 from freedom.universe import choose_primary, classify, load_overrides, verification_report
+from tests.fakes import FakeHyperliquidInfo
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -71,6 +74,34 @@ def test_choose_primary_prefers_volume_then_dex_priority(settings):
     assert bool(by.loc["xyz:NVDA", U.in_event_universe])
     assert not bool(by.loc["xyz:GOLD", U.in_event_universe])
     assert u[U.in_event_universe].sum() == u.loc[u[U.in_event_universe], U.underlying].nunique()
+
+
+def test_build_universe_writes_atomically_with_a_stable_clock(settings, monkeypatch):
+    FakeHyperliquidInfo().install(monkeypatch)  # markets from the fixtures; the SEC ticker map is unavailable
+    clocks = []
+
+    def listing_and_volume(hl, market, now):
+        clocks.append(now)
+        return None, float("nan")
+
+    monkeypatch.setattr(universe_mod, "_listing_and_volume", listing_and_volume)
+    writes = []
+    real_write = archive_mod.write_parquet_atomic
+
+    def write(df, path):
+        writes.append(path)
+        real_write(df, path)
+
+    monkeypatch.setattr(archive_mod, "write_parquet_atomic", write)
+    u = universe_mod.build_universe(settings)
+    # one clock for the whole pull, floored to the hour so the candle request (the cache key) repeats
+    assert clocks and len(set(clocks)) == 1 and clocks[0] == clocks[0].floor("h")
+    assert writes == [settings.universe_path] and settings.universe_path.exists()
+    assert not settings.universe_path.with_name(settings.universe_path.name + ".tmp").exists()
+    assert len(pd.read_parquet(settings.universe_path)) == len(u) and bool(u[U.in_event_universe].any())
+    settings.universe_path.unlink()
+    universe_mod.build_universe(settings, write=False)
+    assert not settings.universe_path.exists() and len(writes) == 1
 
 
 def test_verification_report_lists_uncertain_rows(settings):

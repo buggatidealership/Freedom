@@ -134,7 +134,9 @@ def build_universe(settings: Settings, *, write: bool = True) -> pd.DataFrame:
     overrides = load_overrides(settings)
     u = classify(markets, sec_tickers, overrides)
 
-    now = pd.Timestamp.now(tz="UTC")
+    # floored so the 30-day candle request body (the cache key) is stable within the hour and
+    # its 6 h cache_ttl in _listing_and_volume actually hits on reruns
+    now = pd.Timestamp.now(tz="UTC").floor("h")
     need = u[U.kind].isin([k.value for k in EVENT_KINDS]) | u[U.market].isin(BENCHMARK_MARKETS)
     starts: dict[str, pd.Timestamp | None] = {}
     notional: dict[str, float] = {}
@@ -151,7 +153,9 @@ def build_universe(settings: Settings, *, write: bool = True) -> pd.DataFrame:
     u = choose_primary(u, overrides)
     u = u.sort_values([U.in_event_universe, U.kind, U.market], ascending=[False, True, True]).reset_index(drop=True)
     if write:
-        u.to_parquet(settings.universe_path, index=False)
+        from ..data.archive import write_parquet_atomic
+
+        write_parquet_atomic(u, settings.universe_path)  # readers never see a partial file
     return u
 
 
