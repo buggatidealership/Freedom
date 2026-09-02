@@ -17,6 +17,7 @@ import respx
 from httpx import Response
 
 from freedom.data import sec as secmod
+from freedom.data.base import ProviderUnavailable
 from freedom.data.sec import (
     ARCHIVES_URL,
     COMPANYFACTS_URL,
@@ -26,6 +27,7 @@ from freedom.data.sec import (
     TTL_SUBMISSIONS,
     TTL_TICKERS,
     SECClient,
+    edgar_date,
     find_exhibit_path,
     html_to_text,
     normalise_accession,
@@ -322,6 +324,83 @@ def test_press_release_text_pdf_only_exhibit_is_none(settings):
         assert SECClient(settings).press_release_text(1, "0000000001-26-000003") is None
 
 
+def index_url(cik: int, accession: str) -> str:
+    return f"{ARCHIVES_URL}{cik}/{accession.replace('-', '')}/{accession}-index.htm"
+
+
+def test_press_release_text_404_is_remembered_and_rechecked_after_ttl(settings, monkeypatch):
+    client = SECClient(settings)
+    with respx.mock(assert_all_mocked=True) as m:
+        route = m.get(index_url(1, "0000000001-26-000004")).respond(404)
+        assert client.press_release_text(1, "0000000001-26-000004") is None
+        assert client.press_release_text(1, "0000000001-26-000004") is None
+        assert route.call_count == 1, "a genuine 404 is cached; do not re-hit EDGAR"
+    monkeypatch.setattr(secmod, "TTL_MISSING", -1)  # a marker written from now on is already stale
+    with respx.mock(assert_all_mocked=True, assert_all_called=False) as m:
+        route = m.get(index_url(1, "0000000001-26-000004")).respond(404)
+        assert client.press_release_text(1, "0000000001-26-000004") is None
+        assert route.call_count == 0, "the marker written under the default TTL is still fresh"
+        route = m.get(index_url(1, "0000000001-26-000005")).respond(404)
+        assert client.press_release_text(1, "0000000001-26-000005") is None
+        assert client.press_release_text(1, "0000000001-26-000005") is None
+        assert route.call_count == 2, "an expired marker is refetched"
+
+
+FORBIDDEN = Response(
+    403,
+    text="<html><body><h1>Undeclared Automated Tool</h1><p>Request Rate Threshold Exceeded"
+         "</p></body></html>",
+    headers={"content-type": "text/html"},
+)
+
+
+def test_press_release_text_403_is_a_policy_block_not_a_missing_document(settings):
+    """EDGAR uses 403 for rejected User-Agents and throttling, never for absent documents: a
+    throttled run must abort, not report 'no press release' for every filing."""
+    folder = f"{ARCHIVES_URL}1/000000000126000006/"
+    index_html = f"""
+    <table class="tableFile">
+    <tr><td>2</td><td>PRESS RELEASE</td><td><a href="{folder}pr.htm">pr.htm</a></td><td>EX-99.1</td><td>1</td></tr>
+    </table>"""
+    with respx.mock(assert_all_mocked=True) as m:
+        index = m.get(f"{folder}0000000001-26-000006-index.htm").mock(return_value=FORBIDDEN)
+        client = SECClient(settings)
+        with pytest.raises(ProviderUnavailable) as info:
+            client.press_release_text(1, "0000000001-26-000006")
+        msg = str(info.value)
+        assert "403" in msg and "Undeclared Automated Tool" in msg
+        assert "FREEDOM_SEC_USER_AGENT" in msg and "FREEDOM_SEC_REQUESTS_PER_SECOND" in msg
+        assert index.call_count == 1, "403 is not retried"
+        # nothing was cached for the blocked URL: a fixed User-Agent gets a fresh request
+        index.mock(return_value=html(index_html))
+        exhibit = m.get(f"{folder}pr.htm").mock(return_value=FORBIDDEN)
+        with pytest.raises(ProviderUnavailable):
+            client.press_release_text(1, "0000000001-26-000006")
+        assert index.call_count == 2 and exhibit.call_count == 1
+        exhibit.mock(return_value=html("<p>All good</p>"))
+        assert client.press_release_text(1, "0000000001-26-000006") == "All good"
+
+
+def test_json_endpoints_403_raise_provider_unavailable(settings):
+    with respx.mock(assert_all_mocked=True) as m:
+        m.get(f"{SUBMISSIONS_URL}CIK0000000001.json").mock(return_value=FORBIDDEN)
+        with pytest.raises(ProviderUnavailable, match="FREEDOM_SEC_USER_AGENT"):
+            SECClient(settings).submissions(1)
+
+
+def test_press_release_text_resolves_relative_exhibit_href(settings):
+    folder = f"{ARCHIVES_URL}1/000000000126000007/"
+    index_rel = """
+    <table class="tableFile">
+    <tr><td>2</td><td>PRESS RELEASE</td><td><a href="pr.htm">pr.htm</a></td><td>EX-99.1</td><td>1</td></tr>
+    </table>"""
+    with respx.mock(assert_all_mocked=True) as m:
+        m.get(f"{folder}0000000001-26-000007-index.htm").mock(return_value=html(index_rel))
+        exhibit = m.get(f"{folder}pr.htm").mock(return_value=html("<p>Relative</p>"))
+        assert SECClient(settings).press_release_text(1, "0000000001-26-000007") == "Relative"
+        assert exhibit.call_count == 1
+
+
 def test_find_exhibit_path_prefers_exact_type_then_ex99_family():
     idx = load_text("0001045810-26-000073-index.htm")
     assert find_exhibit_path(idx) == "/Archives/edgar/data/1045810/000104581026000073/q2fy27pr.htm"
@@ -347,6 +426,19 @@ def test_html_to_text_units():
     assert html_to_text(raw) == "Acme & Co reports record’s\n\nRevenue $ 1,234\nEPS 0.50\n\nEnds"
     assert html_to_text("plain text\n\n\n\nmore") == "plain text\n\nmore"
     assert html_to_text("") == ""
+
+
+# ---- calendar dates ---------------------------------------------------------------------------
+def test_edgar_date_reads_utc_midnight_columns_as_calendar_days(edgar, sec):
+    df = sec.submissions(NVDA, include_older=False).set_index("accession")
+    dates = edgar_date(df["filing_date"])
+    assert dates.loc[NVDA_Q2] == date(2026, 8, 26)
+    assert dates.map(lambda d: isinstance(d, date)).all()
+    # the trap the helper exists for: converting the zone first shifts the day
+    shifted = df["filing_date"].dt.tz_convert("America/New_York").dt.date
+    assert shifted.loc[NVDA_Q2] == date(2026, 8, 25)
+    blanks = edgar_date(pd.Series(pd.to_datetime(["2026-08-26", None], utc=True)))
+    assert blanks.iloc[0] == date(2026, 8, 26) and pd.isna(blanks.iloc[1])
 
 
 # ---- cache policy -----------------------------------------------------------------------------

@@ -21,7 +21,12 @@ Measured server facts (2026-09-02, see docs/data-sources.md):
 Timestamps: ``accepted`` is the exact UTC instant. Calendar dates (``filing_date``,
 ``period_end``, ``period_start``, ``filed``) are EDGAR dates represented as tz-aware UTC
 *midnight* Timestamps so that every datetime column leaving this client is UTC; read them with
-``.dt.date`` rather than converting to another zone.
+``edgar_date`` (``.dt.date``), never by converting to another zone, which shifts the day.
+
+Errors: EDGAR answers 404 for a document that does not exist (``press_release_text`` returns
+None and remembers the miss for ``TTL_MISSING``) and 403 for policy blocks (rejected User-Agent,
+request-rate threshold). A 403 raises ``ProviderUnavailable`` so the run aborts instead of
+reporting "no press release" for every filing.
 """
 
 from __future__ import annotations
@@ -31,25 +36,33 @@ import threading
 import time
 from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 import pandas as pd
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from ..config import Settings
-from ..data.base import DiskCache, HttpClient, TokenBucket, _is_retryable, cache_key
+from ..data.base import (
+    DiskCache,
+    HttpClient,
+    ProviderUnavailable,
+    TokenBucket,
+    _is_retryable,
+    cache_key,
+)
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/"
 COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/"
 ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/"
-WWW_URL = "https://www.sec.gov"
 
 DAY = 24 * 3600
 TTL_TICKERS = 7 * DAY
 TTL_SUBMISSIONS = 1 * DAY
 TTL_FACTS = 7 * DAY
 TTL_FOREVER = 100 * 365 * DAY  # filed documents never change; HttpClient treats None as "no cache"
+TTL_MISSING = 1 * DAY  # a 404 is re-checked daily: a just-accepted filing can lag on the Archives
 
 EARNINGS_ITEM = "2.02"  # 8-K item: Results of Operations and Financial Condition
 PRESS_RELEASE_EXHIBIT = "EX-99.1"
@@ -65,19 +78,19 @@ _ACCESSION_RE = re.compile(r"^(\d{10})-?(\d{2})-?(\d{6})$")
 
 
 # ---- plumbing ----------------------------------------------------------------------------------
-class _SecLimiter:
+class _SecLimiter(TokenBucket):
     """Token bucket for the sustained rate plus a minimum spacing between requests, so that a
-    burst of cached-miss requests never exceeds SEC's per-second fair-access limit."""
+    burst of cache-miss requests never exceeds SEC's per-second fair-access limit."""
 
     def __init__(self, requests_per_second: int):
         rps = max(int(requests_per_second), 1)
-        self.bucket = TokenBucket(rps * 60)
+        super().__init__(rps * 60)
         self.min_interval = 1.0 / rps
         self._last = 0.0
         self._lock = threading.Lock()
 
     def acquire(self, weight: float = 1.0) -> None:
-        self.bucket.acquire(weight)
+        super().acquire(weight)
         with self._lock:
             now = time.monotonic()
             wait = self._last + self.min_interval - now
@@ -87,23 +100,66 @@ class _SecLimiter:
             self._last = now
 
 
+def _policy_block(url: str, exc: httpx.HTTPStatusError) -> ProviderUnavailable | None:
+    """EDGAR answers 403 for policy blocks ("Undeclared Automated Tool" when the User-Agent is
+    rejected, "Request Rate Threshold Exceeded" when throttled) and never for a missing document
+    (that is a 404). Treating a 403 as "no document" would silently empty the whole run."""
+    if exc.response.status_code != 403:
+        return None
+    reason = " ".join(html_to_text(exc.response.text).split())[:200] or "(empty body)"
+    return ProviderUnavailable(
+        f"sec: EDGAR refused {url} (HTTP 403: {reason}). SEC's fair-access policy requires a "
+        "User-Agent that identifies you: set FREEDOM_SEC_USER_AGENT to "
+        "'Company Name contact@example.com'; if the message mentions the request rate, lower "
+        "FREEDOM_SEC_REQUESTS_PER_SECOND or wait before rerunning."
+    )
+
+
+_MISSING_KEY = "missing_until"  # cached payload of a 404: {"missing_until": <epoch seconds>}
+
+
 class _SecHttp(HttpClient):
     """HttpClient plus a text GET (filing indexes and exhibits are HTML, not JSON) that goes
-    through the same cache, limiter and retry policy."""
+    through the same cache, limiter and retry policy. Both GETs turn an EDGAR 403 into
+    ProviderUnavailable (see _policy_block)."""
 
-    def get_text(self, url: str, *, cache_ttl: int | None) -> str:
+    def get_text(self, url: str, *, cache_ttl: int | None) -> str | None:
+        """Body of a document, or None when EDGAR has no such document (HTTP 404).
+
+        A 404 is remembered for TTL_MISSING so that repeated lookups of a filing without an
+        index page or exhibit do not re-hit EDGAR. Any other error propagates."""
         key = cache_key(self.provider, f"GET-TEXT {url}", None)
         if cache_ttl is not None:
             hit = self.cache.get(self.provider, key, cache_ttl)
-            if hit is not None:
+            if isinstance(hit, str):
                 return hit
+            if isinstance(hit, dict) and hit.get(_MISSING_KEY, 0) > time.time():
+                return None
         if self.limiter is not None:
             self.limiter.acquire(1.0)
         if self.budget is not None:
             self.budget.consume(1)
-        text = self._request_text(url)
+        try:
+            text = self._request_text(url)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                self.cache.set(self.provider, key, {_MISSING_KEY: time.time() + TTL_MISSING})
+                return None
+            blocked = _policy_block(url, exc)
+            if blocked is not None:
+                raise blocked from exc
+            raise
         self.cache.set(self.provider, key, text)
         return text
+
+    def _request(self, method: str, url: str, *, params=None, json_body=None, headers=None) -> Any:
+        try:
+            return super()._request(method, url, params=params, json_body=json_body, headers=headers)
+        except httpx.HTTPStatusError as exc:
+            blocked = _policy_block(url, exc)
+            if blocked is not None:
+                raise blocked from exc
+            raise
 
     @retry(
         retry=retry_if_exception(_is_retryable),
@@ -127,6 +183,18 @@ def normalise_accession(accession: str) -> str:
 
 def split_items(items: str | None) -> list[str]:
     return [x.strip() for x in str(items or "").split(",") if x.strip()]
+
+
+def edgar_date(values: pd.Series) -> pd.Series:
+    """Calendar dates (``datetime.date``; NaT where missing) of an EDGAR date column:
+    ``filing_date``, ``filed``, ``period_start`` or ``period_end``.
+
+    These columns hold EDGAR dates as tz-aware UTC *midnight* Timestamps. This is the one place
+    that turns them back into dates: ``tz_convert("America/New_York")`` would move midnight UTC
+    to 20:00 the previous evening and shift the day. Derive ``E.report_date_ny`` from
+    ``filing_date`` through this helper.
+    """
+    return values.dt.date
 
 
 def _dates_utc(values: list[Any]) -> pd.DatetimeIndex:
@@ -380,26 +448,18 @@ class SECClient:
     def press_release_text(self, cik: int, accession: str) -> str | None:
         """Plain text of the EX-99.1 exhibit for a filing, or None."""
         acc = normalise_accession(accession)
-        folder = self.filing_folder_url(cik, acc)
-        index_html = self._get_text_or_none(f"{folder}{acc}-index.htm")
+        index_url = f"{self.filing_folder_url(cik, acc)}{acc}-index.htm"
+        index_html = self.http.get_text(index_url, cache_ttl=TTL_FOREVER)
         if index_html is None:
             return None
         path = find_exhibit_path(index_html, PRESS_RELEASE_EXHIBIT)
         if path is None:
             return None
-        url = path if path.startswith("http") else f"{WWW_URL}{path}"
+        url = urljoin(index_url, path)  # absolute /Archives/... paths and bare file names alike
         if not url.lower().endswith((".htm", ".html", ".txt")):
             return None  # e.g. a PDF-only exhibit: nothing we can strip to text
-        raw = self._get_text_or_none(url)
+        raw = self.http.get_text(url, cache_ttl=TTL_FOREVER)
         if raw is None:
             return None
         text = html_to_text(raw)
         return text or None
-
-    def _get_text_or_none(self, url: str) -> str | None:
-        try:
-            return self.http.get_text(url, cache_ttl=TTL_FOREVER)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (403, 404):
-                return None
-            raise
