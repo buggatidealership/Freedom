@@ -178,6 +178,7 @@ CONTINUATION_DEAD_BAND = 0.0025  # 25 bp: below this the early reaction has no s
 # ---- decision times -----------------------------------------------------------------------------
 # name -> offset in minutes relative to t0 (negative = before release)
 DECISION_TIMES: dict[str, int] = {
+    "pre_10m": -10,  # the operator's pre-release card: a call at least ten minutes before
     "pre_5m": -5,
     "post_1m": 1,
     "post_15m": 15,

@@ -717,3 +717,92 @@ NON_POINT_IN_TIME: dict[str, str] = {
     "perp_state": "max_leverage is the market's CURRENT leverage cap; Hyperliquid publishes no history",
 }
 NON_POINT_IN_TIME_KEYS: dict[str, tuple[str, ...]] = {"surprise": SURPRISE_KEYS, "perp_state": ("max_leverage",)}
+
+
+def _ret_desc(n: int, what: str) -> str:
+    return f"{what} return over the last {n} session{'s' if n != 1 else ''} before the release"
+
+
+# Plain-language description of every feature key (the prediction card prints these next to
+# the features that pushed a call). tests/test_card.py checks that every GROUP_KEYS key has one.
+DESCRIPTIONS: dict[str, str] = {
+    # calendar
+    "amc": "release scheduled after the New York close",
+    "bmo": "release scheduled before the New York open",
+    "rth": "release lands inside New York regular trading hours",
+    "weekday": "day of the week of the release (0 = Monday)",
+    "friday": "release on a Friday (the 24 h window spans the weekend's thin perp trading)",
+    "hour_ny": "New York clock hour of the release",
+    "hours_to_next_open": "hours from the release to the next New York open",
+    "hours_to_next_close": "hours from the release to the next New York close",
+    "h24_closed": "the New York session is closed when the 24 h window ends",
+    "holiday_adjacent": "an exchange holiday sits next to the release day",
+    "days_since_last_event": "days since this name's previous earnings release",
+    "n_events_same_day": "other universe names reporting on the same day",
+    # pre_price
+    "ret_1d": _ret_desc(1, "the stock's"), "ret_5d": _ret_desc(5, "the stock's"),
+    "ret_20d": _ret_desc(20, "the stock's"), "ret_60d": _ret_desc(60, "the stock's"),
+    "rvol_20d": "the stock's realised daily volatility over the last 20 sessions",
+    "dist_52w_high": "how far the stock sits below its 52-week high (log distance)",
+    "dist_52w_low": "how far the stock sits above its 52-week low (log distance)",
+    "dvol_5d_ratio": "the last 5 sessions' dollar volume relative to the longer baseline",
+    "drift_60m": "the stock's drift over the 60 minutes before the release",
+    "drift_30m": "the stock's drift over the 30 minutes before the release",
+    "gap_since_close": "the move from the last New York close to the pre-release instant",
+    "ext_vol_ratio": "extended-hours volume relative to the regular-session baseline",
+    "vol_30m_ratio": "volume in the 30 minutes before the release relative to its normal level",
+    # history
+    "hist_n": "number of this name's earlier releases in the history",
+    "hist_r24_mean": "average 24 h post-earnings return over this name's earlier releases",
+    "hist_r24_std": "spread of this name's past 24 h post-earnings returns",
+    "hist_r24_skew": "skew of this name's past 24 h returns (lopsided toward jumps up or down)",
+    "hist_abs_r24_mean": "typical size of this name's past 24 h earnings moves, ignoring direction",
+    "hist_up_rate": "share of this name's past releases that closed the 24 h window up",
+    "hist_cont_rate": "share of past releases where the first reaction kept going instead of reversing",
+    "hist_last1_r24": "24 h return after this name's most recent release",
+    "hist_last2_r24": "24 h return after this name's second most recent release",
+    "hist_last3_r24": "24 h return after this name's third most recent release",
+    "hist_last4_r24": "24 h return after this name's fourth most recent release",
+    "hist_surprise_beta": "how strongly this name's past 24 h moves tracked its EPS surprises",
+    "hist_eps_surprise_mean": "this name's average past EPS surprise (percent)",
+    # market
+    "mkt_ret_1d": _ret_desc(1, "the broad market's"), "mkt_ret_5d": _ret_desc(5, "the broad market's"),
+    "mkt_ret_20d": _ret_desc(20, "the broad market's"),
+    "mkt_rvol_20d": "the broad market's realised volatility over the last 20 sessions",
+    "vix_level": "VIX level (implied volatility of the S&P 500)",
+    "vix_chg_5d": "change in the VIX over the last 5 sessions",
+    "sector_ret_1d": _ret_desc(1, "the name's sector proxy"),
+    "sector_ret_5d": _ret_desc(5, "the name's sector proxy"),
+    "mkt_drift_60m": "the broad market's drift over the 60 minutes before the release",
+    # perp_state
+    "funding_rate": "latest hourly funding rate on the Hyperliquid perp (positive: longs pay shorts)",
+    "funding_mean_24h": "average perp funding rate over the last 24 h",
+    "premium": "perp price premium over the reference (oracle) price before the release",
+    "oi_notional": "open interest on the perp, in dollars",
+    "oi_chg_24h": "24 h change in perp open interest (log)",
+    "day_ntl_vlm": "the perp's dollar volume over the last day",
+    "perp_vol_30d": "median daily perp dollar volume over the last 30 days",
+    "max_leverage": "the market's current maximum leverage (not point-in-time)",
+    "listing_age_d": "days since the perp was listed",
+    # surprise
+    "eps_surprise": "EPS surprise versus consensus (percent)",
+    "rev_surprise": "revenue surprise versus consensus (percent)",
+    "eps_beat": "EPS beat consensus (1) or missed (0)",
+    "eps_surprise_abs": "size of the EPS surprise, ignoring direction",
+    "sign_agree": "EPS and revenue surprised the same way (+1) or opposite ways (-1)",
+    "eps_surprise_z": "EPS surprise relative to this name's own past surprises (z-score)",
+    "rev_surprise_z": "revenue surprise relative to this name's own past surprises (z-score)",
+    "n_estimates": "number of analyst estimates in the consensus",
+    # reaction
+    **{f"r_{k}m": f"return from the pre-release price to {k} minutes after the release"
+       for k in REACTION_HORIZONS_MIN},
+    "r_now": "return from the pre-release price to the decision instant",
+    "abs_r_now": "size of the reaction so far, ignoring direction",
+    "path_max": "highest point since the release, relative to the pre-release price",
+    "path_min": "lowest point since the release, relative to the pre-release price",
+    "path_range": "high-to-low range since the release",
+    "vol_z": "post-release volume versus pre-release volume, in pre-release standard deviations",
+    "vol_ratio": "post-release volume relative to pre-release volume",
+    "ar_now": "the reaction so far net of the broad market's move over the same minutes",
+    "premium_post": "perp premium over the reference price after the release",
+}

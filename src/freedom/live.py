@@ -52,6 +52,7 @@ import pandas as pd
 from . import events as events_mod
 from . import features as features_mod
 from . import models as models_mod
+from .card import build_card
 from .config import Settings
 from .data.archive import CTX_SUBDIR, load_archive, read_parquet_or_none, write_parquet_atomic
 from .data.base import ProviderUnavailable
@@ -519,7 +520,8 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
                   now: pd.Timestamp | str | None = None, hl=None, fmp=None, sec=None,
                   append: bool = True) -> dict:
     """Build features as of the decision instant, score the trained model and append the live
-    row. Returns {row, features, contributions, schedule, model_meta, consensus}. `now` is the
+    row. Returns {row, features, contributions, card, schedule, model_meta, consensus}; `card` is
+    card.build_card's LONG/SHORT/NO TRADE summary with its reasons. `now` is the
     replay override (`predict --now`): the row then carries replay=True and now_override, and
     run_at stays the wall clock, so a replay can never pass for a live prediction."""
     if decision not in DECISION_TIMES:
@@ -582,9 +584,12 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
         "n_features": len(names), "n_features_missing": len(missing),
     }
     row.update({k: feats.get(k, float("nan")) for k in names})
+    contribs = top_contributions(model, X)
+    card = build_card(row, model=model, X=X, band=float(settings.no_trade_band), fallback=contribs)
+    row["call"], row["no_trade_band"] = card["call"], card["band"]  # the call as recorded
     if append:
         append_live_prediction(settings, row)
-    return {"row": row, "features": feats, "contributions": top_contributions(model, X),
+    return {"row": row, "features": feats, "contributions": contribs, "card": card,
             "schedule": asdict(schedule), "model_meta": meta,
             "consensus": {k: row[k] for k in (E.estimate_source, E.estimate_snapshot_time, E.eps_estimate,
                                                  E.rev_estimate, E.n_estimates)}}

@@ -13,3 +13,4 @@ build/
 /reports/
 .env
 /.claude/worktrees/
+uv.lock

@@ -45,7 +45,7 @@ design, including the 31 review findings that shaped it.
 * **Targets**: log returns `r_h` from `P0`, abnormal returns against `xyz:SP500` (or SPY), and
   labels `direction`, `magnitude` and `continuation_k = sign(r_k) · sign(r_24h − r_k)` for
   k ∈ {15m, 30m} (+1 the early reaction extended, −1 it reversed).
-* **Decision times**: `pre_5m`, `post_1m`, `post_15m`, `post_30m`, `post_60m`. Every feature is
+* **Decision times**: `pre_10m`, `pre_5m`, `post_1m`, `post_15m`, `post_30m`, `post_60m`. Every feature is
   built `as_of` the decision instant and the models for different decision times are never mixed.
 
 ## Install
@@ -67,12 +67,23 @@ free tier). Hyperliquid, SEC EDGAR and Nasdaq need no key. Yahoo Finance is not 
 freedom universe                 # Hyperliquid markets -> data/universe.parquet (+ rows to verify)
 freedom archive                  # candles, funding, context and consensus snapshots (run every 12 h)
 freedom events --since 2024-01-01 --underlyings NVDA,AAPL,MSFT,AMZN,META,GOOGL,TSLA,AMD,MU,INTC
-freedom dataset --decision-times pre_5m,post_15m,post_30m
+freedom dataset --decision-times pre_10m,pre_5m,post_15m,post_30m
 freedom evaluate --models zero,base_rate,historical_mean,hist_abs_mean,vol_scaled,sign_of_reaction,always_extends,surprise_sign,linear,lightgbm --decision-times pre_5m,post_30m
 freedom optimize --decision-times post_30m --n-trials 50
+freedom train --model lightgbm --decision-time pre_10m
 freedom train --model lightgbm --decision-time post_30m
 freedom upcoming --days 14
-freedom predict --event NVDA:2026-10 --decision post_30m
+freedom predict --event NVDA:2026-10 --decision pre_10m   # card 1, ten minutes before
+freedom predict --event NVDA:2026-10 --decision post_30m  # card 2, thirty minutes after
+```
+
+Each `predict` prints a card first: `CALL: LONG | SHORT | NO TRADE` (NO TRADE unless `p_up` is at
+least `no_trade_band` = 0.10 away from 0.5), the expected 24 h move with its 10/90 % band, and the
+five features that pushed the call, signed, each with a plain-language description. When the
+direction head is untrained (fewer than 30 usable rows) the reasons are importance-ranked and
+unsigned, and the card says so. Off-schedule and replay rows print `NOT TRADEABLE`.
+
+```
 ```
 
 The ten-name/2024 example yields fewer than the default 120 trainable events per walk-forward

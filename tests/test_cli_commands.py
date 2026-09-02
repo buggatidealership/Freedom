@@ -338,7 +338,15 @@ def _prediction(replay: bool = False) -> dict:
            "model_id": "pre_5m/linear@abcdef01", "sources_used": "hyperliquid", "bar_source": "hyperliquid",
            "input_lag_s_hyperliquid": 75.0, "input_lag_s_fmp": np.nan, "input_lag_s_sec": np.nan,
            "n_features": 12, "n_features_missing": 2}
+    card = {"event_id": "NVDA:2026-07", "market": "xyz:NVDA", "decision": "pre_5m", "as_of": as_of,
+            "call": "LONG", "p_up": 0.62, "edge": 0.12, "band": 0.10, "expected_r_24h": 0.011, "r_lo": -0.04,
+            "r_hi": 0.07, "magnitude_hat": 0.011,
+            "reasons": [{"feature": "f_ret_5d", "what": "the stock's return over the last 5 sessions",
+                         "value": 0.032, "push": 0.21, "direction": "up"}],
+            "reason_basis": "signed contributions of the direction head",
+            "tradeable": not replay, "not_tradeable_because": ["replay"] if replay else []}
     return {"row": row, "features": {}, "contributions": [{"feature": "f_pre_price_x", "importance": 0.7, "value": 0.5}],
+            "card": card,
             "schedule": {"note": "on schedule"}, "model_meta": {"n_events": 300, "trained_at": "2026-09-01T00:00:00Z"},
             "consensus": {E.estimate_source: "consensus_snapshot", E.estimate_snapshot_time: as_of,
                           E.eps_estimate: 1.2, E.rev_estimate: 4.6e10, E.n_estimates: 30}}
@@ -360,6 +368,8 @@ def test_predict_prints_the_prediction(dirs, monkeypatch):
     assert "0.62" in result.output and "consensus_snapshot" in result.output and "f_pre_price_x" in result.output
     assert "live_predictions.parquet" in result.output
     assert "REPLAY" in result.output and "2026-08-26 19:30" in result.output  # a --now run is labelled as such
+    assert "CALL: LONG" in result.output and "NOT TRADEABLE: replay" in result.output
+    assert "+1.10 %" in result.output and "f_ret_5d" in result.output and "+0.210 (up)" in result.output
     result = runner.invoke(app, ["predict", "--event", "NVDA:2026-07", "--decision", "pre_5m", "--model", "linear"])
     assert result.exit_code == 0 and "REPLAY" not in result.output
     assert runner.invoke(app, ["predict", "--event", "x", "--decision", "noon"]).exit_code == 2

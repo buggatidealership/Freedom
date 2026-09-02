@@ -1,7 +1,16 @@
-name: archive-candles
-# Hyperliquid serves only the most recent 5000 candles per interval (1m ≈ 83 h), so fine-grained
-# perp history must be captured continuously. Every 12 h this job restores the newest archive
-# artifact, pulls new candles/funding/context and a consensus snapshot, and re-uploads.
+name: freedom-data
+# Twice a day: restore the data directory from the newest artifact, pull new Hyperliquid
+# candles/funding/context and a consensus snapshot, then extend the full-universe earnings
+# history and dataset as far as the day's free FMP quota allows, and re-upload everything.
+#
+# Hyperliquid serves only the most recent 5000 candles per interval (1m ≈ 83 h), so the archive
+# must run continuously. FMP's free plan allows ~250 requests a day; `freedom events` and
+# `freedom dataset` treat an exhausted budget as a checkpoint (exit 2, rows marked pending) and
+# resume from the on-disk cache on the next run, so the first full build completes over a few
+# days without anyone watching it. The 00:17 UTC run lands just after the quota resets.
+#
+# Setup: add FMP_API_KEY as a repository secret and enable Actions. Nothing vendor-derived is
+# committed to the repository; the data lives only in the private `freedom-data` artifact.
 on:
   schedule:
     - cron: "17 */12 * * *"
@@ -10,29 +19,42 @@ permissions:
   actions: read
   contents: read
 jobs:
-  archive:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+      FREEDOM_SEC_USER_AGENT: "freedom-harness ${{ github.repository_owner }}@users.noreply.github.com"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - run: uv python install 3.11
       - run: uv venv && uv pip install -e .
-      - name: Restore previous archive
+      - name: Restore data from the newest artifact
         env:
           GH_TOKEN: ${{ github.token }}
         # actions/download-artifact only sees the current run; gh fetches the newest artifact
-        # of that name from any earlier run, which is how the archive accumulates.
-        run: gh run download -n candle-archive -D data/archive -R "${{ github.repository }}" || echo "no previous archive (first run)"
-      - run: uv run freedom universe
-      # --strict: exit 4 (a red run, so GitHub notifies) when any item errored or 1-minute
-      # bars were lost past the server horizon; the archive is uploaded regardless so a
-      # failed run never stops it accumulating.
-      - run: uv run freedom archive --strict
+        # of that name from any earlier run, which is how the data accumulates.
+        run: gh run download -n freedom-data -D data -R "${{ github.repository }}" || echo "no previous data (first run)"
+      - name: Universe
+        run: uv run freedom universe
+      - name: Archive candles, funding, context, consensus
+        # --strict: exit 4 when any item errored or 1-minute bars were lost past the server
+        # horizon; the step is marked failed (GitHub notifies) but the build carries on.
+        continue-on-error: true
+        run: uv run freedom archive --strict
+      - name: Earnings events (full universe; exit 2 = daily quota reached, resumes tomorrow)
+        continue-on-error: true
+        run: uv run freedom events --since 2024-01-01
+      - name: Targets and features (exit 2 = daily quota reached, resumes tomorrow)
+        continue-on-error: true
+        run: uv run freedom dataset --decision-times pre_10m,pre_5m,post_15m,post_30m
+      - name: Status
+        run: uv run freedom status
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: candle-archive
-          path: data/archive
+          name: freedom-data
+          path: data
           retention-days: 90
+          include-hidden-files: true

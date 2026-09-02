@@ -253,7 +253,7 @@ def events(since: str = typer.Option("2022-01-01", help="Earliest report date (U
 
 # ---- dataset ------------------------------------------------------------------------------------------
 @app.command()
-def dataset(decision_times: str = typer.Option("pre_5m,post_15m,post_30m")) -> None:
+def dataset(decision_times: str = typer.Option("pre_10m,pre_5m,post_15m,post_30m")) -> None:
     """Compute targets and features; write data/dataset.parquet."""
     from . import events as events_mod
     from . import features as features_mod
@@ -409,10 +409,42 @@ def train(model: str = typer.Option("lightgbm"), decision_time: str = typer.Opti
 
 
 # ---- predict ------------------------------------------------------------------------------------------
+def _pct(v: object) -> str:
+    """A return as a signed percentage ('' when missing)."""
+    return "" if _blank(v) else f"{float(v) * 100:+.2f} %"  # type: ignore[arg-type]
+
+
+def _print_card(card: dict) -> None:
+    """The operator's card: the call, its size, and the reasons, before the row's details."""
+    style = {"LONG": "bold green", "SHORT": "bold red"}.get(card["call"], "bold yellow")
+    console.print(f"\nCARD {card['decision']}  {card['event_id']}  ({card['market'] or 'no perp market'})",
+                  style="bold", markup=False)
+    console.print(f"CALL: {card['call']}", style=style, markup=False)
+    console.print(f"  p_up {_cell(card['p_up'])}   edge {card['edge']:+.3f} vs band ±{card['band']:.2f}   "
+                  f"expected 24h move {_pct(card['expected_r_24h'])}   typical size "
+                  f"{_pct(card['magnitude_hat']).lstrip('+-')}"
+                  f"   10/90 % band {_pct(card['r_lo'])} .. {_pct(card['r_hi'])}", markup=False)
+    for why in card["not_tradeable_because"]:
+        console.print(f"  NOT TRADEABLE: {why}", style="yellow", markup=False)
+    if card["reasons"]:
+        table = Table(title=f"why: {card['reason_basis']}")
+        for col in ("push", "feature", "value", "what it measures"):
+            table.add_column(col)
+        for r in card["reasons"]:
+            push = "" if _blank(r["push"]) else f"{r['push']:+.3f} ({r['direction']})"
+            table.add_row(push, r["feature"], _cell(r["value"]), r["what"])
+        console.print(table)
+    else:
+        console.print("  no reasons: the direction head is untrained (base rate) and the model exposes no "
+                      "feature importance; the call above is the base rate, not a read of this event",
+                      style="yellow", markup=False)
+
+
 def _print_prediction(res: dict) -> None:
     from .schemas import E
 
     row, sched = res["row"], res["schedule"]
+    _print_card(res["card"])
     head = {"event": row[E.event_id], "market": row[E.market], "decision": row["decision_time"],
             "as_of": row["as_of"], "t0 used": row["t0_used"], "t0 source": row["t0_source_live"],
             "off_schedule": row["off_schedule"], "schedule": sched["note"],
@@ -441,7 +473,7 @@ def _print_prediction(res: dict) -> None:
 
 @app.command()
 def predict(event: str = typer.Option(..., "--event", help="event_id, e.g. NVDA:2026-07 (see `freedom upcoming`)"),
-            decision: str = typer.Option("post_30m", "--decision", help="pre_5m | post_1m | post_15m | post_30m | post_60m"),
+            decision: str = typer.Option("post_30m", "--decision", help="pre_10m | pre_5m | post_1m | post_15m | post_30m | post_60m"),
             model: str | None = typer.Option(None, "--model", help="Trained model name under data/models/<decision>/"),
             now: str | None = typer.Option(None, "--now", help="Override the current instant (UTC ISO) for replays"),
             no_append: bool = typer.Option(False, "--no-append", help="Do not append to data/live_predictions.parquet")) -> None:

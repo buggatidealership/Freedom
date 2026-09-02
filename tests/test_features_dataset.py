@@ -28,7 +28,7 @@ from freedom.features import (
     read_dataset,
 )
 from freedom.features.loaders import ContextLoader, sector_proxy
-from freedom.schemas import SCHEMA_VERSION, C, D, E, T
+from freedom.schemas import DECISION_TIMES, SCHEMA_VERSION, C, D, E, T
 from freedom.targets import compute_targets
 from freedom.timeutil import to_utc
 from tests.fakes import NVDA, FakeHyperliquidInfo, synth_candles
@@ -213,10 +213,10 @@ def test_build_dataset_defaults_groups_and_errors(settings, offline):
     events = make_events().iloc[:1]
     targets = make_targets(events)
     df = build_dataset(settings, events, targets, groups=["calendar", "reaction"], write=False)
-    assert len(df) == 5 and set(df[D.decision_time]) == {"pre_5m", "post_1m", "post_15m", "post_30m", "post_60m"}
+    assert len(df) == 6 and set(df[D.decision_time]) == {"pre_10m", "pre_5m", "post_1m", "post_15m", "post_30m", "post_60m"}
     fcols = feature_columns(df)
     assert "f_amc" in fcols and "f_r_30m" in fcols and "f_ret_1d" not in fcols
-    assert (df[D.as_of] == df[E.t0] + df[D.decision_time].map(lambda d: pd.Timedelta(minutes={"pre_5m": -5, "post_1m": 1, "post_15m": 15, "post_30m": 30, "post_60m": 60}[d]))).all()
+    assert (df[D.as_of] == df[E.t0] + df[D.decision_time].map(lambda d: pd.Timedelta(minutes=DECISION_TIMES[d]))).all()
     with pytest.raises(ValueError):
         build_dataset(settings, events, targets, decision_times=["post_7m"], write=False)
     with pytest.raises(ValueError):
