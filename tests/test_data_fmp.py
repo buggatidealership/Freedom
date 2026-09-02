@@ -10,6 +10,8 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import time
+import traceback
 from datetime import date
 from pathlib import Path
 
@@ -19,6 +21,7 @@ import pytest
 import respx
 
 from freedom.config import Settings
+from freedom.data import base as base_mod
 from freedom.data import fmp as fmp_mod
 from freedom.data.base import BudgetExhausted, HttpClient, ProviderUnavailable, cache_key
 from freedom.data.fmp import (
@@ -88,6 +91,32 @@ def fake_http(monkeypatch) -> FakeHttp:
 @pytest.fixture
 def client(settings, fake_http) -> FMPClient:
     return FMPClient(settings)
+
+
+class Clock:
+    """Stands in for the ``time`` module inside freedom.data.base so cache ages can be
+    advanced without sleeping. Only ``time()`` is shifted; ``monotonic``/``sleep`` pass through."""
+
+    def __init__(self) -> None:
+        self.offset = 0.0
+
+    def time(self) -> float:
+        return time.time() + self.offset
+
+    @staticmethod
+    def monotonic() -> float:
+        return time.monotonic()
+
+    @staticmethod
+    def sleep(seconds: float) -> None:
+        time.sleep(seconds)
+
+
+@pytest.fixture
+def clock(monkeypatch) -> Clock:
+    c = Clock()
+    monkeypatch.setattr(base_mod, "time", c)
+    return c
 
 
 def assert_candle_contract(df: pd.DataFrame, step: pd.Timedelta, market: str, interval: str,
@@ -255,6 +284,10 @@ def test_intraday_empty_payload_and_argument_errors(client, fake_http):
     df = client.intraday("NVDA", "5min", pd.Timestamp("2026-08-26"), pd.Timestamp("2026-08-27"))
     assert list(df.columns) == CANDLE_COLUMNS and df.empty
     assert df[C.t].dtype == "datetime64[ns, UTC]" and df[C.volume].dtype == "float64"
+    # An empty payload for a completed range is not trusted as immutable: it is re-read with the
+    # ordinary TTL so a transient empty 200 expires instead of sticking for ten years.
+    assert [c["cache_ttl"] for c in fake_http.calls] == [IMMUTABLE_TTL_SECONDS,
+                                                         client.settings.cache_ttl_seconds]
     with pytest.raises(ValueError):
         client.intraday("NVDA", "2min", pd.Timestamp("2026-08-26"), pd.Timestamp("2026-08-27"))
     with pytest.raises(ValueError):
@@ -268,7 +301,9 @@ def test_intraday_extended_flag_and_cache_ttl_policy(client, fake_http, monkeypa
                     extended=False)
     (call,) = fake_http.calls
     assert call["cache_params"]["extended"] == "false"
-    assert call["cache_ttl"] == client.settings.cache_ttl_seconds  # chunk touches today
+    # The chunk touches today: the session is still in progress, so only the live TTL applies.
+    assert call["cache_ttl"] == client.settings.live_cache_ttl_seconds
+    assert call["cache_ttl"] < client.settings.cache_ttl_seconds
 
     fake_http.calls.clear()
     client.intraday("NVDA", "5min", pd.Timestamp("2026-08-26"), pd.Timestamp("2026-08-27"))
@@ -300,6 +335,16 @@ def test_daily_contract(client, fake_http, monkeypatch):
 def test_daily_filters_to_requested_range(client, fake_http):
     df = client.daily("NVDA", pd.Timestamp("2026-08-24"), pd.Timestamp("2026-08-28"))
     assert df[C.t].tolist() == [utc(f"2026-08-{d} 04:00") for d in (24, 25, 26, 27, 28)]
+
+
+def test_daily_cache_ttl_policy_and_override(client, fake_http, monkeypatch):
+    monkeypatch.setattr(fmp_mod, "_today_ny", lambda: date(2026, 9, 2))
+    client.daily("NVDA", pd.Timestamp("2026-08-24"), pd.Timestamp("2026-09-02"))
+    assert fake_http.calls[-1]["cache_ttl"] == client.settings.live_cache_ttl_seconds  # today
+    client.daily("NVDA", pd.Timestamp("2026-08-24"), pd.Timestamp("2026-09-01"))
+    assert fake_http.calls[-1]["cache_ttl"] == IMMUTABLE_TTL_SECONDS  # completed sessions
+    client.daily("NVDA", pd.Timestamp("2026-08-24"), pd.Timestamp("2026-09-01"), cache_ttl=30)
+    assert fake_http.calls[-1]["cache_ttl"] == 30
 
 
 # ---- profile / live ----------------------------------------------------------------------------
@@ -355,6 +400,70 @@ def test_cache_key_excludes_api_key_and_reruns_are_free(settings):
     with gzip.open(path, "rt", encoding="utf-8") as f:
         assert "apikey" not in f.read()
     assert client.http.budget.used_today() == 1
+
+
+@respx.mock
+def test_today_range_is_refetched_after_live_ttl(settings, clock):
+    today = fmp_mod._today_ny()
+    day = pd.Timestamp(today)
+    bar = {"open": 1.0, "low": 1.0, "high": 1.0, "close": 1.0, "volume": 1}
+    bars = [{"date": f"{today} 09:30:00", **bar}, {"date": f"{today} 09:31:00", **bar}]
+    intraday_route = respx.get(f"{BASE}/stable/historical-chart/1min").mock(
+        side_effect=[httpx.Response(200, json=bars[:1]), httpx.Response(200, json=bars)])
+    daily_route = respx.get(f"{BASE}/stable/historical-price-eod/full").mock(
+        side_effect=[httpx.Response(200, json=[]),
+                     httpx.Response(200, json=[{"date": today.isoformat(), **bar}])])
+    client = FMPClient(settings)
+
+    assert len(client.intraday("NVDA", "1min", day, day)) == 1
+    assert client.daily("NVDA", day, day).empty
+    # Inside the live TTL the disk cache answers (a tight predict loop must not burn budget)...
+    assert len(client.intraday("NVDA", "1min", day, day)) == 1
+    assert client.daily("NVDA", day, day).empty
+    assert intraday_route.call_count == 1 and daily_route.call_count == 1
+    # ...but once it has expired the in-progress session is fetched again, not served for a week.
+    clock.offset = settings.live_cache_ttl_seconds + 1
+    assert len(client.intraday("NVDA", "1min", day, day)) == 2
+    assert len(client.daily("NVDA", day, day)) == 1
+    assert intraday_route.call_count == 2 and daily_route.call_count == 2
+
+
+@respx.mock
+def test_empty_completed_range_is_revalidated_after_short_ttl(settings, clock, monkeypatch):
+    monkeypatch.setattr(fmp_mod, "_today_ny", lambda: date(2026, 9, 2))
+    payload = load("historical-chart_5min_NVDA_20260826_27_extended.json")
+    route = respx.get(f"{BASE}/stable/historical-chart/5min").mock(
+        side_effect=[httpx.Response(200, json=[]), httpx.Response(200, json=payload)])
+    client = FMPClient(settings)
+    args = ("NVDA", "5min", pd.Timestamp("2026-08-26"), pd.Timestamp("2026-08-26"))
+
+    assert client.intraday(*args).empty
+    assert client.intraday(*args).empty  # within cache_ttl_seconds: the empty answer is reused
+    assert route.call_count == 1
+    clock.offset = settings.cache_ttl_seconds + 1
+    assert len(client.intraday(*args)) == 192  # expired: fetched again, real bars this time
+    assert route.call_count == 2
+    clock.offset += 400 * 24 * 3600
+    assert len(client.intraday(*args)) == 192  # non-empty completed session: immutable
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_raise_site_frames_never_hold_the_key(tmp_path):
+    key = "frame-local-secret-9f3a"
+    settings = Settings(data_dir=tmp_path / "data", fmp_api_key=key, _env_file=None)
+    settings.ensure_dirs()
+    respx.get(f"{BASE}/stable/profile").mock(
+        return_value=httpx.Response(401, json={"Error Message": "Invalid API KEY"}))
+    client = FMPClient(settings)
+    with pytest.raises(ProviderUnavailable) as info:
+        client.profile("NVDA")
+    frames = [f for f, _ in traceback.walk_tb(info.tb) if f.f_code.co_filename == fmp_mod.__file__]
+    assert frames, "the raise site inside fmp.py must be part of the traceback"
+    for frame in frames:
+        for name, value in frame.f_locals.items():
+            assert name not in ("exc", "query"), f"{frame.f_code.co_name}: {name} still bound"
+            assert key not in repr(value), f"{frame.f_code.co_name}: local {name!r} holds the key"
 
 
 @respx.mock

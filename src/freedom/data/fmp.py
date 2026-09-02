@@ -16,8 +16,13 @@ Conventions:
 * the API key is added to the request only: it never enters cache keys (``cache_params`` is
   passed without it), httpx log lines (a redacting filter is installed) or exception messages;
 * intraday requests are chunked into fixed ``MAX_INTRADAY_DAYS_PER_REQUEST``-day windows
-  counted from ``start_day`` so a rerun with the same arguments hits the disk cache; chunks that
-  end before today (New York) are cached as immutable because completed sessions do not change.
+  counted from ``start_day`` so a rerun with the same arguments hits the disk cache;
+* cache policy for price ranges: a chunk that ends before today (New York) is cached as
+  immutable because completed sessions do not change, except that an *empty* payload is only
+  trusted for ``settings.cache_ttl_seconds`` (a weekend/holiday is legitimately empty, but a
+  transient empty 200 or a symbol whose history is backfilled later must not stick for ever);
+  a chunk that touches today is a live, in-progress session and is cached for
+  ``settings.live_cache_ttl_seconds`` only, so ``freedom predict`` never sees a stale partial day.
 """
 
 from __future__ import annotations
@@ -172,6 +177,11 @@ def _epoch_to_utc(value: Any) -> pd.Timestamp | None:
     return pd.Timestamp(v, unit=unit, tz=UTC)
 
 
+def _is_empty_payload(payload: Any) -> bool:
+    """``None``, ``[]`` and ``{}`` carry no records (``_records`` maps all three to ``[]``)."""
+    return payload is None or (isinstance(payload, list | dict) and not payload)
+
+
 # ---- frame builders -----------------------------------------------------------------------------
 def _empty_candles() -> pd.DataFrame:
     return pd.DataFrame({
@@ -290,22 +300,37 @@ class FMPClient:
 
     # ---- plumbing ----------------------------------------------------------------------------
     def _get(self, path: str, params: dict[str, Any], *, cache_ttl: int) -> Any:
-        """GET ``base/path``. The key goes on the wire only; cache keys use ``params`` as given."""
+        """GET ``base/path``. The key goes on the wire only; cache keys use ``params`` as given.
+
+        ``cache_ttl=IMMUTABLE_TTL_SECONDS`` is honoured for non-empty payloads only: an empty
+        payload is re-read with ``settings.cache_ttl_seconds`` so it is fetched again once that
+        shorter TTL has expired instead of being pinned for ten years."""
         url = f"{self.base.rstrip('/')}/{path}"
-        query = dict(params)
-        query["apikey"] = self.settings.fmp_api_key
+        payload = self._fetch(url, path, params, cache_ttl)
+        if cache_ttl == IMMUTABLE_TTL_SECONDS and _is_empty_payload(payload):
+            payload = self._fetch(url, path, params, int(self.settings.cache_ttl_seconds))
+        return payload
+
+    def _fetch(self, url: str, path: str, params: dict[str, Any], cache_ttl: int) -> Any:
+        # The key is spliced into the request inline so that no local variable ever holds it:
+        # a traceback that dumps frame locals (rich's show_locals, a debugger, an error
+        # reporter) would otherwise print it at the raise sites below.
         try:
-            return self.http.get_json(url, query, cache_ttl=cache_ttl, cache_params=params)
+            return self.http.get_json(
+                url, {**params, "apikey": self.settings.fmp_api_key},
+                cache_ttl=cache_ttl, cache_params=params,
+            )
         except httpx.HTTPStatusError as exc:
-            # str(exc) embeds the full URL (with the key): rebuild the message, drop the chain.
+            # str(exc) embeds the full URL (with the key): keep only the status and a redacted
+            # body, then leave the except block so ``exc`` is unbound before anything is raised.
             status = exc.response.status_code
             body = _redact(exc.response.text[:200].replace("\n", " "))
-            if status in (401, 402, 403):
-                raise ProviderUnavailable(
-                    f"FMP rejected {path} (HTTP {status}): {body} -- check FMP_API_KEY and "
-                    "whether the plan includes this endpoint"
-                ) from None
-            raise FMPError(f"FMP {path} failed (HTTP {status}): {body}") from None
+        if status in (401, 402, 403):
+            raise ProviderUnavailable(
+                f"FMP rejected {path} (HTTP {status}): {body} -- check FMP_API_KEY and "
+                "whether the plan includes this endpoint"
+            ) from None
+        raise FMPError(f"FMP {path} failed (HTTP {status}): {body}") from None
 
     @staticmethod
     def _records(payload: Any, path: str) -> list[dict]:
@@ -324,11 +349,15 @@ class FMPClient:
         raise FMPError(f"FMP {path}: unexpected payload type {type(payload).__name__}")
 
     def _ttl(self, last_day: date, override: int | None) -> int:
+        """Cache TTL for a price range ending on ``last_day`` (New York calendar day).
+
+        Completed sessions are immutable; a range that reaches today is still being written
+        and must be refreshed on the live cadence, never for ``cache_ttl_seconds`` (a week)."""
         if override is not None:
             return int(override)
         if last_day < _today_ny():
             return IMMUTABLE_TTL_SECONDS
-        return int(self.settings.cache_ttl_seconds)
+        return int(self.settings.live_cache_ttl_seconds)
 
     # ---- earnings ----------------------------------------------------------------------------
     def earnings_history(self, symbol: str, *, limit: int = 60) -> pd.DataFrame:
@@ -361,7 +390,7 @@ class FMPClient:
         `start_day`/`end_day` are inclusive New York calendar days; the `interval` column carries
         the harness label ('1m', '5m'); `interval` accepts '1min'/'5min' or '1m'/'5m'.
         `cache_ttl=None` means: immutable for chunks ending before today (NY), else
-        settings.cache_ttl_seconds."""
+        settings.live_cache_ttl_seconds (the session is still in progress)."""
         api_interval, label, step = _resolve_interval(interval)
         symbol = _norm_symbol(symbol)
         first, last = _as_ny_date(start_day), _as_ny_date(end_day)
@@ -380,17 +409,20 @@ class FMPClient:
             frames.append(_intraday_frame(self._records(payload, path), symbol, label, step, a, b))
         return _finish_candles(frames)
 
-    def daily(self, symbol: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    def daily(self, symbol: str, start: pd.Timestamp, end: pd.Timestamp,
+              *, cache_ttl: int | None = None) -> pd.DataFrame:
         """`stable/historical-price-eod/full`: schemas.C columns at interval '1d', t = session
         date at 00:00 America/New_York converted to UTC. t_end = the next New York midnight in
-        UTC (half-open calendar day). source='fmp_daily'; n_trades is not reported (NA)."""
+        UTC (half-open calendar day). source='fmp_daily'; n_trades is not reported (NA).
+        `cache_ttl` follows the same policy as `intraday`: None means immutable when `end` is
+        before today (NY), else settings.live_cache_ttl_seconds."""
         symbol = _norm_symbol(symbol)
         first, last = _as_ny_date(start), _as_ny_date(end)
         if last < first:
             raise ValueError(f"end {last} is before start {first}")
         path = "stable/historical-price-eod/full"
         params = {"symbol": symbol, "from": first.isoformat(), "to": last.isoformat()}
-        payload = self._get(path, params, cache_ttl=self._ttl(last, None))
+        payload = self._get(path, params, cache_ttl=self._ttl(last, cache_ttl))
         records = self._records(payload, path)
         if not records:
             return _empty_candles()
