@@ -101,8 +101,14 @@ Providers: `hyperliquid` (meta, candles with paging, funding, asset contexts),
 
 **Archiver** (`freedom archive`): pulls 1m, 5m, 15m and 1h candles plus funding for every
 universe market and appends to `data/archive/candles/<market>/<interval>.parquet` (dedup on
-`t`). Designed to run from cron or a GitHub Actions schedule at least every 3 days (the 1m
-window is ~3.5 days). Also snapshots `metaAndAssetCtxs` (open interest, premium, oracle vs mark).
+`t`), where `<market>` is the market name with `:` replaced by `_` (`xyz:NVDA` →
+`candles/xyz_NVDA/1h.parquet`); build paths through `archive.candle_path` / `load_archive`,
+never by hand. Funding goes to `candles/<market>/funding.parquet` with `t` floored to the
+settlement hour, so it joins hourly bars on `t`; the first pull for a market starts at its
+listing date. Designed to run from cron or a GitHub Actions schedule at least every 3 days
+(the 1m window is ~3.5 days); a run that finds the archive older than the server horizon
+appends what is still served and reports the lost span in its summary. Also snapshots
+`metaAndAssetCtxs` (open interest, premium, oracle vs mark) to `ctx/<dex>/<date>.parquet`.
 
 ## 5. Event table
 

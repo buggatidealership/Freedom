@@ -9,7 +9,12 @@ Measured server semantics (2026-09-02) that the code below relies on:
   `startTime` returns the bar that *contains* it, so every page is requested with
   `endTime = end - 1` and post-filtered to `start <= t < end`.
 * Only the most recent 5000 candles per (market, interval) exist; older windows return `[]`.
-* `fundingHistory` returns at most 500 entries per request, oldest first.
+* `fundingHistory` returns at most 500 entries per request, oldest first. Each entry's `time`
+  is the settlement block, 48-120 ms *after* the hour it settles; `funding_history` floors it
+  to that hour so `t` lines up with hourly candles (the millisecond offset is not kept).
+
+Every datetime column leaving this module is datetime64[ns, UTC] (`DATETIME_DTYPE`), for
+empty and non-empty frames alike.
 """
 
 from __future__ import annotations
@@ -36,6 +41,16 @@ FUNDING_ITEMS_PER_WEIGHT = 20  # fundingHistory: +1 weight per 20 items
 FUNDING_PAGE_SIZE = 500  # measured: a 40-day request returned exactly 500 entries
 FUNDING_INTERVAL_MS = 3_600_000  # funding settles hourly on HIP-3 perps
 
+DATETIME_DTYPE = "datetime64[ns, UTC]"
+
+# Listing search: HIP-3 dexes launched in October 2025 (earliest measured listing 2025-11-12),
+# so a 1d request from LISTING_SEARCH_START finds every listing in one page charged ~31 weight
+# (the limiter is charged from the window length; a window from 2020 costs ~61 for the same
+# ~300 bars). Should a market have bars at the very start of that window, the search is
+# repeated once from LISTING_SEARCH_FLOOR.
+LISTING_SEARCH_START = pd.Timestamp("2025-01-01", tz=UTC)
+LISTING_SEARCH_FLOOR = pd.Timestamp("2020-01-01", tz=UTC)
+
 # Calendar-length intervals: nominal spans for paging; t_end comes from the server's `T + 1`.
 _CALENDAR_INTERVAL_MS = {"3d": 3 * 86_400_000, "1w": 7 * 86_400_000, "1M": 31 * 86_400_000}
 
@@ -53,7 +68,9 @@ def to_ms(ts: pd.Timestamp | str) -> int:
 
 
 def from_ms(ms: pd.Series | Iterable[int]) -> pd.Series:
-    return pd.to_datetime(pd.Series(ms, dtype="int64"), unit="ms", utc=True)
+    """Epoch milliseconds -> DATETIME_DTYPE series. One resolution everywhere, so `t`, `t_end`
+    and the empty frames share a dtype and parquet round-trips are exact."""
+    return pd.to_datetime(pd.Series(ms, dtype="int64"), unit="ms", utc=True).dt.as_unit("ns")
 
 
 def interval_ms(interval: str) -> int:
@@ -75,10 +92,11 @@ def funding_weight(n_items: int) -> int:
 
 
 def empty_candles() -> pd.DataFrame:
-    """Zero-row frame with the schemas.C columns and the dtypes non-empty frames carry."""
+    """Zero-row frame with the schemas.C columns and exactly the dtypes non-empty frames carry
+    (tests assert the two agree)."""
     return pd.DataFrame({
         C.market: pd.Series(dtype=str), C.interval: pd.Series(dtype=str),
-        C.t: pd.Series(dtype="datetime64[ns, UTC]"), C.t_end: pd.Series(dtype="datetime64[ns, UTC]"),
+        C.t: pd.Series(dtype=DATETIME_DTYPE), C.t_end: pd.Series(dtype=DATETIME_DTYPE),
         C.open: pd.Series(dtype="float64"), C.high: pd.Series(dtype="float64"),
         C.low: pd.Series(dtype="float64"), C.close: pd.Series(dtype="float64"),
         C.volume: pd.Series(dtype="float64"), C.n_trades: pd.Series(dtype="int64"),
@@ -87,8 +105,9 @@ def empty_candles() -> pd.DataFrame:
 
 
 def empty_funding() -> pd.DataFrame:
+    """Zero-row funding frame with the dtypes non-empty frames carry."""
     return pd.DataFrame({
-        "market": pd.Series(dtype=str), "t": pd.Series(dtype="datetime64[ns, UTC]"),
+        "market": pd.Series(dtype=str), "t": pd.Series(dtype=DATETIME_DTYPE),
         "funding_rate": pd.Series(dtype="float64"), "premium": pd.Series(dtype="float64"),
     })
 
@@ -120,18 +139,21 @@ def candles_frame(market: str, interval: str, raw: Iterable[dict], start_ms: int
 
 
 def funding_frame(market: str, raw: Iterable[dict], start_ms: int, end_ms: int) -> pd.DataFrame:
+    """Raw fundingHistory records with start <= time < end -> frame with FUNDING_COLUMNS.
+    `t` is the settlement instant floored to the hour (see the module docstring); one row per
+    hour (the last record of an hour wins), sorted by t."""
     rows = [r for r in raw if start_ms <= int(r["time"]) < end_ms]
     if not rows:
         return empty_funding()
     df = pd.DataFrame(rows)
     df["time"] = df["time"].astype("int64")
-    df = df.drop_duplicates(subset="time", keep="last").sort_values("time", kind="mergesort")
-    df = df.reset_index(drop=True)
+    df = df.sort_values("time", kind="mergesort").reset_index(drop=True)
     out = pd.DataFrame({
-        "market": market, "t": from_ms(df["time"]),
+        "market": market, "t": from_ms(df["time"]).dt.floor("h"),
         "funding_rate": df["fundingRate"].astype("float64"),
         "premium": df["premium"].astype("float64"),
     })
+    out = out.drop_duplicates(subset="t", keep="last").reset_index(drop=True)
     return out[FUNDING_COLUMNS]
 
 
@@ -226,19 +248,31 @@ class HyperliquidClient:
         return candles_frame(market, interval, pages, start_ms, end_ms)
 
     def listing_start(self, market: str) -> pd.Timestamp | None:
-        """Start time of the first daily candle, or None if the market has no candles."""
-        today = pd.Timestamp(utcnow()).normalize()
-        df = self.candles(market, "1d", pd.Timestamp("2020-01-01", tz=UTC),
-                          today + pd.Timedelta(days=1),
-                          cache_ttl=self.settings.cache_ttl_seconds)
+        """Start time of the first daily candle, or None if the market has no candles.
+        One 1d request from LISTING_SEARCH_START (a second one back to LISTING_SEARCH_FLOOR
+        only if bars exist at the window's start), cached for settings.cache_ttl_seconds."""
+        ttl = self.settings.cache_ttl_seconds
+        end = pd.Timestamp(utcnow()).normalize() + pd.Timedelta(days=1)
+        df = self.candles(market, "1d", LISTING_SEARCH_START, end, cache_ttl=ttl)
         if df.empty:
             return None
-        return pd.Timestamp(df[C.t].iloc[0])
+        first = pd.Timestamp(df[C.t].iloc[0])
+        if first == LISTING_SEARCH_START:  # listed before the cheap window: look further back
+            older = self.candles(market, "1d", LISTING_SEARCH_FLOOR, LISTING_SEARCH_START,
+                                 cache_ttl=ttl)
+            if not older.empty:
+                first = pd.Timestamp(older[C.t].iloc[0])
+        return first
 
     # ---- funding -----------------------------------------------------------------------------
     def funding_history(self, market: str, start: pd.Timestamp, end: pd.Timestamp | None = None,
                         *, cache_ttl: int | None = None) -> pd.DataFrame:
-        """Hourly funding: columns market, t (UTC), funding_rate, premium. Pages by time."""
+        """Hourly funding: columns market, t (UTC), funding_rate, premium. Pages by time.
+
+        `t` is the settlement *hour*: the server reports the settlement instant (48-120 ms
+        after the hour) and it is floored so that `t` joins directly with hourly candles' `t`
+        (no consumer needs to floor again). The [start, end) window applies to the settlement
+        instant; rows are unique on t and sorted."""
         start_ms = to_ms(start)
         end_ms = to_ms(end) if end is not None else to_ms(pd.Timestamp(utcnow()))
         rows: list[dict] = []

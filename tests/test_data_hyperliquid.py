@@ -37,6 +37,8 @@ def assert_candle_frame(df: pd.DataFrame, market: str, interval: str, source: st
     for col in (C.open, C.high, C.low, C.close, C.volume):
         assert df[col].dtype == np.float64
     assert df[C.n_trades].dtype == np.int64
+    # empty and non-empty frames carry identical dtypes (one datetime resolution for t and t_end)
+    assert df.dtypes.equals(hl.empty_candles().dtypes), df.dtypes
     if len(df):
         assert (df[C.market] == market).all()
         assert (df[C.interval] == interval).all()
@@ -51,6 +53,7 @@ def test_epoch_helpers_and_weights():
     assert hl.to_ms(T0) == T0_MS
     assert hl.to_ms("2026-08-24 00:00") == T0_MS  # naive is taken as UTC
     assert hl.from_ms([T0_MS]).iloc[0] == T0
+    assert str(hl.from_ms([T0_MS]).dtype) == hl.DATETIME_DTYPE == "datetime64[ns, UTC]"
     assert hl.candle_weight(0) == 20 and hl.candle_weight(1) == 21
     assert hl.candle_weight(5000) == 20 + math.ceil(5000 / 60)
     assert hl.funding_weight(48) == 20 + 3
@@ -192,10 +195,22 @@ def test_listing_start_from_first_daily_candle(client, fake, settings):
     fake.candles[(NVDA, "1d")] = synth_candles(NVDA, "1d", hl.to_ms(listing), 10)
     assert client.listing_start(NVDA) == listing
     (call,) = fake.calls_of("candleSnapshot")
-    assert call["body"]["req"]["startTime"] == hl.to_ms(pd.Timestamp("2020-01-01", tz="UTC"))
+    # one page from the HIP-3 era, not from 2020: the limiter is charged from the window length
+    assert call["body"]["req"]["startTime"] == hl.to_ms(hl.LISTING_SEARCH_START)
     assert call["body"]["req"]["interval"] == "1d"
+    assert call["weight"] < hl.candle_weight(2000)
     assert call["cache_ttl"] == settings.cache_ttl_seconds  # listing dates do not change
     assert client.listing_start("xyz:NOPE") is None
+
+
+def test_listing_start_before_search_window_looks_further_back(client, fake):
+    listed = pd.Timestamp("2024-06-01", tz="UTC")
+    fake.candles[("xyz:OLD", "1d")] = synth_candles("xyz:OLD", "1d", hl.to_ms(listed), 2000)
+    assert client.listing_start("xyz:OLD") == listed
+    calls = fake.calls_of("candleSnapshot")
+    assert [c["body"]["req"]["startTime"] for c in calls] == [
+        hl.to_ms(hl.LISTING_SEARCH_START), hl.to_ms(hl.LISTING_SEARCH_FLOOR)]
+    assert calls[1]["body"]["req"]["endTime"] == hl.to_ms(hl.LISTING_SEARCH_START) - 1
 
 
 # ---- funding ------------------------------------------------------------------------------------
@@ -205,8 +220,12 @@ def test_funding_history_fixture(client, fake):
     df = client.funding_history(NVDA, start, end)
     assert list(df.columns) == ["market", "t", "funding_rate", "premium"]
     assert len(df) == 48 and str(df["t"].dt.tz) == "UTC"
+    assert df.dtypes.equals(hl.empty_funding().dtypes), df.dtypes
     assert df["t"].is_monotonic_increasing and df["t"].is_unique
     assert (df["t"] >= start).all() and (df["t"] < end).all()
+    # the server stamps the settlement block (48-120 ms after the hour); t is the hour itself
+    assert (df["t"] == df["t"].dt.floor("h")).all()
+    assert df["t"].iloc[0] == start
     assert df["funding_rate"].dtype == np.float64 and df["premium"].dtype == np.float64
     assert df["funding_rate"].iloc[0] == pytest.approx(0.00000625)
     assert df["premium"].iloc[0] == pytest.approx(0.0002191143)
@@ -216,7 +235,17 @@ def test_funding_history_fixture(client, fake):
                             "startTime": hl.to_ms(start), "endTime": hl.to_ms(end)}
     assert call["weight"] == hl.funding_weight(48) and call["cache_ttl"] is None
     # half-open end: the 23:00 entry of the 27th is the last, the 28th 00:00 entry is out
-    assert df["t"].iloc[-1].floor("h") == end - H
+    assert df["t"].iloc[-1] == end - H
+
+
+def test_funding_frame_floors_to_hour_and_keeps_last_per_hour():
+    raw = [{"time": T0_MS + 48, "fundingRate": "1e-6", "premium": "0"},
+           {"time": T0_MS + 900_000, "fundingRate": "2e-6", "premium": "0"},  # same hour, later
+           {"time": T0_MS + 3_600_000 + 120, "fundingRate": "3e-6", "premium": "0"}]
+    df = hl.funding_frame("xyz:SYN", raw, 0, 10**14)
+    assert list(df["t"]) == [T0, T0 + H]
+    assert df["funding_rate"].tolist() == [2e-6, 3e-6]
+    assert df.dtypes.equals(hl.empty_funding().dtypes)
 
 
 def test_funding_history_pages_by_500(client, fake):
@@ -239,6 +268,6 @@ def test_funding_history_pages_by_500(client, fake):
 def test_funding_history_empty_and_default_end(client, fake):
     df = client.funding_history("xyz:NOPE", T0)
     assert df.empty and list(df.columns) == ["market", "t", "funding_rate", "premium"]
-    assert str(df["t"].dt.tz) == "UTC"
+    assert str(df["t"].dt.tz) == "UTC" and df.dtypes.equals(hl.empty_funding().dtypes)
     (call,) = fake.calls
     assert call["body"]["endTime"] > call["body"]["startTime"]  # end defaults to now

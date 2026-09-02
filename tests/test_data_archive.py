@@ -49,7 +49,7 @@ def test_first_run_writes_every_file(settings, fake):
     assert r5m["rows_added"] == 337
     rf = summary_row(summary, NVDA, "funding")
     assert rf["rows_added"] == 48
-    assert rf["first_t"].floor("h") == pd.Timestamp("2026-08-26 00:00", tz="UTC")
+    assert rf["first_t"] == pd.Timestamp("2026-08-26 00:00", tz="UTC")
     rc = summary_row(summary, "xyz", "ctx")
     assert rc["rows_added"] == 103 and rc["first_t"] == NOW
 
@@ -70,6 +70,10 @@ def test_first_run_writes_every_file(settings, fake):
     funding = pd.read_parquet(archive.funding_path(settings, NVDA))
     assert list(funding.columns) == ["market", "t", "funding_rate", "premium"]
     assert funding["t"].is_unique and str(funding["t"].dt.tz) == "UTC"
+    # funding t is the settlement hour, so it joins the hourly bars on t without flooring
+    assert (funding["t"] == funding["t"].dt.floor("h")).all()
+    assert len(stored.merge(funding, on="t")) == 48
+    assert str(stored[C.t].dtype) == str(stored[C.t_end].dtype) == str(funding["t"].dtype)
 
     ctx = pd.read_parquet(archive.ctx_path(settings, "xyz", date(2026, 8, 29)))
     assert list(ctx.columns) == archive.CTX_COLUMNS
@@ -79,15 +83,21 @@ def test_first_run_writes_every_file(settings, fake):
     assert nvda["impact_bid"] == 216.708 and nvda["impact_ask"] == 216.737
     assert nvda["funding"] == pytest.approx(0.0000048249)
     assert nvda["t"] == NOW and nvda["dex"] == "xyz"
+    assert str(ctx["t"].dtype) == str(funding["t"].dtype)
 
     # requests: the first pull asks for the server's whole 5000-bar horizon ending at the bar
-    # in progress, in a single request per interval
+    # in progress, in a single request per interval (plus one 1d probe for the listing date)
     calls = fake.calls_of("candleSnapshot")
-    assert len(calls) == 2
-    req = next(c["body"]["req"] for c in calls if c["body"]["req"]["interval"] == "1h")
+    by_interval = {c["body"]["req"]["interval"]: c["body"]["req"] for c in calls}
+    assert len(calls) == 3 and set(by_interval) == {"1h", "5m", "1d"}
+    req = by_interval["1h"]
     end_ms = req["endTime"] + 1
     assert end_ms == archive.to_ms(NOW.floor("h") + H)
     assert end_ms - req["startTime"] == 5000 * 3_600_000
+    # no daily candles in the fake -> listing unknown -> funding bootstraps 35 days back
+    (fcall,) = fake.calls_of("fundingHistory")
+    assert fcall["body"]["startTime"] == archive.to_ms(NOW - pd.Timedelta(days=35))
+    assert fcall["body"]["endTime"] == archive.to_ms(NOW)
 
 
 def test_rerun_is_idempotent_and_incremental(settings, fake):
@@ -95,13 +105,19 @@ def test_rerun_is_idempotent_and_incremental(settings, fake):
     n_calls = len(fake.calls)
     summary = archive_markets(settings, [NVDA], ["1h"], now=NOW)
     r = summary_row(summary, NVDA, "1h")
-    assert r["rows_added"] == 0 and r["rows_total"] == 121
+    assert r["rows_added"] == 0 and r["rows_total"] == 121 and pd.isna(r["error"])
     assert summary_row(summary, NVDA, "funding")["rows_added"] == 0
     assert summary_row(summary, "xyz", "ctx")["rows_added"] == 0  # same (market, t) rows
+    assert summary["error"].isna().all()
+    # the second run: no listing probe (funding is already archived), one request per item
+    rerun = fake.calls[n_calls:]
+    assert [c["body"]["type"] for c in rerun] == ["candleSnapshot", "fundingHistory",
+                                                  "metaAndAssetCtxs"]
     # the second pull starts at the last archived bar (refreshing it), not the whole horizon
-    req = fake.calls_of("candleSnapshot")[-1]["body"]["req"]
+    req = rerun[0]["body"]["req"]
     assert req["startTime"] == archive.to_ms(T0 + pd.Timedelta(days=5))
-    assert len(fake.calls) == 2 * n_calls
+    # funding resumes at the hour after the last archived one
+    assert rerun[1]["body"]["startTime"] == archive.to_ms(pd.Timestamp("2026-08-28", tz="UTC"))
     stored = pd.read_parquet(archive.candle_path(settings, NVDA, "1h"))
     assert len(stored) == 121 and stored[C.t].is_unique and tmp_files(settings) == []
 
@@ -116,7 +132,7 @@ def test_append_dedups_and_refreshes_partial_bar(settings, fake):
     later = NOW + 3 * H
     summary = archive_markets(settings, [NVDA], ["1h"], now=later)
     r = summary_row(summary, NVDA, "1h")
-    assert r["rows_added"] == 3 and r["rows_total"] == 124
+    assert r["rows_added"] == 3 and r["rows_total"] == 124 and pd.isna(r["error"])
     stored = pd.read_parquet(archive.candle_path(settings, NVDA, "1h"))
     assert len(stored) == 124 and stored[C.t].is_unique and stored[C.t].is_monotonic_increasing
     refreshed = stored.set_index(C.t).loc[pd.Timestamp(last_t, unit="ms", tz="UTC")]
@@ -135,6 +151,71 @@ def test_http_failure_is_recorded_not_fatal(settings, fake):
     assert pd.isna(bad["first_t"])
     assert summary_row(summary, NVDA, "1h")["rows_added"] == 121
     assert not archive.candle_path(settings, "xyz:BAD", "1h").exists()
+    assert tmp_files(settings) == []
+
+
+def test_funding_bootstraps_from_listing_start(settings, fake):
+    listing = pd.Timestamp("2025-11-12", tz="UTC")
+    fake.candles[(NVDA, "1d")] = synth_candles(NVDA, "1d", archive.to_ms(listing), 400)
+    summary = archive_markets(settings, [NVDA], ["1h"], now=NOW)
+    (call,) = fake.calls_of("fundingHistory")
+    assert call["body"]["startTime"] == archive.to_ms(listing)
+    assert call["body"]["endTime"] == archive.to_ms(NOW)
+    assert summary_row(summary, NVDA, "funding")["rows_added"] == 48
+    probe = [c for c in fake.calls_of("candleSnapshot") if c["body"]["req"]["interval"] == "1d"]
+    assert len(probe) == 1 and probe[0]["cache_ttl"] == settings.cache_ttl_seconds
+
+
+def test_gap_after_missed_runs_is_reported(settings, fake):
+    archive_markets(settings, [NVDA], ["1h"], now=NOW)
+    last_archived = T0 + pd.Timedelta(days=5)
+    later = NOW + 6000 * H  # the archived bars are now older than the 5000-bar horizon
+    bar = later.floor("h")
+    fake.candles[(NVDA, "1h")] = synth_candles(NVDA, "1h", archive.to_ms(bar - 9 * H), 10)
+    summary = archive_markets(settings, [NVDA], ["1h"], now=later)
+    r = summary_row(summary, NVDA, "1h")
+    # the newest bars are archived as usual ...
+    assert r["rows_added"] == 10 and r["rows_total"] == 131 and r["first_t"] == bar - 9 * H
+    stored = pd.read_parquet(archive.candle_path(settings, NVDA, "1h"))
+    assert len(stored) == 131 and stored[C.t].is_monotonic_increasing
+    # ... and the hole between the archive and what the server still serves is spelled out
+    gap_from, gap_last = last_archived + H, bar - 10 * H
+    n_missing = int((gap_last + H - gap_from) / H)
+    assert r["error"].startswith("gap: ")
+    assert f"{n_missing} 1h bars" in r["error"]
+    assert gap_from.isoformat() in r["error"] and gap_last.isoformat() in r["error"]
+    # the request covered the whole horizon (the unreachable part is not requested)
+    req = fake.calls_of("candleSnapshot")[-1]["body"]["req"]
+    assert req["startTime"] == archive.to_ms(bar + H) - 5000 * 3_600_000
+    assert pd.isna(summary_row(summary, NVDA, "funding")["error"])
+
+
+def test_error_rows_report_existing_archive_size(settings, fake):
+    archive_markets(settings, [NVDA], ["1h"], now=NOW)
+    fake.fail_markets.add(NVDA)
+    summary = archive_markets(settings, [NVDA], ["1h"], now=NOW + H)
+    r1h = summary_row(summary, NVDA, "1h")
+    assert r1h["error"].startswith("ConnectError") and r1h["rows_added"] == 0
+    assert r1h["rows_total"] == 121 and pd.isna(r1h["first_t"]) and pd.isna(r1h["last_t"])
+    rf = summary_row(summary, NVDA, "funding")
+    assert rf["error"].startswith("ConnectError") and rf["rows_added"] == 0
+    assert rf["rows_total"] == 48
+    assert pd.isna(summary_row(summary, "xyz", "ctx")["error"])
+
+
+def test_malformed_responses_are_recorded_not_fatal(settings, fake):
+    fake.malformed_markets.add("xyz:BAD")  # non-JSON 200 body -> json.JSONDecodeError
+    fake.ctx_mismatch_dexs.add("xyz")  # meta/ctx length mismatch -> ValueError in ctx_frame
+    summary = archive_markets(settings, [NVDA, "xyz:BAD"], ["1h"], now=NOW)
+    bad = summary_row(summary, "xyz:BAD", "1h")
+    assert bad["error"].startswith("JSONDecodeError") and bad["rows_added"] == 0
+    assert summary_row(summary, "xyz:BAD", "funding")["error"].startswith("JSONDecodeError")
+    ctx = summary_row(summary, "xyz", "ctx")
+    assert ctx["error"].startswith("ValueError") and ctx["rows_added"] == 0
+    assert ctx["rows_total"] == 0 and not archive.ctx_path(settings, "xyz", NOW.date()).exists()
+    # the healthy market in the same run is unaffected
+    assert summary_row(summary, NVDA, "1h")["rows_added"] == 121
+    assert summary_row(summary, NVDA, "funding")["rows_added"] == 48
     assert tmp_files(settings) == []
 
 

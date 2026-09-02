@@ -54,7 +54,9 @@ class FakeHyperliquidInfo:
         self.funding: dict[str, list[dict]] = {
             NVDA: load_fixture("hyperliquid", "funding_xyzNVDA_20260826_28.json"),
         }
-        self.fail_markets: set[str] = set()  # candle/funding requests for these raise
+        self.fail_markets: set[str] = set()  # candle/funding requests for these raise ConnectError
+        self.malformed_markets: set[str] = set()  # ... raise JSONDecodeError (non-JSON 200 body)
+        self.ctx_mismatch_dexs: set[str] = set()  # metaAndAssetCtxs returns one ctx too few
 
     def install(self, monkeypatch) -> FakeHyperliquidInfo:
         def _post(http: HttpClient, url: str, body, **kw):
@@ -70,6 +72,12 @@ class FakeHyperliquidInfo:
     def calls_of(self, typ: str) -> list[dict]:
         return [c for c in self.calls if c["body"]["type"] == typ]
 
+    def _maybe_fail(self, market: str) -> None:
+        if market in self.fail_markets:
+            raise httpx.ConnectError("simulated network failure")
+        if market in self.malformed_markets:
+            raise json.JSONDecodeError("Expecting value", "<html>503 Service Unavailable</html>", 0)
+
     def post_json(self, url: str, body: dict, *, cache_ttl, weight=1.0, headers=None):
         self.calls.append({"url": url, "body": body, "cache_ttl": cache_ttl, "weight": weight})
         typ = body["type"]
@@ -78,19 +86,20 @@ class FakeHyperliquidInfo:
         if typ == "meta":
             return load_fixture("hyperliquid", f"meta_{body['dex']}.json")
         if typ == "metaAndAssetCtxs":
-            return load_fixture("hyperliquid", f"metaAndAssetCtxs_{body['dex']}.json")
+            meta, ctxs = load_fixture("hyperliquid", f"metaAndAssetCtxs_{body['dex']}.json")
+            if body["dex"] in self.ctx_mismatch_dexs:
+                ctxs = ctxs[:-1]
+            return [meta, ctxs]
         if typ == "candleSnapshot":
             req = body["req"]
-            if req["coin"] in self.fail_markets:
-                raise httpx.ConnectError("simulated network failure")
+            self._maybe_fail(req["coin"])
             step = hl.interval_ms(req["interval"])
             span = req["endTime"] - req["startTime"] + 1
             assert span <= hl.MAX_CANDLES_PER_REQUEST * step, "request would exceed 5000 candles"
             rows = self.candles.get((req["coin"], req["interval"]), [])
             return [r for r in rows if r["T"] >= req["startTime"] and r["t"] <= req["endTime"]]
         if typ == "fundingHistory":
-            if body["coin"] in self.fail_markets:
-                raise httpx.ConnectError("simulated network failure")
+            self._maybe_fail(body["coin"])
             rows = self.funding.get(body["coin"], [])
             hit = [r for r in rows if body["startTime"] <= r["time"] <= body["endTime"]]
             return sorted(hit, key=lambda r: r["time"])[: hl.FUNDING_PAGE_SIZE]
