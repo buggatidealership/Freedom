@@ -7,6 +7,7 @@ while the baselines' outputs can be recomputed by hand from the feature columns.
 
 from __future__ import annotations
 
+import json
 import warnings
 
 import numpy as np
@@ -387,6 +388,79 @@ def test_lightgbm_enforces_small_n_caps():
     assert isinstance(m, LightGBMModel)
 
 
+@pytest.mark.parametrize("alias", ["n_estimators", "num_iterations", "num_trees"])
+def test_lightgbm_round_aliases_map_to_num_boost_round_and_keep_early_stopping(alias, split):
+    Xtr, ytr, dtr, Xte, *_ = split
+    m = make_model("lightgbm", seed=SEED, **{alias: 300}).fit(Xtr, ytr, dtr)
+    assert m.num_boost_round == 300 and alias not in m.lgb_params and alias not in m.params
+    assert m.params["num_boost_round"] == 300
+    # the refit honours the early-stopped best iteration instead of the alias value
+    assert m.booster_return_.num_trees() == m.best_iterations_["regression"] < 300
+    assert m.booster_direction_.num_trees() == m.best_iterations_["binary"] < 300
+    ref = make_model("lightgbm", seed=SEED, num_boost_round=300).fit(Xtr, ytr, dtr)
+    assert np.array_equal(m.predict_return(Xte), ref.predict_return(Xte))
+    assert np.array_equal(m.predict_proba_up(Xte), ref.predict_proba_up(Xte))
+
+
+def test_lightgbm_early_stopping_alias_and_conflicting_aliases():
+    m = make_model("lightgbm", early_stopping_round=10)
+    assert m.early_stopping_rounds == 10 and "early_stopping_round" not in m.lgb_params
+    with pytest.raises(TypeError, match="conflicting"):
+        make_model("lightgbm", n_estimators=300, num_trees=200)
+    assert make_model("lightgbm", n_estimators=300, num_trees=300).num_boost_round == 300
+
+
+def test_linear_accepts_scalar_alpha_and_C_and_rejects_unknown_params(split):
+    Xtr, ytr, dtr, Xte, *_ = split
+    m = make_model("linear", seed=SEED, alpha=300.0, C=0.01)
+    assert m.alphas == (300.0,) and m.Cs == (0.01,)
+    assert m.params["alphas"] == (300.0,) and m.params["Cs"] == (0.01,)
+    m.fit(Xtr, ytr, dtr)
+    assert m.alpha_ == 300.0 and m.C_ == 0.01
+    ref = _fitted("linear", split)
+    assert (ref.alpha_, ref.C_) != (300.0, 0.01)
+    assert not np.array_equal(m.predict_proba_up(Xte), ref.predict_proba_up(Xte))
+    assert not np.array_equal(m.predict_return(Xte), ref.predict_return(Xte))
+    with pytest.raises(TypeError, match="unknown parameter"):
+        make_model("linear", lambda_l2=1.0)
+    with pytest.raises(TypeError, match="not both"):
+        make_model("linear", alpha=1.0, alphas=(1.0, 10.0))
+    with pytest.raises(ValueError):
+        make_model("linear", Cs=())
+    # the ensemble forwards member_params unchanged, so the optimizer's names reach the member
+    e = make_model("ensemble", member_params={"linear": {"alpha": 3.0, "C": 0.01}})
+    assert e.members_[0].alphas == (3.0,) and e.members_[0].Cs == (0.01,)
+    with pytest.raises(TypeError):
+        make_model("ensemble", member_params={"linear": {"alpha_": 3.0}})
+
+
+@pytest.mark.parametrize("name", LEARNERS)
+def test_non_finite_features_are_treated_as_missing(name, split):
+    Xtr, ytr, dtr, Xte, *_ = split
+    col = Xtr.columns.get_loc("f_x2")
+    Xinf, Xnan = Xtr.copy(), Xtr.copy()
+    Xinf.iloc[3, col], Xnan.iloc[3, col] = np.inf, np.nan
+    a = make_model(name, seed=SEED).fit(Xinf, ytr, dtr)
+    b = make_model(name, seed=SEED).fit(Xnan, ytr, dtr)
+    Tinf, Tnan = Xte.copy(), Xte.copy()
+    Tinf.iloc[0, col], Tnan.iloc[0, col] = -np.inf, np.nan
+    assert np.isfinite(a.predict_return(Tinf)).all() and np.isfinite(a.predict_proba_up(Tinf)).all()
+    assert np.array_equal(a.predict_return(Tinf), b.predict_return(Tnan))
+    assert np.array_equal(a.predict_proba_up(Tinf), b.predict_proba_up(Tnan))
+
+
+@pytest.mark.parametrize("name", sorted(EXPECTED_MODELS))
+def test_predicting_on_an_empty_frame_returns_empty_arrays(name, split):
+    Xtr, ytr, dtr, Xte, *_ = split
+    m = _fitted(name, split)
+    empty = Xte.iloc[:0]
+    for predict in (m.predict_proba_up, m.predict_return, m.predict_magnitude):
+        out = predict(empty)
+        assert isinstance(out, np.ndarray) and out.shape == (0,) and out.dtype == float
+    lo, hi = m.predict_band(empty)
+    assert lo.shape == (0,) and hi.shape == (0,)
+
+
 def test_ensemble_is_the_mean_of_its_members(split):
     Xtr, ytr, dtr, Xte, *_ = split
     members = [make_model("base_rate"), make_model("sign_of_reaction"), make_model("hist_abs_mean")]
@@ -406,6 +480,15 @@ def test_ensemble_is_the_mean_of_its_members(split):
         Ensemble(members=[])
     with pytest.raises(ValueError):
         Ensemble(members=["zero"], weights=(1, 1))
+
+
+def test_ensemble_params_record_instance_members_by_name():
+    members = [make_model("zero"), make_model("base_rate", seed=3)]
+    e = Ensemble(members=members, weights=(1, 2), member_params={"zero": {}})
+    assert e.params["members"] == ("zero", "base_rate")
+    json.dumps(e.params)  # a plain hyper-parameter record, never the member objects
+    assert e.members_[0] is members[0] and e.members_[1].seed == 3  # instances are used as given
+    assert make_model("ensemble", members=["ridge", "zero"]).params["members"] == ("ridge", "zero")
 
 
 # ---- persistence --------------------------------------------------------------------------------

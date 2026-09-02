@@ -15,12 +15,13 @@ Conventions shared by every model
 * Features are the `f_*` columns of X (schemas.D.feature_prefix), including the `__missing`
   companions; every other column (event_id, t0, ...) is ignored. The column list seen in `fit`
   is stored in `feature_names_`; at prediction time X is re-indexed to it, so extra columns are
-  dropped and absent columns become NaN (then imputed / handled natively).
+  dropped and absent columns become NaN (then imputed / handled natively). Non-finite values
+  (NaN, +/-inf) are treated as missing by every model.
 * `y_return` is the headline log return (NaN where the event has no 24h target); `y_direction`
   is +1 / -1 (0 or NaN = unlabelled). Rows are aligned positionally with X. The return head
   trains on rows with a finite return, the direction head on rows with a +1/-1 label.
 * `p_up` is a probability clipped to [PROBA_EPS, 1 - PROBA_EPS]; `predict_return` is in
-  log-return units; both return float ndarrays of len(X).
+  log-return units; both return float ndarrays of len(X) (empty for an empty X).
 * Every fit records the training base rates (`up_rate_`, `mean_return_`, `mean_abs_return_`);
   a learner with fewer than MIN_TRAIN_ROWS usable rows for a head falls back to those constants
   for that head and emits `SmallSampleWarning`, so tiny folds degrade to `base_rate`.
@@ -172,11 +173,13 @@ class BaseModel(ABC):
         return self._matrix(X), r, d
 
     def _matrix(self, X: pd.DataFrame) -> np.ndarray:
-        """Float matrix of X aligned to feature_names_ (absent columns -> NaN, extras dropped)."""
+        """Float matrix of X aligned to feature_names_ (absent columns -> NaN, extras dropped);
+        +/-inf becomes NaN so it is imputed / split on like a missing value."""
         cols = self.feature_names_
         if not cols:
             return np.empty((len(X), 0), dtype=float)
-        return X.reindex(columns=cols).apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+        M = X.reindex(columns=cols).apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+        return np.where(np.isfinite(M), M, np.nan)
 
     @staticmethod
     def _column(X: pd.DataFrame, name: str) -> np.ndarray:

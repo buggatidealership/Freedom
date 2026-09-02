@@ -1,10 +1,12 @@
 """`ensemble`: (weighted) mean of the members' p_up, r_hat and magnitude.
 
 Members are given by registry name (default `linear` + `lightgbm`, each built with the
-ensemble's seed and any `member_params[name]`) or as already-constructed BaseModel instances.
-Every member is fitted on the same (X, y_return, y_direction). The magnitude is the mean of the
-members' `predict_magnitude`, not |mean r_hat|, so a magnitude-only member (e.g. hist_abs_mean)
-contributes its magnitude even though its r_hat is 0.
+ensemble's seed and any `member_params[name]`) or as already-constructed BaseModel instances,
+which are used as given (their own seed and parameters). `params["members"]` records the
+members by name either way, so `params` stays a plain JSON-serialisable hyper-parameter record;
+the objects live in `members_`. Every member is fitted on the same (X, y_return, y_direction).
+The magnitude is the mean of the members' `predict_magnitude`, not |mean r_hat|, so a
+magnitude-only member (e.g. hist_abs_mean) contributes its magnitude even though its r_hat is 0.
 """
 
 from __future__ import annotations
@@ -24,7 +26,8 @@ class Ensemble(BaseModel):
     def __init__(self, *, seed: int = 7, members: Sequence[str | BaseModel] = DEFAULT_MEMBERS,
                  member_params: dict[str, dict] | None = None, weights: Sequence[float] | None = None,
                  **params):
-        super().__init__(seed=seed, members=tuple(members), member_params=member_params,
+        names = tuple(m.name if isinstance(m, BaseModel) else str(m) for m in members)
+        super().__init__(seed=seed, members=names, member_params=member_params,
                          weights=None if weights is None else tuple(weights), **params)
         if len(members) == 0:
             raise ValueError("ensemble needs at least one member")

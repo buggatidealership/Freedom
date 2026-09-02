@@ -7,6 +7,11 @@ log-loss for the direction) with the small-N settings of docs/design.md §7.
 * The number of rounds is chosen by early stopping on a seeded inner split (`valid_fraction`
   of the rows held out), then the booster is refitted on all rows with that many rounds.
 * Determinism: `seed`, `deterministic=True`, `force_row_wise=True`, `num_threads=1`.
+* Any LightGBM alias of num_iterations (n_estimators, num_trees, n_iter, ...) or of
+  early_stopping_round passed through `**lgb_params` is mapped onto `num_boost_round` /
+  `early_stopping_rounds` and never reaches lgb.train's params: there it would silently take
+  priority over the num_boost_round argument and the refit would ignore the early-stopped
+  best iteration. Conflicting aliases raise TypeError.
 * A head with fewer than MIN_TRAIN_ROWS usable rows, or a direction head with one class,
   falls back to the training base rate for that head (SmallSampleWarning).
 """
@@ -34,12 +39,32 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "min_sum_hessian_in_leaf": 1e-3,
     "max_bin": 63,
 }
+# lightgbm's own alias sets (lightgbm.basic._ConfigAliases) for the two parameters that must stay
+# arguments of lgb.train rather than entries of params; see the module docstring.
+NUM_ITERATIONS_ALIASES = frozenset({
+    "num_iterations", "num_iteration", "n_iter", "num_tree", "num_trees", "num_round", "num_rounds",
+    "nrounds", "num_boost_round", "n_estimators", "max_iter",
+})
+EARLY_STOPPING_ALIASES = frozenset({
+    "early_stopping_round", "early_stopping_rounds", "early_stopping", "n_iter_no_change",
+})
+
+
+def _pop_alias(params: dict[str, Any], aliases: frozenset[str], default: int) -> int:
+    """Remove every key of `aliases` from params and return their (single) value, else default."""
+    found = {k: params.pop(k) for k in sorted(aliases) if k in params}
+    if len({int(v) for v in found.values()}) > 1:
+        raise TypeError(f"lightgbm: conflicting values for the same parameter: {found}")
+    return int(next(iter(found.values()))) if found else int(default)
 
 
 @register("lightgbm")
 class LightGBMModel(BaseModel):
     def __init__(self, *, seed: int = 7, num_boost_round: int = 500, early_stopping_rounds: int = 30,
                  valid_fraction: float = 0.2, **lgb_params):
+        lgb_params = dict(lgb_params)
+        num_boost_round = _pop_alias(lgb_params, NUM_ITERATIONS_ALIASES, num_boost_round)
+        early_stopping_rounds = _pop_alias(lgb_params, EARLY_STOPPING_ALIASES, early_stopping_rounds)
         super().__init__(seed=seed, num_boost_round=num_boost_round,
                          early_stopping_rounds=early_stopping_rounds, valid_fraction=valid_fraction,
                          **lgb_params)

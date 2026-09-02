@@ -8,7 +8,9 @@ Pipeline (learned in fit, applied identically at prediction time):
    over `Cs` for the L2 logistic direction head (seeded stratified inner folds scored by
    log-loss, ties broken towards the strongest regularisation, refit on all rows). The grids
    are deliberately on the strong-regularisation side because N is a few hundred events at
-   best.
+   best. A scalar `alpha` / `C` (the names the optimizer tunes) is shorthand for a
+   one-element grid, i.e. no inner selection; passing both the scalar and the grid, or any
+   other keyword, raises TypeError so a misspelt hyper-parameter cannot be a silent no-op.
 
 A head with fewer than MIN_TRAIN_ROWS usable rows, or a direction head with a single class,
 falls back to the training base rate for that head (SmallSampleWarning).
@@ -29,13 +31,29 @@ DEFAULT_ALPHAS = (1.0, 3.0, 10.0, 30.0, 100.0, 300.0, 1000.0)  # ridge alpha on 
 DEFAULT_CS = (0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0)  # logistic C = 1 / lambda
 
 
+def _grid(name: str, scalar, grid, default) -> tuple[float, ...]:
+    """The search grid for one head: `scalar` (-> a one-element grid) or `grid`, not both."""
+    if scalar is not None:
+        if grid is not default:
+            raise TypeError(f"linear: pass either {name} or {name}s, not both")
+        grid = (scalar,)
+    out = tuple(float(v) for v in grid)
+    if not out:
+        raise ValueError(f"linear: {name}s must not be empty")
+    return out
+
+
 @register("linear")
 class LinearModel(BaseModel):
     def __init__(self, *, seed: int = 7, alphas=DEFAULT_ALPHAS, Cs=DEFAULT_CS, cv_folds: int = 5,
                  **params):
-        alphas = tuple(float(a) for a in alphas)
-        Cs = tuple(float(c) for c in Cs)
-        super().__init__(seed=seed, alphas=alphas, Cs=Cs, cv_folds=cv_folds, **params)
+        alpha, C = params.pop("alpha", None), params.pop("C", None)
+        if params:
+            raise TypeError(f"linear: unknown parameter(s) {sorted(params)}; "
+                            "accepted: alpha or alphas, C or Cs, cv_folds")
+        alphas = _grid("alpha", alpha, alphas, DEFAULT_ALPHAS)
+        Cs = _grid("C", C, Cs, DEFAULT_CS)
+        super().__init__(seed=seed, alphas=alphas, Cs=Cs, cv_folds=cv_folds)
         self.alphas = alphas
         self.Cs = Cs
         self.cv_folds = int(cv_folds)
@@ -80,7 +98,7 @@ class LinearModel(BaseModel):
 
         ok = np.isfinite(r)
         if ok.sum() >= MIN_TRAIN_ROWS:
-            self.ridge_ = RidgeCV(alphas=self.alphas).fit(Z[ok], r[ok])
+            self.ridge_ = RidgeCV(alphas=list(self.alphas)).fit(Z[ok], r[ok])  # a list: sklearn mutates a 1-grid
             self.alpha_ = float(self.ridge_.alpha_)
         else:
             self._small_sample("return", int(ok.sum()))
@@ -115,13 +133,13 @@ class LinearModel(BaseModel):
 
     def predict_return(self, X: pd.DataFrame) -> np.ndarray:
         self._check_fitted()
-        if self.ridge_ is None:
+        if self.ridge_ is None or len(X) == 0:  # sklearn rejects 0-row input
             return self._base_return(len(X))
         return np.asarray(self.ridge_.predict(self._features(X)), dtype=float)
 
     def predict_proba_up(self, X: pd.DataFrame) -> np.ndarray:
         self._check_fitted()
-        if self.logit_ is None:
+        if self.logit_ is None or len(X) == 0:
             return self._base_proba(len(X))
         return clip_proba(self.logit_.predict_proba(self._features(X))[:, 1])
 
