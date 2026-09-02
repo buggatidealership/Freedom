@@ -92,7 +92,10 @@ class E:
     cik = "cik"
     kind = "kind"  # equity_us | equity_fpi
     fiscal_period = "fiscal_period"  # "YYYY-MM" fiscal quarter-end month
-    fiscal_period_source = "fiscal_period_source"  # sec_facts | alphavantage | derived
+    # sec_facts | alphavantage (the period's own filing) | sec_facts_projected |
+    # alphavantage_projected (latest known period end + whole quarters: fresh / upcoming
+    # events, stable before and after the filing) | derived (calendar quarter, no facts)
+    fiscal_period_source = "fiscal_period_source"
     report_date_ny = "report_date_ny"  # calendar date in New York
     t0 = "t0"
     t0_confidence = "t0_confidence"  # 0..1
@@ -105,7 +108,9 @@ class E:
     rev_estimate = "rev_estimate"
     rev_surprise_pct = "rev_surprise_pct"
     n_estimates = "n_estimates"
-    estimate_source = "estimate_source"  # consensus_snapshot | fmp_final | nasdaq_final
+    # consensus_snapshot | fmp_final | nasdaq_final (vendor's final value, past events) |
+    # fmp_calendar (vendor's current, not-yet-final value on upcoming rows)
+    estimate_source = "estimate_source"
     estimate_snapshot_time = "estimate_snapshot_time"  # UTC time the consensus was captured, or NaT
     sources_used = "sources_used"
     has_perp_at_t0 = "has_perp_at_t0"  # t0 >= earliest listing_start over all markets of the underlying

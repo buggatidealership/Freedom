@@ -142,15 +142,20 @@ appends what is still served and reports the lost span in its summary. Also snap
 `freedom events` → `data/events.parquet`, one row per (underlying, fiscal period).
 `fiscal_period` is the fiscal quarter-end month (`YYYY-MM`), derived deterministically per
 name: SEC companyfacts quarterly EPS period end for US filers, Alpha Vantage `fiscalDateEnding`
-for foreign private issuers, else the calendar quarter end preceding the FMP date with
-`flags += fiscal_period_derived`. `event_id = "{underlying}:{fiscal_period}"`. Nasdaq and Alpha
+for foreign private issuers; when the period's own filing is not on file yet (a fresh event
+before its 10-Q, an upcoming one) the quarter end is projected from the issuer's latest known
+period end in whole quarters (`fiscal_period_source = sec_facts_projected`), so the id is the
+same before and after the filing lands; only a name with no period end at all falls back to
+the calendar quarter end preceding the FMP date with `flags += fiscal_period_derived`.
+`event_id = "{underlying}:{fiscal_period}"`. Nasdaq and Alpha
 Vantage rows are matched to the FMP row by nearest report date within ±10 days; a matched pair
 whose dates differ by more than one day gets `flags += date_conflict` and confidence 0.
 Columns: `t0, t0_confidence, t0_source, timing, eps_actual, eps_estimate, eps_surprise_pct,
 rev_actual, rev_estimate, rev_surprise_pct, n_estimates, estimate_source,
 estimate_snapshot_time, sources_used, market, listing_start, has_perp_at_t0, pending, flags`.
 **Consensus provenance:** vendor estimates for past events are the vendor's final value, not
-the consensus as of `t0`; they are stored with `estimate_source = fmp_final` and the surprise
+the consensus as of `t0`; they are stored with `estimate_source = fmp_final` (upcoming rows
+carry the vendor's current, not-yet-final value as `fmp_calendar`) and the surprise
 feature group is marked non-point-in-time in reports. From now on the archiver's consensus
 snapshots provide `estimate_source = consensus_snapshot` with the capture time, and live
 prediction uses only those. `has_perp_at_t0 = t0 ≥ min(listing_start)` over all markets of the
@@ -262,7 +267,9 @@ archived consensus snapshot). `freedom predict --event <event_id> --decision <d>
 features `as_of` a well-defined instant and loads the trained model for `d`:
 
 * **pre_5m**: `as_of = expected_t0 − 5 min`, where `expected_t0` is the issuer's median
-  acceptance clock time over its past `sec_8k` events (fallback: the calendar-flag default).
+  acceptance clock time over its past `sec_8k` events (a manual override on the matching
+  upcoming row of `events.parquet` wins; fallbacks in order: that row's calendar-flag time,
+  the Nasdaq calendar's time flag, the AMC default).
   The live row stores `as_of`, `expected_t0`, and, once the 8-K arrives, `t0_actual` and
   `t0_lag_s`.
 * **post_k**: `t0_live` comes from the live detector on 1-minute perp or FMP bars (the same
