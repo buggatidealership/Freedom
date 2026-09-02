@@ -1,0 +1,362 @@
+[
+  {
+    "symbol": "NVDA",
+    "date": "2026-11-18",
+    "epsActual": null,
+    "epsEstimated": 2.47,
+    "revenueActual": null,
+    "revenueEstimated": 108673200000,
+    "lastUpdated": "2026-09-02"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2026-08-26",
+    "epsActual": 2.22,
+    "epsEstimated": 2.09,
+    "revenueActual": 96221000000,
+    "revenueEstimated": 92270940000,
+    "lastUpdated": "2026-09-02"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2026-05-20",
+    "epsActual": 1.87,
+    "epsEstimated": 1.76,
+    "revenueActual": 81615000000,
+    "revenueEstimated": 78423370000,
+    "lastUpdated": "2026-08-20"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2026-02-25",
+    "epsActual": 1.62,
+    "epsEstimated": 1.54,
+    "revenueActual": 68127000000,
+    "revenueEstimated": 66126470000,
+    "lastUpdated": "2026-05-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2025-11-19",
+    "epsActual": 1.3,
+    "epsEstimated": 1.26,
+    "revenueActual": 57006000000,
+    "revenueEstimated": 54961119678,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2025-08-27",
+    "epsActual": 1.05,
+    "epsEstimated": 1.01,
+    "revenueActual": 46743000000,
+    "revenueEstimated": 46048920689,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2025-05-28",
+    "epsActual": 0.81,
+    "epsEstimated": 0.737,
+    "revenueActual": 44062000000,
+    "revenueEstimated": 43334160366,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2025-02-26",
+    "epsActual": 0.89,
+    "epsEstimated": 0.848,
+    "revenueActual": 39331000000,
+    "revenueEstimated": 38101348563,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2024-11-20",
+    "epsActual": 0.81,
+    "epsEstimated": 0.75,
+    "revenueActual": 35100000000,
+    "revenueEstimated": 33171592429,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2024-08-28",
+    "epsActual": 0.68,
+    "epsEstimated": 0.645,
+    "revenueActual": 30040000000,
+    "revenueEstimated": 28779505589,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2024-05-22",
+    "epsActual": 0.61,
+    "epsEstimated": 0.56,
+    "revenueActual": 26044000000,
+    "revenueEstimated": 24592795107,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2024-02-21",
+    "epsActual": 0.52,
+    "epsEstimated": 0.46,
+    "revenueActual": 22103000000,
+    "revenueEstimated": 20238800000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2023-11-21",
+    "epsActual": 0.4,
+    "epsEstimated": 0.34,
+    "revenueActual": 18120000000,
+    "revenueEstimated": 16294147339,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2023-08-23",
+    "epsActual": 0.27,
+    "epsEstimated": 0.21,
+    "revenueActual": 13507000000,
+    "revenueEstimated": 11224000000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2023-05-24",
+    "epsActual": 0.11,
+    "epsEstimated": 0.09,
+    "revenueActual": 7192000000,
+    "revenueEstimated": 6516830000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2023-02-22",
+    "epsActual": 0.09,
+    "epsEstimated": 0.08,
+    "revenueActual": 6051000000,
+    "revenueEstimated": 6008160000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2022-11-16",
+    "epsActual": 0.06,
+    "epsEstimated": 0.07,
+    "revenueActual": 5931000000,
+    "revenueEstimated": 5780771964,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2022-08-24",
+    "epsActual": 0.05,
+    "epsEstimated": 0.06,
+    "revenueActual": 6704000000,
+    "revenueEstimated": 6699486570,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2022-05-25",
+    "epsActual": 0.14,
+    "epsEstimated": 0.13,
+    "revenueActual": 8288000000,
+    "revenueEstimated": 8123361000,
+    "lastUpdated": "2026-08-18"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2022-02-16",
+    "epsActual": 0.13,
+    "epsEstimated": 0.12,
+    "revenueActual": 7643000000,
+    "revenueEstimated": 7420320000,
+    "lastUpdated": "2026-08-18"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2021-11-17",
+    "epsActual": 0.12,
+    "epsEstimated": 0.11,
+    "revenueActual": 7103000000,
+    "revenueEstimated": 7413390000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2021-08-18",
+    "epsActual": 0.1,
+    "epsEstimated": 0.1,
+    "revenueActual": 6507000000,
+    "revenueEstimated": 6816700000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2021-05-26",
+    "epsActual": 0.09,
+    "epsEstimated": 0.08,
+    "revenueActual": 5661000000,
+    "revenueEstimated": 5318430000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2021-02-24",
+    "epsActual": 0.08,
+    "epsEstimated": 0.07,
+    "revenueActual": 5003000000,
+    "revenueEstimated": 4814350000,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2020-11-18",
+    "epsActual": 0.07,
+    "epsEstimated": 0.06,
+    "revenueActual": 4726000000,
+    "revenueEstimated": 4100770428,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2020-08-19",
+    "epsActual": 0.05,
+    "epsEstimated": 0.05,
+    "revenueActual": 3866000000,
+    "revenueEstimated": 3493587155,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2020-05-21",
+    "epsActual": 0.04,
+    "epsEstimated": 0.04,
+    "revenueActual": 3080000000,
+    "revenueEstimated": 2891777777,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2020-02-13",
+    "epsActual": 0.05,
+    "epsEstimated": 0.04,
+    "revenueActual": 3105000000,
+    "revenueEstimated": 2743571428,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2019-11-14",
+    "epsActual": 0.04,
+    "epsEstimated": 0.04,
+    "revenueActual": 3014000000,
+    "revenueEstimated": 2658415730,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2019-08-15",
+    "epsActual": 0.03,
+    "epsEstimated": 0.03,
+    "revenueActual": 2579000000,
+    "revenueEstimated": 2391814516,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2019-05-16",
+    "epsActual": 0.02,
+    "epsEstimated": 0.02,
+    "revenueActual": 2220000000,
+    "revenueEstimated": 2043409090,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2019-02-14",
+    "epsActual": 0.02,
+    "epsEstimated": 0.02,
+    "revenueActual": 2205000000,
+    "revenueEstimated": 2067187500,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2018-11-15",
+    "epsActual": 0.05,
+    "epsEstimated": 0.05,
+    "revenueActual": 3181000000,
+    "revenueEstimated": 3232864130,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2018-08-16",
+    "epsActual": 0.05,
+    "epsEstimated": 0.05,
+    "revenueActual": 3123000000,
+    "revenueEstimated": 2849335051,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2018-05-10",
+    "epsActual": 0.05,
+    "epsEstimated": 0.04,
+    "revenueActual": 3207000000,
+    "revenueEstimated": 2487380487,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2018-02-08",
+    "epsActual": 0.04,
+    "epsEstimated": 0.03,
+    "revenueActual": 2911000000,
+    "revenueEstimated": 1913410112,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2017-11-09",
+    "epsActual": 0.03,
+    "epsEstimated": 0.02,
+    "revenueActual": 2636000000,
+    "revenueEstimated": 1863037593,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2017-08-10",
+    "epsActual": 0.03,
+    "epsEstimated": 0.02,
+    "revenueActual": 2230000000,
+    "revenueEstimated": 1696739130,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2017-05-09",
+    "epsActual": 0.02,
+    "epsEstimated": 0.66,
+    "revenueActual": 1937000000,
+    "revenueEstimated": 1618253164,
+    "lastUpdated": "2026-03-25"
+  },
+  {
+    "symbol": "NVDA",
+    "date": "2017-02-09",
+    "epsActual": 0.02,
+    "epsEstimated": 0.02,
+    "revenueActual": 2173000000,
+    "revenueEstimated": 1821808080,
+    "lastUpdated": "2026-03-25"
+  }
+]
