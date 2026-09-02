@@ -21,6 +21,7 @@ import pandas as pd
 
 from .. import models as models_mod
 from ..config import Settings
+from ..models import MIN_TRAIN_ROWS
 from ..schemas import DECISION_TIMES, SCHEMA_VERSION, D, E, P, T, T0Source
 from .folds import HOLDOUT_FOLD, Fold, season_end, seasons_of, t0_utc, walk_forward_folds
 from .metrics import (
@@ -78,6 +79,7 @@ HIGHER_IS_BETTER = {"accuracy": True, "balanced_accuracy": True, "brier": False,
 SCORE_COLUMNS = {"accuracy": "hit", "brier": "brier", "log_loss": "ll", "mae": "ae", "magnitude_mae": "mag_ae"}
 MDE_PAIRED = "paired_se"  # MDE from the paired comparison's own standard error
 MDE_UPPER_BOUND = "closed_form_upper_bound"  # no comparison: the unpaired closed form (conservative)
+VERDICT_IDENTICAL = "identical_to_baseline"  # zero paired SE: the model reproduced the baseline exactly
 MAX_NONFINITE_P_SHARE = 0.1  # a model returning more non-finite p_up than this is rejected
 HEADLINE_SOURCES = frozenset({T0Source.sec_8k.value, T0Source.manual.value, T0Source.detected.value})
 STRATA = (E.t0_source, E.kind, E.timing)
@@ -464,16 +466,24 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
                     cmp.update({"baseline": base["model"], "baseline_value": base["value"], "model_value": cell.get(metric)})
                     # the MDE of the test actually run: from the paired comparison's own standard error
                     mde = paired_mde(cmp["se"]) if metric in MDE_METRICS else None
+                    mde_source = MDE_PAIRED if metric in MDE_METRICS else None
+                    identical = metric in MDE_METRICS and (mde is None or not np.isfinite(mde) or mde <= 0)
+                    if identical:
+                        # identical predictions (e.g. a model that fell back to the base rate)
+                        # give a zero paired SE; report the unpaired bound and say so
+                        mde = min_detectable_improvement(cmp["n"], metric, cmp["baseline_value"])
+                        mde_source = MDE_UPPER_BOUND
                     cmp["mde"] = mde
-                    cmp["mde_source"] = MDE_PAIRED if metric in MDE_METRICS else None
-                    cmp["verdict"] = verdict(metric, cmp["ci"][0], cmp["ci"][1], mde, cmp["n"])
+                    cmp["mde_source"] = mde_source
+                    cmp["verdict"] = (VERDICT_IDENTICAL if identical
+                                      else verdict(metric, cmp["ci"][0], cmp["ci"][1], mde, cmp["n"]))
                     comparison[metric] = cmp
             cell["comparison"] = comparison or None
             for metric in MDE_METRICS:
                 cmp = comparison.get(metric)
                 if cmp is not None and cmp["mde"] is not None and np.isfinite(cmp["mde"]):
                     cell["mde"][metric] = cmp["mde"]
-                    cell["mde_source"][metric] = MDE_PAIRED
+                    cell["mde_source"][metric] = cmp.get("mde_source", MDE_PAIRED)
                 else:  # no paired comparison (a baseline, or no baseline present): the closed-form upper bound
                     base = best.get(subset, {}).get(metric)
                     base_value = base["value"] if base else cell.get(metric)
@@ -739,7 +749,7 @@ def _notes(results: dict[str, Any], extras: dict[str, Any], scorings_before: int
     notes = [f"holdout season {settings.holdout_season} had been scored {scorings_before} time(s) before this run; "
              "discount any holdout number accordingly"]
     for d, per_model in results.items():
-        n_cells = n_inconclusive = 0
+        n_cells = n_inconclusive = n_identical = 0
         for res in per_model.values():
             for cell in res["subsets"].values():
                 cmp = (cell.get("comparison") or {}).get("brier")
@@ -747,11 +757,14 @@ def _notes(results: dict[str, Any], extras: dict[str, Any], scorings_before: int
                     continue
                 n_cells += 1
                 n_inconclusive += str(cmp["verdict"]).startswith("inconclusive")
+                n_identical += str(cmp["verdict"]) == VERDICT_IDENTICAL
         n_perp = extras.get(d, {}).get("n_has_perp", 0)
         if n_cells:
-            note = (f"{d}: {n_inconclusive} of {n_cells} Brier comparisons are inconclusive at their n; "
-                    f"the perp-era cohort (has_perp_at_t0) holds {n_perp} events")
-            if 2 * n_inconclusive >= n_cells:
+            note = (f"{d}: {n_inconclusive} of {n_cells} Brier comparisons are inconclusive at their n"
+                    + (f" and {n_identical} reproduced their baseline exactly (learners fall back to the "
+                       f"base rate below {MIN_TRAIN_ROWS} training rows)" if n_identical else "")
+                    + f"; the perp-era cohort (has_perp_at_t0) holds {n_perp} events")
+            if 2 * (n_inconclusive + n_identical) >= n_cells:
                 note += (", so with listings only since Nov 2025 this report is mostly inconclusive, "
                          "as expected for early runs")
             notes.append(note)

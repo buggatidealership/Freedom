@@ -229,6 +229,14 @@ def find_8k_acceptance(sec_filings: pd.DataFrame | None, report_date_ny: Any) ->
     return pd.Timestamp(accepted.loc[idx]).tz_convert(UTC), accession
 
 
+def _crosses_session_boundary(acceptance: pd.Timestamp, detected_start: pd.Timestamp) -> bool:
+    """True when the acceptance is outside regular hours but the detected bar starts inside
+    them (or vice versa): a detection may not move t0 across the open/close boundary."""
+    from ..timeutil import is_rth
+
+    return bool(is_rth(detected_start)) != bool(is_rth(acceptance))
+
+
 def resolve_release_time(
     *,
     report_date_ny: pd.Timestamp,
@@ -264,7 +272,13 @@ def resolve_release_time(
         if det is not None:
             start, first_bar = det
             lag = float((acc - start).total_seconds())
-            if 0 <= lag <= DETECTION_WINDOW.total_seconds():
+            if 0 <= lag <= DETECTION_WINDOW.total_seconds() and _crosses_session_boundary(acc, start):
+                # a filing accepted after the close cannot have been released during the
+                # session: the spike is the closing auction (measured: MU 2026-06-24, 15:59 ET)
+                detail += (f"; detection {_fmt_ts(start)} inside the regular session ignored "
+                           f"(closing auction), t0 stays at acceptance")
+                lag = None
+            elif 0 <= lag <= DETECTION_WINDOW.total_seconds():
                 t0 = start
                 detail += f"; detection {_fmt_ts(start)} moved t0 earlier by {lag:.0f}s"
             else:

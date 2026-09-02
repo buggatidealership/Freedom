@@ -53,6 +53,9 @@ MIN_TRAIN_ROWS = 30  # a head with fewer usable rows falls back to the base rate
 MODEL_FILENAME = "model.joblib"
 
 
+_SMALL_SAMPLE_SEEN: set[tuple[str, str, int]] = set()
+
+
 class SmallSampleWarning(UserWarning):
     """A learner had too few usable training rows and fell back to base-rate behaviour."""
 
@@ -201,6 +204,11 @@ class BaseModel(ABC):
     def _small_sample(self, head: str, n: int) -> None:
         msg = (f"{self.name}: only {n} usable rows for the {head} head (< {MIN_TRAIN_ROWS}); "
                "falling back to the training base rate")
+        key = (self.name, head, n)
+        if key in _SMALL_SAMPLE_SEEN:  # walk-forward and studies refit many times: say it once
+            log.debug(msg)
+            return
+        _SMALL_SAMPLE_SEEN.add(key)
         log.warning(msg)
         warnings.warn(msg, SmallSampleWarning, stacklevel=3)
 

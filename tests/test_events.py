@@ -802,3 +802,32 @@ def test_archiver_records_a_consensus_summary_row(settings, fake, monkeypatch):
     row = summary[summary["interval"] == "consensus"].iloc[0]
     assert str(row["error"]).startswith("ProviderUnavailable") and row["rows_added"] == 0
     assert row["rows_total"] == 868
+
+
+
+def test_detection_never_moves_an_after_close_filing_into_the_session():
+    """MU 2026-06-24: 8-K accepted 20:02:01Z; the 15:59 ET closing-auction bar spikes."""
+    import numpy as np
+
+    from freedom.events import resolve_release_time
+    from freedom.schemas import C
+
+    day = pd.Timestamp("2026-06-24")
+    ts_ = pd.date_range("2026-06-24 04:00", "2026-06-24 19:59", freq="1min", tz="America/New_York").tz_convert("UTC")
+    bars = pd.DataFrame({C.t: ts_, C.t_end: ts_ + pd.Timedelta(minutes=1), C.open: 100.0, C.high: 100.5,
+                         C.low: 99.5, C.close: 100.0, C.volume: 1000.0, C.n_trades: 10, C.interval: "1m",
+                         C.market: "MU", C.source: "fmp_intraday"})
+    ny = bars[C.t].dt.tz_convert("America/New_York")
+    auction = (ny.dt.hour == 15) & (ny.dt.minute == 59)
+    bars.loc[auction, [C.volume, C.close]] = [80000.0, 102.0]  # closing cross: big volume, 2 % print
+    release = (ny.dt.hour == 16) & (ny.dt.minute == 2)
+    bars.loc[release, [C.volume, C.close]] = [60000.0, 96.0]
+    bars[C.close] = bars[C.close].astype(float)
+    filings = pd.DataFrame({"form": ["8-K"], "items": ["2.02,9.01"],
+                            "accepted": [pd.Timestamp("2026-06-24 20:02:01", tz="UTC")],
+                            "accession": ["0000723125-26-000013"], "filing_date": [pd.Timestamp("2026-06-24", tz="UTC")]})
+    r = resolve_release_time(report_date_ny=day, sec_filings=filings, intraday=bars, calendar_flag=None)
+    assert r.source == "sec_8k"
+    assert r.t0 >= pd.Timestamp("2026-06-24 20:00:00", tz="UTC"), r.detail
+    assert "closing auction" in r.detail or r.t0 == pd.Timestamp("2026-06-24 20:02:00", tz="UTC")
+    assert not np.isnan(r.confidence)
