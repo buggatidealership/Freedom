@@ -41,6 +41,10 @@ from ..schemas import NY, UTC, C, E, PriceSource, U
 from ..timeutil import to_utc
 
 MAX_INTRADAY_DAYS_PER_REQUEST = 5
+# Measured 2026-09-02: a 1-minute request covering five sessions returned only the latest three
+# (2880 bars); 5-minute requests returned all five. Chunk 1-minute windows at three calendar
+# days so no session is silently dropped.
+MAX_INTRADAY_DAYS_BY_INTERVAL = {"1min": 3}
 DAILY_SOURCE = "fmp_daily"  # daily bars are not intraday; PriceSource only names path sources
 IMMUTABLE_TTL_SECONDS = 10 * 365 * 24 * 3600  # completed sessions never change
 
@@ -398,7 +402,7 @@ class FMPClient:
             raise ValueError(f"end_day {last} is before start_day {first}")
         path = f"stable/historical-chart/{api_interval}"
         frames: list[pd.DataFrame] = []
-        for a, b in _day_chunks(first, last, MAX_INTRADAY_DAYS_PER_REQUEST):
+        for a, b in _day_chunks(first, last, MAX_INTRADAY_DAYS_BY_INTERVAL.get(interval, MAX_INTRADAY_DAYS_PER_REQUEST)):
             params = {
                 "symbol": symbol,
                 "from": a.isoformat(),

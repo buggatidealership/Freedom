@@ -465,7 +465,7 @@ def test_build_events_end_to_end_from_fixtures(settings, fake):
     # intraday requests use exactly the loaders window: report date - 1 .. + 2, one chunk
     intraday_calls = [c for c in fake.calls if c["url"].endswith("historical-chart/1min")]
     nvda_q2 = [c for c in intraday_calls if c["params"]["symbol"] == "NVDA" and c["params"]["from"] == "2026-08-25"]
-    assert len(nvda_q2) == 1 and nvda_q2[0]["params"]["to"] == "2026-08-28"
+    assert len(nvda_q2) == 1 and nvda_q2[0]["params"]["to"] == "2026-08-27"
     assert nvda_q2[0]["params"]["extended"] == "true"
     # no Alpha Vantage request for US filers (no key in these settings anyway)
     assert not any(c["provider"] == "alphavantage" for c in fake.calls)

@@ -831,7 +831,7 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
         flags.append("no_intraday")
     else:
         start = pd.Timestamp(d_eff) - pd.Timedelta(days=1)
-        end = pd.Timestamp(d_eff) + pd.Timedelta(days=2)
+        end = pd.Timestamp(d_eff) + pd.Timedelta(days=1)  # same window as targets.loaders (3 days, 1 request)
         try:
             bars = providers.fmp.intraday(name.underlying, "1min", start, end, extended=True)
         except (FMPError, httpx.HTTPError) as exc:

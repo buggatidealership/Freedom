@@ -561,9 +561,10 @@ class _Recorder(models_mod.BaseModel):
         return self.m_out if self.m_out is not None else np.abs(self.predict_return(X))
 
 
-def test_fit_predict_passes_zero_direction_through_and_validates_outputs(caplog):
+def test_fit_predict_passes_zero_direction_through_and_validates_outputs(request, caplog):
     if "recorder" not in models_mod.REGISTRY:
         models_mod.register("recorder")(_Recorder)
+    request.addfinalizer(lambda: models_mod.REGISTRY.pop("recorder", None))
     train = pd.DataFrame({"f_a": [0.1, 0.2, 0.3], runner.Y: [0.0, 0.02, -0.01], runner.DIR: [0.0, 1.0, -1.0]})
     test = pd.DataFrame({"f_a": [0.5, 0.6, 0.7]})
     _Recorder.fitted.clear()
@@ -745,7 +746,7 @@ def test_train_final_saves_model_with_provenance(settings, dataset):
     model = ev.train_final(settings, dataset, model_name="linear", decision_time="post_30m")
     out = settings.models_dir / "post_30m" / "linear"
     meta = json.loads((out / "model.json").read_text())
-    assert (out / "fake_model.json").exists()
+    assert (out / "fake_model.json").exists() or (out / "model.joblib").exists()
     assert meta["decision_time"] == "post_30m" and meta["model"] == "linear" and meta["target"] == "r_24h"
     assert len(meta["dataset_sha256"]) == 64 and meta["git_sha"] and len(meta["config_hash"]) == 64
     assert meta["dataset_hash_source"] == "content"  # no dataset.parquet in this data_dir

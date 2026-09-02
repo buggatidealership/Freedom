@@ -42,8 +42,11 @@ def _perp_bars(settings: Settings, hl, market: str, lo: pd.Timestamp, hi: pd.Tim
 def _equity_bars(fmp, symbol: str, lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame | None:
     if fmp is None:
         return None
+    # [t0 - 1 day, t0 + horizon + 2h] in New York calendar days: three days for every release
+    # clock, one FMP request (1-minute responses are capped at three sessions), and the same
+    # window the events resolver requests so the cache is shared.
     b = fmp.intraday(symbol, "1min", lo.tz_convert("America/New_York").normalize(),
-                     hi.tz_convert("America/New_York").normalize() + pd.Timedelta(days=1), extended=True)
+                     hi.tz_convert("America/New_York").normalize(), extended=True)
     if b is None or len(b) == 0:
         return None
     b = b.copy()
