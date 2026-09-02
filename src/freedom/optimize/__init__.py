@@ -17,6 +17,14 @@ How a trial is scored
   number of seasons in the training window (floored at settings.min_train_events). Scoring is
   always against the fixed headline labels `r_24h` / `direction_24h`, so every trial's value is
   comparable with every other trial and with the baselines.
+* Hyper-parameters are proposed under flat names (`linear.alpha`, `lightgbm.num_boost_round`)
+  and reach the models as the keyword arguments their constructors read (`model_kwargs`):
+  `alpha` / `C` become the one-element grids `alphas` / `Cs` of the linear model, and the
+  LightGBM round count is the constructor's `num_boost_round` — never a `num_iterations` alias
+  inside its params dict, where it would override the early-stopped refit.
+* Feature columns are attributed to groups by the keys each group declares next to the
+  features registry (features.groups.GROUP_KEYS), not by a naming convention; a column no
+  registered group declares is an error, never a group of its own.
 * Baselines (models registry, docs/design.md §7) are scored on the same folds; the best one per
   objective is the reference. `p_noise` is the share of season-block bootstrap resamples in
   which the best trial does not beat that baseline (paired, same events). It does not correct
@@ -62,13 +70,17 @@ OBJECTIVES: dict[str, tuple[str, str]] = {
 }
 BASELINES: tuple[str, ...] = ("zero", "base_rate", "historical_mean", "hist_abs_mean", "vol_scaled",
                               "sign_of_reaction", "always_extends", "surprise_sign")
-# Feature groups of docs/design.md §6 and the phases at which they are admissible; the
-# features registry (when populated) is layered on top of this table.
-DESIGN_GROUPS: dict[str, tuple[str, ...]] = {
-    "calendar": ("pre", "post"), "pre_price": ("pre", "post"), "history": ("pre", "post"),
-    "market": ("pre", "post"), "perp_state": ("pre", "post"),
-    "surprise": ("post",), "reaction": ("post",),
-}
+# Optuna name -> constructor keyword of the linear model: the scalar a trial proposes is the
+# one-element grid the model would otherwise search by inner CV (models.linear: alphas / Cs).
+LINEAR_GRID_KNOBS: dict[str, str] = {"alpha": "alphas", "C": "Cs"}
+# LightGBM's aliases of num_iterations (lightgbm.basic._ConfigAliases) other than the
+# constructor argument `num_boost_round`: inside the params dict they take priority over
+# lgb.train's num_boost_round and would silently defeat the early-stopped refit, so a trial may
+# never propose one of them.
+LGB_NUM_ITERATIONS_ALIASES: frozenset[str] = frozenset({
+    "num_iterations", "num_iteration", "n_iter", "num_tree", "num_trees", "num_round", "num_rounds",
+    "nrounds", "n_estimators", "max_iter",
+})
 MIN_WINDOW_SEASONS = 2
 N_BOOTSTRAP = 1000
 TEST_SET_ATTR = "test_set_hash"
@@ -112,8 +124,8 @@ class TrialConfig:
     @classmethod
     def from_params(cls, params: dict, groups: list[str]) -> TrialConfig:
         family = params["model"]
-        lin = {k.split(".", 1)[1]: v for k, v in params.items() if k.startswith("linear.")}
-        lgb = {k.split(".", 1)[1]: v for k, v in params.items() if k.startswith("lightgbm.")}
+        lin = model_kwargs("linear", params)
+        lgb = model_kwargs("lightgbm", params)
         if family == "linear":
             mp: dict = lin
         elif family == "lightgbm":
@@ -125,20 +137,42 @@ class TrialConfig:
                    window_seasons=int(params["train_window_seasons"]))
 
 
+def model_kwargs(family: str, params: dict) -> dict:
+    """The `<family>.<name>` entries of a trial's params as the keyword arguments the family's
+    constructor reads: linear's scalar `alpha` / `C` become the one-element grids `alphas` /
+    `Cs` (LINEAR_GRID_KNOBS); a LightGBM num_iterations alias other than `num_boost_round` is
+    refused (LGB_NUM_ITERATIONS_ALIASES) because inside the params dict it would override the
+    early-stopped refit."""
+    raw = {k.split(".", 1)[1]: v for k, v in params.items() if k.startswith(family + ".")}
+    if family == "linear":
+        return {LINEAR_GRID_KNOBS.get(k, k): (float(v),) if k in LINEAR_GRID_KNOBS else v
+                for k, v in raw.items()}
+    if family == "lightgbm":
+        bad = sorted(LGB_NUM_ITERATIONS_ALIASES & raw.keys())
+        if bad:
+            raise ValueError(f"lightgbm parameter(s) {bad} would override the early-stopped round count; "
+                             "propose `lightgbm.num_boost_round` instead")
+    return raw
+
+
 def suggest(trial: optuna.Trial, groups: list[str], targets: tuple[str, ...], n_seasons: int) -> dict:
     """Sample one configuration. Parameter names are flat (`linear.alpha`, `use_calendar`, ...)
-    so best_params.json is self-describing; TrialConfig.from_params turns them into a model."""
+    so best_params.json is self-describing; TrialConfig.from_params (via model_kwargs) turns
+    them into the constructor arguments of the model."""
     family = trial.suggest_categorical("model", list(FAMILIES))
     if family in ("linear", "ensemble"):
-        trial.suggest_float("linear.alpha", 0.1, 1000.0, log=True)  # ridge L2
-        trial.suggest_float("linear.C", 1e-3, 10.0, log=True)  # logistic inverse L2
+        trial.suggest_float("linear.alpha", 0.1, 1000.0, log=True)  # ridge L2 -> alphas=(alpha,)
+        trial.suggest_float("linear.C", 1e-3, 10.0, log=True)  # logistic inverse L2 -> Cs=(C,)
     if family in ("lightgbm", "ensemble"):
         trial.suggest_int("lightgbm.num_leaves", 2, 7)
         trial.suggest_int("lightgbm.min_data_in_leaf", 20, 60)
         trial.suggest_float("lightgbm.feature_fraction", 0.4, 1.0)
         trial.suggest_float("lightgbm.bagging_fraction", 0.5, 1.0)
         trial.suggest_float("lightgbm.learning_rate", 0.01, 0.2, log=True)
-        trial.suggest_int("lightgbm.n_estimators", 50, 400)
+        # constructor arguments of models.lgbm: the cap on rounds and the early-stopping
+        # patience of the inner split that chooses the actual number of rounds
+        trial.suggest_int("lightgbm.num_boost_round", 50, 400)
+        trial.suggest_int("lightgbm.early_stopping_rounds", 10, 50)
         trial.suggest_float("lightgbm.lambda_l2", 1e-3, 10.0, log=True)
     for g in groups:
         trial.suggest_categorical(f"use_{g}", [True, False])
@@ -147,34 +181,51 @@ def suggest(trial: optuna.Trial, groups: list[str], targets: tuple[str, ...], n_
     return dict(trial.params)
 
 
-def group_phases() -> dict[str, tuple[str, ...]]:
-    """Design table overlaid with whatever the features registry declares."""
-    out = dict(DESIGN_GROUPS)
-    for name, (_fn, admissible) in features_mod.REGISTRY.items():
-        out[name] = tuple(admissible)
+def group_keys() -> dict[str, tuple[str, ...]]:
+    """Registered feature group -> the output keys its function emits, as the features module
+    declares them next to the registry (features.groups.GROUP_KEYS). Every registered group
+    must declare its keys and no key may belong to two groups."""
+    if not features_mod.REGISTRY:
+        raise ValueError("the features registry is empty: no feature group is registered")
+    declared = dict(getattr(getattr(features_mod, "groups", None), "GROUP_KEYS", None) or {})
+    missing = [g for g in features_mod.REGISTRY if not declared.get(g)]
+    if missing:
+        raise ValueError(f"feature group(s) {missing} declare no output keys (features.groups.GROUP_KEYS)")
+    out = {g: tuple(str(k) for k in declared[g]) for g in features_mod.REGISTRY}
+    owner: dict[str, str] = {}
+    for g, keys in out.items():
+        for k in keys:
+            if owner.setdefault(k, g) != g:
+                raise ValueError(f"feature key {k!r} is declared by both {owner[k]!r} and {g!r}")
     return out
 
 
 def feature_groups(columns, decision_time: str) -> dict[str, list[str]]:
-    """Feature columns (f_<group>_..., including __missing companions) by group, keeping only
-    the groups admissible at the decision time's phase. Columns of a group unknown to both the
-    design table and the registry are kept under their first token: the dataset builder only
-    writes admissible groups, so an unknown group cannot be a post-only one leaking into pre."""
+    """Feature columns (`f_<key>` and their `__missing` companions) by group, keeping only the
+    groups admissible at the decision time's phase. A column belongs to the registered group
+    that declares its key (group_keys); a feature column no group declares is an error — the
+    dataset and the features registry disagree — never a group of its own."""
     phase = features_mod.phase_of(decision_time)
-    phases = group_phases()
-    names = sorted(phases, key=len, reverse=True)
-    prefix = D.feature_prefix
+    owner = {k: g for g, keys in group_keys().items() for k in keys}
+    prefix, suffix = D.feature_prefix, D.missing_suffix
     out: dict[str, list[str]] = {}
+    unknown: list[str] = []
     for col in columns:
-        if not str(col).startswith(prefix):
+        name = str(col)
+        if not name.startswith(prefix):
             continue
-        stem = str(col)[len(prefix):]
-        group = next((g for g in names if stem == g or stem.startswith(g + "_")), None)
+        key = name[len(prefix):]
+        if key.endswith(suffix):
+            key = key[:-len(suffix)]
+        group = owner.get(key)
         if group is None:
-            group = stem.split("_", 1)[0]
-        elif phase not in phases[group]:
-            continue
-        out.setdefault(group, []).append(str(col))
+            unknown.append(name)
+        elif phase in features_mod.REGISTRY[group][1]:
+            out.setdefault(group, []).append(name)
+    if unknown:
+        raise ValueError(f"{len(unknown)} feature column(s) belong to no registered feature group "
+                         f"({', '.join(unknown[:6])}{', ...' if len(unknown) > 6 else ''}): the dataset was "
+                         "built by another version of the features module; run `freedom dataset` again")
     return {g: sorted(cols) for g, cols in sorted(out.items())}
 
 
@@ -377,6 +428,16 @@ def best_baseline(scores: dict[str, tuple[float, pd.DataFrame]], objective: str)
     return name, scores[name][0], scores[name][1]
 
 
+def share_true(s: pd.Series) -> float:
+    """Share of truthy values with missing ones counted as False (the nullable `boolean` dtype
+    build_dataset writes cannot be cast to bool while it holds NA). Reporting only: never raises."""
+    try:
+        return float(s.fillna(False).astype(bool).mean())
+    except (TypeError, ValueError) as exc:
+        log.warning("share of %s not computed: %s", s.name, exc)
+        return float("nan")
+
+
 def run_study(settings: Settings, dataset: pd.DataFrame, *, decision_time: str, n_trials: int,
               objective: str = "brier", timeout_seconds: int | None = None) -> dict:
     """Search space: model family (linear, lightgbm, ensemble) and hyper-parameters, feature
@@ -459,7 +520,7 @@ def run_study(settings: Settings, dataset: pd.DataFrame, *, decision_time: str, 
         "seasons": sorted(rows[SEASON_COL].unique().tolist()),
         "holdout_season": settings.holdout_season, "test_set_hash": ref_hash,
         "dataset_hash": dataset_hash(rows), "groups": list(groups), "targets": list(targets),
-        "has_perp_share": float(rows[E.has_perp_at_t0].astype(bool).mean()) if E.has_perp_at_t0 in rows.columns else float("nan"),
+        "has_perp_share": share_true(rows[E.has_perp_at_t0]) if E.has_perp_at_t0 in rows.columns else float("nan"),
         "best_value": None, "best_params": None, "best_trial": None,
         "baseline_name": base[0] if base else None, "baseline_value": base[1] if base else None,
         "baselines": {k: v[0] for k, v in scores.items()},

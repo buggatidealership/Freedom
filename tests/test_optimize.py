@@ -1,25 +1,49 @@
-"""Optuna study on a tiny synthetic dataset with fake eval functions and models patched in.
+"""Optuna study on a tiny synthetic dataset with fake eval functions, models and feature
+groups patched in.
 
-The eval and models modules are implemented elsewhere; here they are replaced by minimal
-deterministic stand-ins that honour their docstrings (fold shapes, metric dicts, the
-BaseModel interface) so the study mechanics can be tested offline in seconds.
+The eval, models and features modules are implemented elsewhere; here they are replaced by
+minimal deterministic stand-ins that honour their contracts (fold shapes, metric dicts, the
+BaseModel interface and constructor signatures, the group registry with its declared keys) so
+the study mechanics can be tested offline in seconds. The tests marked with the `needs_real_*`
+markers run only once the real registries are importable and check the contracts against them.
 """
 
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
+import optuna
 import pandas as pd
 import pytest
+from lightgbm.basic import _ConfigAliases
 
 import freedom.eval as eval_mod
+import freedom.features as features_mod
 import freedom.models as models_mod
 from freedom import optimize as opt
 from freedom.schemas import D, E, T, season_of
 
 SEASONS = ["2025Q1", "2025Q2", "2025Q3", "2025Q4", "2026Q1", "2026Q2", "2026Q3"]
 HOLDOUT = "2026Q3"
+
+# The v1 groups (docs/design.md §6) with their admissibility and a subset of the keys the
+# features module declares for them (features.groups.GROUP_KEYS): column f_<key>.
+FAKE_GROUPS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "calendar": (("pre", "post"), ("weekday", "amc")),
+    "pre_price": (("pre", "post"), ("ret_1d", "drift_60m")),
+    "history": (("pre", "post"), ("hist_n", "hist_r24_mean")),
+    "market": (("pre", "post"), ("mkt_ret_1d",)),
+    "perp_state": (("pre", "post"), ("funding_rate",)),
+    "surprise": (("post",), ("eps_surprise",)),
+    "reaction": (("post",), ("r_15m", "r_now")),
+}
+REAL_MODELS = all(f in models_mod.REGISTRY and models_mod.REGISTRY[f].__module__.startswith("freedom.models")
+                  for f in ("linear", "lightgbm", "ensemble"))
+REAL_FEATURES = bool(features_mod.REGISTRY) and bool(getattr(getattr(features_mod, "groups", None), "GROUP_KEYS", None))
+needs_real_models = pytest.mark.skipif(not REAL_MODELS, reason="the models registry holds no real linear/lightgbm/ensemble here")
+needs_real_features = pytest.mark.skipif(not REAL_FEATURES, reason="the features registry is not populated here")
 
 
 def _season_start(season: str) -> pd.Timestamp:
@@ -42,12 +66,13 @@ def make_dataset(n_per_season: int = 12, decision_times=("pre_5m", "post_30m"), 
                     D.as_of: t0, E.t0: t0, E.t0_confidence: 0.95 if i % 6 else 0.5, E.t0_source: "sec_8k",
                     E.has_perp_at_t0: si >= 4, "season": season,
                     T.r("24h"): r24, T.ar("24h"): r24 - 0.001, T.direction: float(np.sign(r24)),
-                    "f_calendar_weekday": float(t0.weekday()), "f_calendar_weekday__missing": 0.0,
-                    "f_pre_price_signal": signal, "f_pre_price_signal__missing": 0.0,
-                    "f_history_mean_r24": rng.normal(scale=0.01),
-                    "f_surprise_eps_pct": (signal + rng.normal()) if post else np.nan,
-                    "f_surprise_eps_pct__missing": 0.0 if post else 1.0,
-                    "f_reaction_r_15m": (0.5 * r24 + rng.normal(scale=0.01)) if post else np.nan,
+                    "f_weekday": float(t0.weekday()), "f_weekday__missing": 0.0,
+                    "f_amc": 1.0, "f_amc__missing": 0.0,
+                    "f_ret_1d": signal, "f_ret_1d__missing": 0.0,
+                    "f_hist_r24_mean": rng.normal(scale=0.01),
+                    "f_eps_surprise": (signal + rng.normal()) if post else np.nan,
+                    "f_eps_surprise__missing": 0.0 if post else 1.0,
+                    "f_r_15m": (0.5 * r24 + rng.normal(scale=0.01)) if post else np.nan,
                 })
     return pd.DataFrame(rows)
 
@@ -68,6 +93,42 @@ class FakeLinear(models_mod.BaseModel):
 
     def predict_proba_up(self, X):
         return 1.0 / (1.0 + np.exp(-40.0 * self.predict_return(X)))
+
+
+class StrictLinear(FakeLinear):
+    """The constructor of models.linear.LinearModel: grids `alphas` / `Cs` (a one-element grid
+    is a fixed value), `cv_folds`, and a TypeError for any other keyword."""
+
+    def __init__(self, *, seed: int = 7, alphas=(1.0, 10.0, 100.0), Cs=(0.01, 0.1, 1.0), cv_folds: int = 5, **params):
+        if params:
+            raise TypeError(f"linear: unknown parameter(s) {sorted(params)}")
+        super().__init__(seed=seed, alphas=tuple(alphas), Cs=tuple(Cs), cv_folds=cv_folds)
+
+
+class StrictLightGBM(FakeLinear):
+    """The constructor of models.lgbm.LightGBMModel: the round count and the early-stopping
+    patience are arguments, everything else goes into LightGBM's params dict — where an alias
+    of num_iterations / early_stopping_round would override them, so it must never arrive."""
+
+    FORBIDDEN = frozenset(_ConfigAliases.get("num_iterations")) | frozenset(_ConfigAliases.get("early_stopping_round"))
+
+    def __init__(self, *, seed: int = 7, num_boost_round: int = 500, early_stopping_rounds: int = 30,
+                 valid_fraction: float = 0.2, **lgb_params):
+        bad = sorted(self.FORBIDDEN & lgb_params.keys())
+        if bad:
+            raise TypeError(f"lightgbm: {bad} reached the params dict")
+        super().__init__(seed=seed, num_boost_round=num_boost_round, early_stopping_rounds=early_stopping_rounds,
+                         valid_fraction=valid_fraction, **lgb_params)
+        self.num_boost_round, self.early_stopping_rounds = num_boost_round, early_stopping_rounds
+        self.lgb_params = dict(lgb_params)  # what lgb.train would receive as `params`
+
+
+class StrictEnsemble(FakeLinear):
+    """models.ensemble.Ensemble's constructor: members by registry name built with member_params."""
+
+    def __init__(self, *, seed: int = 7, members=("linear", "lightgbm"), member_params=None, **params):
+        super().__init__(seed=seed, members=tuple(members), member_params=member_params, **params)
+        self.members_ = [models_mod.make_model(m, seed=seed, **(member_params or {}).get(m, {})) for m in members]
 
 
 class FakeZero(models_mod.BaseModel):
@@ -140,7 +201,18 @@ def fake_regression_metrics(r_hat, r_true):
 
 
 @pytest.fixture
-def patched(monkeypatch):
+def fake_features(monkeypatch):
+    """The v1 groups registered with their admissibility and declared keys (FAKE_GROUPS)."""
+    monkeypatch.setattr(features_mod, "REGISTRY", {name: ((lambda ctx: {}), adm) for name, (adm, _) in FAKE_GROUPS.items()})
+    monkeypatch.setattr(features_mod, "groups",
+                        SimpleNamespace(GROUP_KEYS={name: keys for name, (_, keys) in FAKE_GROUPS.items()}),
+                        raising=False)
+    return monkeypatch
+
+
+@pytest.fixture
+def patched(fake_features):
+    monkeypatch = fake_features
     for name, cls in {"linear": FakeLinear, "lightgbm": FakeLinear, "ensemble": FakeLinear,
                       "zero": FakeZero, "base_rate": FakeBaseRate}.items():
         monkeypatch.setitem(models_mod.REGISTRY, name, cls)
@@ -155,16 +227,108 @@ def small_settings(settings):
     return settings.model_copy(update={"min_train_events": 20, "holdout_season": HOLDOUT, "embargo_days": 2})
 
 
-# ---- tests ------------------------------------------------------------------------------------------
-def test_feature_groups_respect_the_decision_phase():
+# ---- feature groups ---------------------------------------------------------------------------------
+def test_feature_groups_come_from_the_declared_keys_and_respect_the_phase(fake_features):
     cols = make_dataset(n_per_season=2).columns
     pre = opt.feature_groups(cols, "pre_5m")
     post = opt.feature_groups(cols, "post_30m")
     assert set(pre) == {"calendar", "pre_price", "history"}
     assert set(post) == {"calendar", "pre_price", "history", "surprise", "reaction"}
-    assert pre["calendar"] == ["f_calendar_weekday", "f_calendar_weekday__missing"]
+    assert pre["calendar"] == ["f_amc", "f_amc__missing", "f_weekday", "f_weekday__missing"]
+    assert post["reaction"] == ["f_r_15m"] and post["surprise"] == ["f_eps_surprise", "f_eps_surprise__missing"]
+    # keys never share a common prefix with their group name: a naming convention cannot do this
+    assert "f_hist_r24_mean" in pre["history"] and "f_ret_1d" in pre["pre_price"]
 
 
+def test_feature_column_outside_the_registry_is_an_error_not_a_group(fake_features):
+    cols = [*make_dataset(n_per_season=1).columns, "f_bogus_thing", "f_bogus_thing__missing"]
+    with pytest.raises(ValueError, match="f_bogus_thing.*freedom dataset"):
+        opt.feature_groups(cols, "pre_5m")
+    fake_features.setattr(features_mod, "REGISTRY", {})
+    with pytest.raises(ValueError, match="registry is empty"):
+        opt.feature_groups(cols, "pre_5m")
+
+
+def test_group_without_declared_keys_or_with_shared_keys_is_an_error(fake_features):
+    fake_features.setitem(features_mod.REGISTRY, "text", ((lambda ctx: {}), ("post",)))
+    with pytest.raises(ValueError, match=r"\['text'\] declare no output keys"):
+        opt.group_keys()
+    fake_features.setitem(features_mod.groups.GROUP_KEYS, "text", ("weekday",))
+    with pytest.raises(ValueError, match="'weekday' is declared by both"):
+        opt.group_keys()
+
+
+@needs_real_features
+def test_real_feature_registry_attributes_every_declared_column():
+    keys = opt.group_keys()
+    assert set(keys) == set(features_mod.REGISTRY) and all(keys[g] for g in keys)
+    cols = [f"{D.feature_prefix}{k}{s}" for g in keys for k in keys[g] for s in ("", D.missing_suffix)]
+    pre, post = opt.feature_groups(cols, "pre_5m"), opt.feature_groups(cols, "post_30m")
+    assert set(post) == set(keys)
+    assert set(pre) == {g for g, (_, adm) in features_mod.REGISTRY.items() if "pre" in adm}
+    assert {"surprise", "reaction"}.isdisjoint(pre)
+    for g, group_cols in post.items():
+        assert len(group_cols) == 2 * len(keys[g])
+        assert all(c[len(D.feature_prefix):].removesuffix(D.missing_suffix) in keys[g] for c in group_cols)
+
+
+# ---- model knobs ------------------------------------------------------------------------------------
+def test_lightgbm_alias_table_matches_the_installed_lightgbm():
+    assert opt.LGB_NUM_ITERATIONS_ALIASES == frozenset(_ConfigAliases.get("num_iterations")) - {"num_boost_round"}
+    with pytest.raises(ValueError, match="num_boost_round"):
+        opt.model_kwargs("lightgbm", {"model": "lightgbm", "lightgbm.n_estimators": 100})
+
+
+@pytest.mark.parametrize("family", opt.FAMILIES)
+def test_suggested_params_are_the_models_constructor_knobs(fake_features, family):
+    fake_features.setitem(models_mod.REGISTRY, "linear", StrictLinear)
+    fake_features.setitem(models_mod.REGISTRY, "lightgbm", StrictLightGBM)
+    fake_features.setitem(models_mod.REGISTRY, "ensemble", StrictEnsemble)
+    study = optuna.create_study(sampler=optuna.samplers.RandomSampler(seed=1))
+    study.enqueue_trial({"model": family})
+    params = opt.suggest(study.ask(), ["calendar", "pre_price"], (T.r("24h"),), n_seasons=4)
+    cfg = opt.TrialConfig.from_params(params, ["calendar", "pre_price"])
+    model = opt.build_model(cfg, seed=7)  # StrictLinear / StrictLightGBM raise on a stray keyword
+    members = {family: model} if family != "ensemble" else dict(zip(model.params["members"], model.members_, strict=True))
+    if family in ("linear", "ensemble"):
+        lin = members["linear"]
+        assert lin.params["alphas"] == (params["linear.alpha"],) and lin.params["Cs"] == (params["linear.C"],)
+        assert not {"alpha", "C"} & lin.params.keys()
+    if family in ("lightgbm", "ensemble"):
+        lgb = members["lightgbm"]
+        assert lgb.num_boost_round == params["lightgbm.num_boost_round"]
+        assert lgb.early_stopping_rounds == params["lightgbm.early_stopping_rounds"]
+        assert lgb.lgb_params["num_leaves"] == params["lightgbm.num_leaves"]
+        assert not StrictLightGBM.FORBIDDEN & lgb.lgb_params.keys()
+
+
+def _fit_predict(params: dict, X: pd.DataFrame, y: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    cfg = opt.TrialConfig.from_params({**params, "target": T.r("24h"), "train_window_seasons": 2}, [])
+    m = opt.build_model(cfg, seed=7).fit(X, y, np.sign(y))
+    return np.asarray(m.predict_return(X), float), np.asarray(m.predict_proba_up(X), float)
+
+
+@needs_real_models
+def test_real_models_change_with_the_suggested_params():
+    rng = np.random.default_rng(3)
+    X = pd.DataFrame(rng.normal(size=(160, 3)), columns=["f_ret_1d", "f_weekday", "f_hist_r24_mean"])
+    y = pd.Series(0.03 * X["f_ret_1d"] + 0.01 * X["f_hist_r24_mean"] + rng.normal(scale=0.02, size=len(X)))
+    weak = _fit_predict({"model": "linear", "linear.alpha": 0.1, "linear.C": 10.0}, X, y)
+    strong = _fit_predict({"model": "linear", "linear.alpha": 1000.0, "linear.C": 1e-3}, X, y)
+    assert not np.allclose(weak[0], strong[0]) and not np.allclose(weak[1], strong[1])
+    assert np.abs(strong[0] - y.mean()).max() < np.abs(weak[0] - y.mean()).max()  # stronger L2 shrinks harder
+    base = {"model": "lightgbm", "lightgbm.num_leaves": 4, "lightgbm.min_data_in_leaf": 20,
+            "lightgbm.feature_fraction": 1.0, "lightgbm.bagging_fraction": 1.0, "lightgbm.learning_rate": 0.1,
+            "lightgbm.early_stopping_rounds": 500, "lightgbm.lambda_l2": 0.01}
+    one = _fit_predict({**base, "lightgbm.num_boost_round": 1}, X, y)
+    many = _fit_predict({**base, "lightgbm.num_boost_round": 300}, X, y)
+    assert not np.allclose(one[0], many[0]) and not np.allclose(one[1], many[1])
+    assert np.abs(many[0] - y).mean() < np.abs(one[0] - y).mean()  # more rounds fit the training data better
+    ens = _fit_predict({**base, "lightgbm.num_boost_round": 300, "linear.alpha": 0.1, "linear.C": 10.0, "model": "ensemble"}, X, y)
+    assert np.allclose(ens[0], 0.5 * (weak[0] + many[0]))
+
+
+# ---- rows, windows, study ---------------------------------------------------------------------------
 def test_prepare_rows_drops_holdout_and_low_confidence(small_settings):
     rows = opt.prepare_rows(small_settings, make_dataset(), "pre_5m")
     assert HOLDOUT not in set(rows["season"])
@@ -186,6 +350,11 @@ def test_training_window_is_floored_at_min_train(patched, small_settings):
     assert len(opt.training_rows(rows, last, 99, min_train=5)) == len(last.train_idx)
 
 
+def test_share_true_tolerates_the_nullable_boolean_dtype():
+    assert opt.share_true(pd.Series([True, None, False], dtype="boolean")) == pytest.approx(1 / 3)
+    assert opt.share_true(pd.Series([True, np.nan, True])) == pytest.approx(2 / 3)
+
+
 def test_run_study_persists_reports_and_never_scores_the_holdout(patched, small_settings):
     seen: list[pd.DataFrame] = []
     real = eval_mod.walk_forward_folds
@@ -196,6 +365,8 @@ def test_run_study_persists_reports_and_never_scores_the_holdout(patched, small_
 
     patched.setattr(eval_mod, "walk_forward_folds", spy)
     ds = make_dataset()
+    ds[E.has_perp_at_t0] = ds[E.has_perp_at_t0].astype("boolean")
+    ds.loc[ds.index[:3], E.has_perp_at_t0] = pd.NA  # as build_dataset writes it: nullable, possibly NA
     res = opt.run_study(small_settings, ds, decision_time="pre_5m", n_trials=6, objective="brier")
 
     assert res["study"] == "freedom_pre_5m_brier" and small_settings.optuna_db.exists()
@@ -203,9 +374,11 @@ def test_run_study_persists_reports_and_never_scores_the_holdout(patched, small_
     assert HOLDOUT not in res["seasons"] and res["holdout_season"] == HOLDOUT
     assert all(HOLDOUT not in set(frame["season"]) for frame in seen)
     assert set(res["groups"]) == {"calendar", "pre_price", "history"}
+    assert 0.0 <= res["has_perp_share"] <= 1.0
     # decision time and the confidence floor are not search dimensions
     forbidden = {"decision_time", "min_t0_confidence", "holdout_season"}
     assert not forbidden & set(res["best_params"])
+    assert not {"lightgbm.n_estimators", "linear.alphas"} & set(res["best_params"])
     board = opt.leaderboard(small_settings, "pre_5m", "brier")
     assert board["state"].eq("complete").sum() == res["n_trials"]
     assert not any(forbidden & set(json.loads(p)) for p in board["params"])

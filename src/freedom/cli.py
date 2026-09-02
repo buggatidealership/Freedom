@@ -2,7 +2,9 @@
 
 Exit codes: 0 success; 2 a prerequisite is missing (an artifact another command writes, an API
 key, an exhausted daily budget) — the message names the command to run first; 3 nothing to
-predict yet (no release detected on the live bars).
+predict yet (no release detected on the live bars). Anything else (a KeyError from a dataset
+without target columns, an unknown model name, ...) is a bug or a data-shape problem and
+propagates with its traceback instead of a misleading "run X first" hint.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Settings, get_settings
+from .errors import EventNotFound
 
 app = typer.Typer(help="Post-earnings price-action harness for Hyperliquid equity perpetuals.")
 console = Console()
@@ -101,7 +104,10 @@ def _require(path: Path, cmd: str) -> None:
 
 @contextmanager
 def _guard() -> Iterator[None]:
-    """Turn a module's prerequisite failures into a message and exit code 2."""
+    """Turn a module's prerequisite failures into a message and exit code 2: budgets, provider
+    availability, a missing artifact (FileNotFoundError, which live.ModelNotFound extends) and
+    an unknown event id (errors.EventNotFound). Other LookupErrors — KeyError, IndexError — are
+    programming or data-shape errors and propagate with a traceback."""
     from .data.base import BudgetExhausted, ProviderUnavailable
 
     try:
@@ -111,7 +117,7 @@ def _guard() -> Iterator[None]:
               "(UTC midnight) or raise FREEDOM_FMP_DAILY_BUDGET / FREEDOM_ALPHAVANTAGE_DAILY_BUDGET.")
     except ProviderUnavailable as exc:
         _fail(f"provider unavailable: {exc}")
-    except (FileNotFoundError, LookupError) as exc:
+    except (FileNotFoundError, EventNotFound) as exc:
         _fail(_hint(str(exc)))
 
 
@@ -260,23 +266,44 @@ def dataset(decision_times: str = typer.Option("pre_5m,post_15m,post_30m")) -> N
 
 
 # ---- evaluate -----------------------------------------------------------------------------------------
-def _print_summary(summary: dict, title: str) -> None:
-    """Print whatever tabular part the evaluation summary carries, then its scalars."""
-    import pandas as pd
+def _summary_rows(summary: dict) -> dict[str, list[dict]]:
+    """decision time -> one row per model from the evaluation summary, whose metrics are nested
+    as results[decision_time][model]["subsets"][subset] (eval.runner). Like the written
+    leaderboard, a row shows the headline subset when it has events, else all events, with the
+    paired comparison against the best baseline and the fixed-sizing trading result."""
+    out: dict[str, list[dict]] = {}
+    for d, per_model in (summary.get("results") or {}).items():
+        rows = []
+        for model, res in (per_model or {}).items():
+            subsets = res.get("subsets") or {}
+            subset = "headline" if (subsets.get("headline") or {}).get("n") else "all"
+            cell = subsets.get(subset) or {}
+            comp = (cell.get("comparison") or {}).get("brier") or {}
+            trading = (res.get("trading") or {}).get("fixed") or {}
+            mean_pnl = (trading.get("mean_pnl") or {}).get("point")
+            rows.append({"model": model, "subset": subset, "n": cell.get("n"),
+                         "accuracy": cell.get("accuracy"), "brier": cell.get("brier"),
+                         "log_loss": cell.get("log_loss"), "spearman_ic": cell.get("spearman_ic"),
+                         "mae": cell.get("mae"),
+                         "Δbrier vs baseline": comp.get("improvement"),
+                         "baseline": comp.get("baseline") or ("(is baseline)" if res.get("is_baseline") else None),
+                         "verdict": comp.get("verdict"), "sharpe (fixed)": trading.get("sharpe_like"),
+                         "mean net bp (fixed)": mean_pnl * 1e4 if isinstance(mean_pnl, int | float) else None})
+        out[d] = rows
+    return out
 
-    printed = False
-    for key in ("leaderboard", "cells", "results", "metrics"):
-        block = summary.get(key)
-        if isinstance(block, list) and block and isinstance(block[0], dict):
-            _print_frame(pd.DataFrame(block), title=f"{title}: {key}")
-            printed = True
-            break
-        if isinstance(block, pd.DataFrame) and len(block):
-            _print_frame(block, title=f"{title}: {key}")
-            printed = True
-            break
+
+def _print_summary(summary: dict, title: str, report_dir: Path | None = None) -> None:
+    """One table per decision time (eval's nested results flattened), then the run's scalars
+    and the path of the leaderboard eval wrote."""
+    tables = _summary_rows(summary)
+    for d, rows in tables.items():
+        if rows:
+            _print_rows(rows, title=f"{title}: {d}")
     scalars = {k: v for k, v in summary.items() if isinstance(v, str | int | float | bool | type(None))}
-    if scalars or not printed:
+    if report_dir is not None:
+        scalars["leaderboard"] = report_dir / "leaderboard.md"
+    if scalars or not tables:
         _print_kv(scalars or {"keys": ", ".join(summary)}, title=title)
 
 
@@ -293,7 +320,9 @@ def evaluate(models: str = typer.Option("zero,base_rate,historical_mean,sign_of_
     ds = _load_dataset(s)
     with _guard():
         summary = eval_mod.evaluate(s, ds, model_names=_csv(models), decision_times=dts, final=final, target=target)
-    _print_summary(summary, title="freedom evaluate" + (" --final" if final else ""))
+    run_id = summary.get("run_id")
+    _print_summary(summary, title="freedom evaluate" + (" --final" if final else ""),
+                   report_dir=s.reports_dir / str(run_id) if run_id else None)
     if final:
         console.print(f"holdout season {s.holdout_season} has now been scored {_count_lines(s.holdout_log_path)} "
                       f"time(s) ({s.holdout_log_path}); discount it accordingly.", style="yellow", markup=False)
@@ -406,8 +435,9 @@ def predict(event: str = typer.Option(..., "--event", help="event_id, e.g. NVDA:
 # ---- upcoming -----------------------------------------------------------------------------------------
 @app.command()
 def upcoming(days: int = typer.Option(14)) -> None:
-    """List upcoming earnings events in the event universe."""
+    """List upcoming earnings events in the event universe with the event_id `freedom predict --event` takes."""
     from . import events as events_mod
+    from . import live
 
     s = get_settings()
     with _guard():
@@ -415,7 +445,7 @@ def upcoming(days: int = typer.Option(14)) -> None:
     if df is None or len(df) == 0:
         console.print(f"no universe events in the next {days} days", markup=False)
         return
-    _print_frame(df, title=f"freedom upcoming: {len(df)} events in the next {days} days")
+    _print_frame(live.with_event_ids(df), title=f"freedom upcoming: {len(df)} events in the next {days} days")
 
 
 # ---- status -------------------------------------------------------------------------------------------

@@ -17,7 +17,7 @@ import freedom.live as live_mod
 import freedom.optimize as optimize_mod
 import freedom.targets as targets_mod
 import freedom.universe as universe_mod
-from freedom.cli import app
+from freedom.cli import _summary_rows, app
 from freedom.data.base import BudgetExhausted, DailyBudget, ProviderUnavailable
 from freedom.schemas import D, E, T, U
 
@@ -152,6 +152,48 @@ def test_evaluate_without_dataset_names_the_dataset_command(dirs):
     assert result.exit_code == 2 and "run `freedom dataset` first" in result.output
 
 
+def _cell(n: int, brier: float, accuracy: float, comparison: dict | None = None) -> dict:
+    return {"n": n, "n_direction": n, "n_return": n, "accuracy": accuracy, "balanced_accuracy": accuracy,
+            "brier": brier, "log_loss": 0.69, "mae": 0.031, "rmse": 0.042, "spearman_ic": 0.05,
+            "ci": {"accuracy": [0.45, 0.6], "brier": [0.23, 0.26]}, "mde": {"brier": 0.02, "accuracy": 0.08},
+            "comparison": comparison, "calibration": None}
+
+
+def _eval_summary() -> dict:
+    """The shape eval.runner.evaluate returns: metrics nested as results[decision_time][model]["subsets"][subset]."""
+    comparison = {"brier": {"baseline": "zero", "baseline_value": 0.25, "model_value": 0.241, "improvement": 0.009,
+                            "ci": [0.001, 0.017], "n": 120, "mde": 0.02, "verdict": "improves"}}
+    trading = lambda sharpe, pnl: {"fixed": {"sharpe_like": sharpe, "max_drawdown": -0.05, "n_trades": 100,  # noqa: E731
+                                             "mean_pnl": {"point": pnl, "ci": [pnl - 0.001, pnl + 0.001]}}}
+    return {"run_id": "20260902T000000Z-abcd1234", "created_at": "2026-09-02T00:00:00+00:00", "final": False,
+            "target": "r_24h", "schema_version": 2, "dataset_sha256": "abcd1234" * 8, "n_rows": 600, "n_events": 300,
+            "git": {"sha": "deadbeef", "dirty": False}, "settings": {"holdout_season": "2026Q3"}, "config_hash": "ff" * 32,
+            "versions": {"lightgbm": "4.7.0"}, "decision_times": ["pre_5m"], "models": ["zero", "linear"],
+            "baselines": ["zero"],
+            "holdout": {"season": "2026Q3", "scorings_before": 0, "scorings_after": 0, "scored_now": False, "n_events": 40},
+            "folds": {"pre_5m": []}, "skipped_seasons": {"pre_5m": []}, "cohorts": {"pre_5m": {"n_events": 300}},
+            "best_baseline": {"pre_5m": {"headline": {"brier": {"model": "zero", "value": 0.25}}}},
+            "results": {"pre_5m": {
+                "zero": {"is_baseline": True, "subsets": {"all": _cell(300, 0.25, 0.5), "headline": _cell(120, 0.25, 0.5)},
+                         "residual_band": {"q10": -0.05, "q90": 0.06, "n": 300, "coverage": 0.8, "n_with_band": 300},
+                         "trading": trading(0.0, 0.0)},
+                "linear": {"is_baseline": False,
+                           "subsets": {"all": _cell(300, 0.244, 0.53), "headline": _cell(120, 0.241, 0.55, comparison)},
+                           "residual_band": {"q10": -0.04, "q90": 0.05, "n": 300, "coverage": 0.81, "n_with_band": 300},
+                           "trading": trading(0.8, 0.0012)}}},
+            "holdout_results": None, "sizings": ["fixed", "by_confidence"], "n_boot": 1000, "notes": ["a note"]}
+
+
+def test_summary_rows_flatten_the_nested_eval_results():
+    rows = _summary_rows(_eval_summary())
+    assert list(rows) == ["pre_5m"] and [r["model"] for r in rows["pre_5m"]] == ["zero", "linear"]
+    linear = rows["pre_5m"][1]
+    assert linear["subset"] == "headline" and linear["n"] == 120 and linear["brier"] == 0.241
+    assert linear["baseline"] == "zero" and linear["verdict"] == "improves" and linear["Δbrier vs baseline"] == 0.009
+    assert linear["mean net bp (fixed)"] == pytest.approx(12.0) and rows["pre_5m"][0]["baseline"] == "(is baseline)"
+    assert _summary_rows({"run_id": "x"}) == {}
+
+
 def test_evaluate_prints_leaderboard_and_final_holdout_count(dirs, monkeypatch):
     data, reports = dirs
     _dataset().to_parquet(data / "dataset.parquet", index=False)
@@ -159,14 +201,15 @@ def test_evaluate_prints_leaderboard_and_final_holdout_count(dirs, monkeypatch):
 
     def evaluate(s, ds, *, model_names, decision_times, final=False, run_id=None, target="r_24h"):
         seen.update(models=model_names, dts=decision_times, final=final, target=target)
-        return {"run_id": "20260902T000000Z-abcd1234", "n_holdout_scorings": 1,
-                "leaderboard": [{"model": "zero", "decision_time": "pre_5m", "brier": 0.25, "n": 300}]}
+        return _eval_summary()
 
     monkeypatch.setattr(eval_mod, "evaluate", evaluate)
     result = runner.invoke(app, ["evaluate", "--models", "zero,linear", "--decision-times", "pre_5m", "--target", "ar_24h"])
     assert result.exit_code == 0, result.output
     assert seen == {"models": ["zero", "linear"], "dts": ["pre_5m"], "final": False, "target": "ar_24h"}
-    assert "zero" in result.output and "abcd1234" in result.output
+    out = result.output
+    assert "pre_5m" in out and "linear" in out and "headline" in out and "0.241" in out and "improves" in out
+    assert "abcd1234" in out and str(reports / "20260902T000000Z-abcd1234" / "leaderboard.md") in out
     reports.mkdir(parents=True, exist_ok=True)
     (reports / "holdout_scorings.jsonl").write_text('{"a":1}\n{"b":2}\n')
     result = runner.invoke(app, ["evaluate", "--final"])
@@ -279,11 +322,18 @@ def test_predict_failure_modes_have_distinct_exit_codes(dirs, monkeypatch):
     assert result.exit_code == 2 and "freedom train" in result.output
 
     def no_event(s, **kw):
-        raise LookupError("event 'ZZZ:2026-07' is neither in events.parquet nor upcoming: run `freedom events` or `freedom upcoming`")
+        raise live_mod.EventNotFound("event 'ZZZ:2026-07' is neither in events.parquet nor upcoming: run `freedom events` or `freedom upcoming`")
 
     monkeypatch.setattr(live_mod, "predict_event", no_event)
     result = runner.invoke(app, ["predict", "--event", "ZZZ:2026-07"])
     assert result.exit_code == 2 and "freedom upcoming" in result.output
+
+    def key_error(s, **kw):  # a data-shape bug: not a missing prerequisite, no "run X first" hint
+        raise KeyError("r_24h")
+
+    monkeypatch.setattr(live_mod, "predict_event", key_error)
+    result = runner.invoke(app, ["predict", "--event", "NVDA:2026-07"])
+    assert result.exit_code == 1 and isinstance(result.exception, KeyError) and "first" not in result.output
 
     def no_events_table(s, **kw):
         raise FileNotFoundError(f"{s.events_path} missing")
@@ -294,14 +344,16 @@ def test_predict_failure_modes_have_distinct_exit_codes(dirs, monkeypatch):
 
 
 # ---- upcoming -----------------------------------------------------------------------------------------
-def test_upcoming_lists_events(dirs, monkeypatch):
-    def upcoming(s, days=14):
-        return pd.DataFrame({E.event_id: ["NVDA:2026-10"], E.underlying: ["NVDA"],
-                             E.report_date_ny: [pd.Timestamp("2026-11-18").date()], E.eps_estimate: [1.3]})
+def test_upcoming_lists_events_with_the_id_predict_takes(dirs, monkeypatch):
+    def upcoming(s, days=14):  # the events implementation's columns: no event_id
+        return pd.DataFrame({E.underlying: ["NVDA"], E.market: ["xyz:NVDA"], E.kind: ["equity_us"],
+                             E.report_date_ny: [pd.Timestamp("2026-11-18").date()],
+                             "expected_t0": [pd.Timestamp("2026-11-18 21:05", tz="UTC")],
+                             "expected_t0_source": ["calendar default (AMC)"], E.eps_estimate: [1.3]})
 
     monkeypatch.setattr(events_mod, "upcoming_events", upcoming)
     result = runner.invoke(app, ["upcoming", "--days", "30"])
-    assert result.exit_code == 0 and "NVDA:2026-10" in result.output and "30 days" in result.output
+    assert result.exit_code == 0 and "NVDA:2026-09" in result.output and "30 days" in result.output
     monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: pd.DataFrame())
     assert "no universe events" in runner.invoke(app, ["upcoming"]).output
 

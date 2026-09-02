@@ -5,18 +5,26 @@ the same feature groups the dataset uses, scores the trained model for the decis
 appends one row to data/live_predictions.parquet:
 
 * pre-release decisions: `as_of = expected_t0 + offset` where `expected_t0` is the issuer's
-  median 8-K acceptance clock (events.expected_release_clock) on the report date, falling back
-  to the calendar-flag default (AMC 16:05, BMO 07:00 America/New_York). The row is
-  `off_schedule` when `now` is not inside [as_of - PRE_WINDOW, expected_t0].
+  median 8-K acceptance clock (events.expected_release_clock) on the report date
+  (`t0_source_live = expected_sec_8k`), falling back to the calendar-flag default (AMC 16:05,
+  BMO 07:00 America/New_York; `expected_calendar_flag`); the clock's provenance text goes into
+  `schedule_note`. The row is `off_schedule` when `now` is not inside
+  [as_of - PRE_WINDOW, expected_t0].
 * post-release decisions: `t0_live` comes from events.detect_release_live on 1-minute bars —
   archived plus live Hyperliquid perp candles when the market exists, else FMP extended-hours
   bars — and `as_of = t0_live + k`. The row is `off_schedule` (and must not be traded) when
   `now - t0_live` is outside [k - 1 min, k + max_fill_lag_minutes]. When the 8-K is already
   on EDGAR its acceptance is recorded as `t0_actual` with `t0_lag_s`; otherwise
   `freedom evaluate --live` back-fills it later.
+* only bars closed at `now` (t_end <= now) are used anywhere: the forming 1-minute candle the
+  providers return is dropped before the detector, the features and the input lags see it.
 * every row records model_id, the sources used, `input_lag_s_<source>` (now minus the newest
-  bar / filing each source served) and the feature values, so the live record can be scored
-  and compared with the backtest's decision instants.
+  closed bar / filing each source served) and the feature values, so the live record can be
+  scored and compared with the backtest's decision instants.
+* an event that is not yet in data/events.parquet is found in the upcoming calendar under the
+  id `freedom upcoming` prints (`upcoming_event_id`: <underlying>:<calendar quarter before the
+  report date>) or its bare underlying when that has a single upcoming event; the row also
+  records `report_date_ny` so it can be matched once `freedom events` assigns the fiscal period.
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ from . import models as models_mod
 from .config import Settings
 from .data.archive import CTX_SUBDIR, load_archive, read_parquet_or_none, write_parquet_atomic
 from .data.base import ProviderUnavailable
+from .errors import EventNotFound
 from .schemas import DECISION_TIMES, NY, UTC, C, D, E, Timing
 from .timeutil import to_ny, to_utc
 
@@ -89,20 +98,59 @@ def sec_client(settings: Settings):
 
 
 # ---- event and model lookup ------------------------------------------------------------------------
+def derived_fiscal_period(report_date_ny) -> str:
+    """'YYYY-MM' of the calendar quarter end preceding the report date — the fiscal period
+    events.fiscal_period_for derives when no filing has fixed it yet."""
+    d = pd.Timestamp(report_date_ny)
+    quarter_start = pd.Timestamp(year=d.year, month=(d.month - 1) // 3 * 3 + 1, day=1)
+    q_end = quarter_start - pd.Timedelta(days=1)
+    return f"{q_end.year:04d}-{q_end.month:02d}"
+
+
+def upcoming_event_id(underlying: str, report_date_ny) -> str:
+    """The id `freedom predict --event` takes for a calendar event not yet in events.parquet:
+    <underlying>:<derived fiscal period>. Once `freedom events` resolves the period from filings
+    the table's id can differ (off-calendar fiscal years), which is why the live row also
+    records report_date_ny."""
+    return f"{str(underlying).upper()}:{derived_fiscal_period(report_date_ny)}"
+
+
+def with_event_ids(upcoming: pd.DataFrame) -> pd.DataFrame:
+    """The upcoming-events frame with an event_id column first: rows without one (the
+    calendar knows no fiscal period) get upcoming_event_id(underlying, report_date_ny)."""
+    df = upcoming.copy()
+    ids = df[E.event_id].astype(object) if E.event_id in df.columns else pd.Series(None, index=df.index, dtype=object)
+    days = df[E.report_date_ny] if E.report_date_ny in df.columns else [None] * len(df)
+    minted = [upcoming_event_id(u, d) if not pd.isna(d) and isinstance(u, str) and u else None
+              for u, d in zip(df[E.underlying], days, strict=True)]
+    ids = ids.where(ids.notna(), pd.Series(minted, index=df.index, dtype=object))
+    if E.event_id in df.columns:
+        df = df.drop(columns=[E.event_id])
+    df.insert(0, E.event_id, ids)
+    return df
+
+
 def find_event(settings: Settings, event_id: str, *, days: int = UPCOMING_LOOKAHEAD_DAYS) -> tuple[pd.Series, pd.DataFrame]:
     """(event row, full events table). The row comes from data/events.parquet, else from the
-    upcoming calendar (events.upcoming_events) for events not yet in the table."""
+    upcoming calendar (events.upcoming_events) under the id `freedom upcoming` prints
+    (with_event_ids) — or under its bare underlying when that has exactly one upcoming event."""
     events = events_mod.load_events(settings)
     hit = events[events[E.event_id] == event_id]
     if len(hit):
         return hit.iloc[0].copy(), events
     upcoming = events_mod.upcoming_events(settings, days=days)
-    if upcoming is not None and len(upcoming) and E.event_id in upcoming.columns:
+    if upcoming is not None and len(upcoming):
+        upcoming = with_event_ids(upcoming)
         hit = upcoming[upcoming[E.event_id] == event_id]
-        if len(hit):
+        if len(hit) == 0 and ":" not in event_id:
+            hit = upcoming[upcoming[E.underlying].astype(str).str.upper() == event_id.upper()]
+        if len(hit) == 1:
             return hit.iloc[0].copy(), events
-    raise LookupError(f"event {event_id!r} is neither in {settings.events_path} nor in the next {days} days "
-                      "of the calendar: run `freedom events` (past events) or `freedom upcoming` to list event ids")
+        if len(hit) > 1:
+            raise EventNotFound(f"{event_id!r} matches {len(hit)} upcoming events "
+                                f"({', '.join(hit[E.event_id].astype(str))}): pass one of these ids")
+    raise EventNotFound(f"event {event_id!r} is neither in {settings.events_path} nor in the next {days} days "
+                        "of the calendar: run `freedom events` (past events) or `freedom upcoming` to list event ids")
 
 
 def load_model(settings: Settings, decision: str, model_name: str | None = None) -> tuple[models_mod.BaseModel, dict, Path]:
@@ -137,9 +185,9 @@ class Schedule:
     offset_min: int
     as_of: pd.Timestamp
     t0: pd.Timestamp  # expected (pre) or detected (post) release instant, UTC
-    t0_source: str  # expected_sec_8k | expected_calendar_flag | detected
+    t0_source: str  # expected_sec_8k | expected_calendar_flag | detected (the live stratum key)
     off_schedule: bool
-    note: str
+    note: str  # free text: schedule state and where expected_t0 came from
 
 
 def report_day(event: pd.Series) -> pd.Timestamp:
@@ -162,21 +210,22 @@ def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, dec
     offset = DECISION_TIMES[decision]
     day = report_day(event)
     clock = events_mod.expected_release_clock(events, str(event[E.underlying]))
-    if clock is not None:
-        hhmm, src = clock
-        source = f"expected_{src}"
+    if clock is not None:  # (HH:MM New York, free-text provenance such as "median of 3 sec_8k acceptances")
+        hhmm, detail = clock
+        source = "expected_sec_8k"
     else:
         timing = event.get(E.timing)
         hhmm = DEFAULT_CLOCK_NY.get(str(timing), DEFAULT_CLOCK_NY[Timing.amc.value])
-        source = "expected_calendar_flag"
+        source, detail = "expected_calendar_flag", f"calendar-flag default for {timing or Timing.amc.value}"
     expected_t0 = to_utc(f"{day.date().isoformat()} {hhmm}", assume_tz=NY)
     as_of = expected_t0 + pd.Timedelta(minutes=offset)
     if now > expected_t0:
-        off, note = True, f"now is {(now - expected_t0)} after the expected release"
+        off, state = True, f"now is {(now - expected_t0)} after the expected release"
     elif now < as_of - PRE_WINDOW:
-        off, note = True, f"now is {(as_of - now)} before the decision instant"
+        off, state = True, f"now is {(as_of - now)} before the decision instant"
     else:
-        off, note = False, "on schedule"
+        off, state = False, "on schedule"
+    note = f"{state}; expected_t0 {hhmm} New York from {detail}"
     return Schedule(decision, offset, as_of, expected_t0, source, off, note)
 
 
@@ -187,7 +236,7 @@ def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.T
     if bars is None or len(bars) == 0:
         raise ReleaseNotDetected(f"no 1-minute bars for {event.get(E.market) or event[E.underlying]} on "
                                  f"{day.date()}; cannot detect the release")
-    t0_live = events_mod.detect_release_live(bars, day)
+    t0_live = events_mod.detect_release_live(bars, day, now=now)
     if t0_live is None:
         raise ReleaseNotDetected(f"no release detected yet for {event[E.event_id]} on {day.date()} "
                                  f"(bars up to {bars[C.t_end].max()})")
@@ -232,21 +281,32 @@ def equity_bars(fmp, symbol: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.
     return b if b is not None and len(b) else None
 
 
+def closed_bars(bars: pd.DataFrame | None, now: pd.Timestamp) -> pd.DataFrame | None:
+    """Bars closed at `now` (t_end <= now): providers include the forming candle when asked up
+    to now, and a partial bar must reach neither the detector, the features nor the lags.
+    None when nothing is closed."""
+    if bars is None or len(bars) == 0:
+        return None
+    keep = bars[pd.to_datetime(bars[C.t_end], utc=True) <= now]
+    return keep.reset_index(drop=True) if len(keep) else None
+
+
 def live_bars(settings: Settings, event: pd.Series, *, hl, fmp, start: pd.Timestamp,
               end: pd.Timestamp) -> tuple[pd.DataFrame | None, str | None]:
-    """(1-minute bars for the event's instrument, source) — the perp when the market has
-    candles, else the underlying's FMP extended-hours bars; (None, None) when neither."""
+    """(1-minute bars for the event's instrument closed at `end`, source) — the perp when the
+    market has candles, else the underlying's FMP extended-hours bars; (None, None) when
+    neither has a closed bar."""
     market = event.get(E.market)
     if isinstance(market, str) and market:
         try:
-            b = perp_bars(settings, hl, market, start, end)
+            b = closed_bars(perp_bars(settings, hl, market, start, end), end)
         except Exception as exc:  # the FMP proxy is the fallback, not a crash
             log.warning("Hyperliquid bars unavailable for %s: %s", market, exc)
             b = None
         if b is not None:
             return b, "hyperliquid"
     try:
-        b = equity_bars(fmp, str(event[E.underlying]), start, end)
+        b = closed_bars(equity_bars(fmp, str(event[E.underlying]), start, end), end)
     except Exception as exc:
         log.warning("FMP bars unavailable for %s: %s", event[E.underlying], exc)
         b = None
@@ -374,6 +434,7 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
         raise ValueError(f"unknown decision time {decision!r}; choose from {sorted(DECISION_TIMES)}")
     now_ts = to_utc(now, assume_tz=UTC) if now is not None else pd.Timestamp.now(tz=UTC)
     event, events = find_event(settings, event_id)
+    event_id = str(event.get(E.event_id) or event_id)  # the resolved id (a bare underlying resolves to one)
     model, meta, model_path = load_model(settings, decision, model_name)
     hl = hl if hl is not None else hl_client(settings)
     fmp = fmp if fmp is not None else fmp_client(settings)
@@ -404,6 +465,7 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
     missing = [k for k in names if k.endswith(D.missing_suffix) and _num(feats.get(k)) == 1.0]
     row: dict = {
         E.event_id: event_id, E.underlying: str(event[E.underlying]), E.market: event.get(E.market),
+        E.report_date_ny: day.date().isoformat(),  # matches the events table once its fiscal period is known
         D.decision_time: decision, D.as_of: schedule.as_of, "run_at": now_ts,
         "t0_used": schedule.t0, "t0_source_live": schedule.t0_source,
         "expected_t0": schedule.t0 if schedule.offset_min < 0 else pd.NaT,
@@ -460,5 +522,6 @@ def load_live_predictions(settings: Settings) -> pd.DataFrame:
     return df
 
 
-__all__ = ["ModelNotFound", "ReleaseNotDetected", "Schedule", "append_live_prediction", "find_event",
-           "live_predictions_path", "load_live_predictions", "load_model", "predict_event"]
+__all__ = ["EventNotFound", "ModelNotFound", "ReleaseNotDetected", "Schedule", "append_live_prediction",
+           "closed_bars", "derived_fiscal_period", "find_event", "live_predictions_path",
+           "load_live_predictions", "load_model", "predict_event", "upcoming_event_id", "with_event_ids"]
