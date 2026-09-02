@@ -23,6 +23,9 @@ Every statement here was verified by a live request from the build environment o
 * Rate limit: 1200 weight per minute per IP. `candleSnapshot` costs 20 + 1 per 60 candles
   returned (a full 5000-candle page ≈ 103 weight, so ≈ 11 pages/minute). Other info requests
   cost 20 (`l2Book`, `allMids`, `clearinghouseState` cost 2).
+* `xyz:VIX` is delisted (`isDelisted: true`, no candles), so the VIX context features are
+  always missing until another volatility source is wired; `xyz:SP500` (listed 2026-03-18) is the
+  benchmark for perp-era events and SPY via FMP before that.
 * Fees (docs): validator perps taker 0.045 % / maker 0.015 % at tier 0. HIP-3 growth-mode
   markets have a 90 %-reduced protocol fee (docs quote a 0.0045–0.009 % baseline) plus a
   deployer share; `xyz` reports `deployerFeeScale = 1.0`, `growthMode = enabled`. The exact
@@ -70,7 +73,10 @@ Every statement here was verified by a live request from the build environment o
 * `stable/historical-chart/{1min,5min}?symbol=&from=&to=&extended=true` returns **pre-market
   and after-hours bars (04:00–19:55 ET)**; without `extended` only 09:30–15:55. Depth measured
   to at least 2024-08 for 5min and 2025-02 for 1min. Timestamps are exchange-local (America/New_York)
-  with no zone suffix.
+  with no zone suffix. **A 1-minute request covering five sessions returned only the latest
+  three (2880 bars)**, silently dropping the first two days; a 5-minute request covering ten
+  sessions returned all ten. The client therefore chunks 1-minute windows at three calendar
+  days, and the resolver and the price-path loader both request `[report day − 1, report day + 1]`.
 * `stable/historical-price-eod/full?symbol=&from=&to=`: daily bars back to at least 2020.
 * `stable/profile`, `stable/quote`, `stable/aftermarket-trade` (live after-hours trade) work.
 * `stable/splits?symbol=` lists splits (NFLX 10:1 on 2025-11-17). **Both EOD and intraday bars
