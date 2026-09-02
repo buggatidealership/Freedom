@@ -214,7 +214,9 @@ trained model and added to `r_hat` at prediction time.
   models}` to `reports/holdout_scorings.jsonl`, and the report prints how many times the holdout
   has been scored so the reader can discount it.
 * Metrics per decision time: directional accuracy, balanced accuracy, Brier, log-loss, Spearman
-  IC of `r_hat` vs `r_24h`, MAE, calibration table (deciles). Every metric is reported (a) for
+  IC of `r_hat` vs `r_24h`, MAE, magnitude MAE of `predict_magnitude` vs `|r_24h|` (so
+  `hist_abs_mean` / `vol_scaled` are scored as magnitude forecasts), calibration table
+  (deciles). Every metric is reported (a) for
   events with `has_perp_at_t0` (headline) and (b) for all events, and stratified by `t0_source`,
   `kind` and `timing`.
 * Trading simulation. A fill at instant `x` (entry at `d`, exit at `t0+24h`) is the **open of
@@ -227,26 +229,45 @@ trained model and added to `r_hat` at prediction time.
   accrued hourly from the archive only when the perp existed at `t0` and archived funding covers
   `[d, t0+24h]`; otherwise zero, with `funding_source ∈ {archive, none}` recorded and the share of
   events (and of PnL) with real funding reported. Side = sign(`p_up` − 0.5) when
-  `|p_up − 0.5| ≥ threshold`, else no trade. Sizing variants: `fixed`, `by_confidence`
-  (∝ `|p_up − 0.5|`), `by_magnitude` (target volatility / predicted `|r_24h|`, capped) and a
-  `magnitude_gate` (trade only when predicted `|r_24h|` exceeds the round-trip cost), so a
-  magnitude forecast has its own PnL line.
+  `|p_up − 0.5| ≥ trade_threshold` (a setting, default 0), else no trade. Sizing variants:
+  `fixed`, `by_confidence` (∝ `|p_up − 0.5|`), `by_magnitude` (`target_vol` / predicted
+  `|r_24h|`, capped) and a `magnitude_gate` (trade only when predicted `|r_24h|` exceeds the
+  round-trip cost), so a magnitude forecast has its own PnL line. The predicted `|r_24h|` is
+  the model's `predict_magnitude` (predictions column `magnitude_hat`); `|r_hat|` stands in
+  only for a model without one. `trade_threshold` and `target_vol` are settings and part of
+  the report's config hash.
 * Sample size is part of every result: each cell (model × decision time × subset) reports `n`,
   the bootstrap interval, and the **minimum detectable improvement** over the best baseline at
-  that `n` (Brier and accuracy). The conclusion "not predictable with these inputs" may be drawn
-  only when the interval excludes the minimum detectable improvement; otherwise the report says
-  "inconclusive at n = …". With listings from Nov 2025 the perp-era pre-holdout cohort is a few
+  that `n` (Brier and accuracy), derived from the paired comparison's own standard error:
+  MDE = (z₀.₉₇₅ + z₀.₈) × SE of the mean per-event score difference, i.e. the MDE of the test
+  the report actually runs. The closed-form unpaired bound (Bhatia-Davis for Brier) is shown
+  only for cells without a comparison and is labelled an upper bound. The conclusion "not
+  predictable with these inputs" may be drawn only when the interval excludes the minimum
+  detectable improvement; otherwise the report says "inconclusive at n = …". With listings from Nov 2025 the perp-era pre-holdout cohort is a few
   hundred events at best, so early reports will mostly be inconclusive, and the report says so.
-* `evaluate --final` refuses to run while any universe event scheduled in the holdout season
-  has `t0 + 24h` in the future or targets pending. The holdout advances at most once per closed
+* `evaluate --final` refuses to run until the holdout season is closed (now ≥ start of the
+  next season + horizon: a dataset built mid-season passes every per-row test yet cannot hold
+  the events still scheduled), while any universe event scheduled in the holdout season has
+  `t0 + 24h` in the future or targets pending, or when `events.parquet` lists a holdout-season
+  event the dataset lacks. The holdout advances at most once per closed
   season by a human edit of `holdout_season`; the previous holdout joins the folds, and after the
   first advance the live record (§10) is the primary honest number.
-* Portfolio metrics: capital rule `equal_split` with gross exposure cap 1.0 (each open position
-  holds `1 / max(n_open, 1)` of capital over its `[entry, exit]` interval); net PnL is aggregated
-  into a daily series keyed by UTC exit date and the Sharpe-like ratio, max drawdown and turnover
-  are computed on that series. Per-event mean net return and hit rate keep their block-bootstrap
-  (by season) 95 % intervals and a paired comparison against the best baseline.
-* Reproducibility: `run_id = <UTC yyyymmddTHHMMSSZ>-<sha256(dataset.parquet)[:8]>`;
+* Portfolio metrics: capital rule `equal_split` with gross exposure cap 1.0: each position
+  holds `cap × min(size, 1) / (peak n_open over its [entry, exit] interval)` for its whole
+  life — a constant weight per position, so the summed exposure never exceeds the cap; capital
+  freed when an overlapping position closes early is not redeployed (a time-varying
+  `1 / n_open(t)` share would need the price path at every concurrency change). The rule is
+  printed in the summary and leaderboard. Net PnL is aggregated into a daily series keyed by
+  UTC exit date and the Sharpe-like ratio, max drawdown (starting capital counts as the first
+  peak) and turnover are computed on that series. Per-event mean net return and hit rate keep
+  their bootstrap 95 % intervals and a paired comparison against the best baseline.
+* Bootstrap resampling: blocks by season when at least 5 seasons are present, else by UTC day
+  of `t0` (same-day dependence is kept), else iid rows; the scheme is recorded per cell. A
+  single-season block — the holdout — can therefore never report a zero-width interval, which
+  is what a season block bootstrap would degenerate to.
+* Reproducibility: `run_id = <UTC yyyymmddTHHMMSSZ>-<sha256(dataset.parquet)[:8]>` (the
+  file's bytes; a frame with no file on disk falls back to a content hash and the summary
+  records `dataset_hash_source`);
   `reports/<run_id>/summary.json` records the dataset hash, git commit and dirty flag, non-secret
   settings, library versions, all metrics, and `predictions.parquet` holds every out-of-sample
   prediction. All stochastic steps derive from `settings.random_seed` (LightGBM

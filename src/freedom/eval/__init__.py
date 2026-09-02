@@ -6,112 +6,95 @@ the OPEN of the first bar starting at or after the signal instant (never the sig
 close) with fill_lag recorded and trades beyond max_fill_lag_minutes dropped; execution cost
 per leg = slippage_floor_bps + slippage_range_coeff * range_bps(execution bar) + taker fee;
 funding accrued only with archived coverage (funding_source recorded); equal_split capital
-rule with a gross exposure cap; metrics reported for has_perp_at_t0 (headline) and all events,
-stratified by t0_source, kind, timing; run_id = <UTC ts>-<sha256(dataset)[:8]>.
-Every cell reports n and the minimum detectable improvement over the best baseline; the
-summary labels a cell "inconclusive" unless the bootstrap interval excludes it. Sizing
-variants: fixed, by_confidence, by_magnitude, magnitude_gate. `final=True` refuses while any
-holdout-season event has t0 + 24h in the future or targets pending.
+rule with a gross exposure cap (sim.CAPITAL_RULE: a constant weight per position = cap / peak
+concurrency over its interval); metrics reported for has_perp_at_t0 (headline) and all
+events, stratified by t0_source, kind, timing; run_id = <UTC ts>-<sha256(dataset.parquet)[:8]>
+(content hash of the frame only when no file exists; summary['dataset_hash_source'] says which).
+Every cell reports n, the minimum detectable improvement over the best baseline derived from
+the paired comparison's own standard error (the closed form is only a labelled upper bound
+where no comparison exists) and the bootstrap resampling scheme: blocks by season with at
+least MIN_BLOCKS seasons, else by UTC day of t0, else iid rows, so a single-season block (the
+holdout) never yields a zero-width interval. The summary labels a cell "inconclusive" unless
+the interval excludes the MDE. Sizing variants: fixed, by_confidence, by_magnitude,
+magnitude_gate, the latter two driven by the model's `predict_magnitude` forecast
+(predictions column magnitude_hat, scored as magnitude MAE against the best baseline).
+`final=True` refuses until the holdout season is closed (now >= next season start + horizon),
+while any holdout-season event has t0 + 24h in the future or targets pending, or when the
+events calendar lists a holdout-season event the dataset lacks. Provider aborts (budget
+exhausted, unavailable) from the bar loader propagate instead of becoming untraded events.
+
+Layout: folds.py (seasons, expanding folds, holdout), metrics.py (metrics, calibration,
+residual band, MDE, bootstrap), sim.py (fills, costs, funding, sizing, equal_split
+portfolio), report.py (provenance, JSON, leaderboard, files), runner.py (evaluate,
+train_final). Everything public is re-exported here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from .folds import HOLDOUT_FOLD, Fold, season_end, season_start, seasons_of, walk_forward_folds
+from .metrics import (
+    MIN_BLOCKS,
+    bootstrap_ci,
+    bootstrap_distribution,
+    brier_scores,
+    calibration_table,
+    choose_blocks,
+    classification_metrics,
+    hit_scores,
+    min_detectable_improvement,
+    paired_mde,
+    paired_se,
+    regression_metrics,
+    residual_band,
+    spearman,
+)
+from .report import (
+    dataset_sha256,
+    git_info,
+    leaderboard_markdown,
+    make_run_id,
+    to_jsonable,
+    write_reports,
+)
+from .runner import (
+    DEFAULT_BASELINES,
+    HoldoutNotReady,
+    baseline_names,
+    check_holdout_ready,
+    evaluate,
+    prepare_dataset,
+    subset_masks,
+    train_final,
+    verdict,
+)
+from .sim import (
+    CAPITAL_RULE,
+    FUNDING_ARCHIVE,
+    FUNDING_NONE,
+    SIZINGS,
+    TRADE_COLUMNS,
+    archive_funding_loader,
+    equal_split_weights,
+    fill_price,
+    funding_sum,
+    leg_cost_bps,
+    loader_paths,
+    memoised_funding,
+    portfolio_metrics,
+    position_size,
+    prepare_funding,
+    simulate,
+)
 
-import pandas as pd
-
-from ..config import Settings
-
-
-@dataclass(frozen=True)
-class Fold:
-    fold: int
-    train_idx: pd.Index
-    test_idx: pd.Index
-    test_season: str  # e.g. "2026Q2"
-
-
-def walk_forward_folds(events: pd.DataFrame, *, min_train: int, embargo_days: int,
-                       holdout_season: str | None) -> tuple[list[Fold], Fold | None]:
-    """Expanding-window folds by season (schemas.season_of(t0)). Test fold = one season;
-    train = all events with t0 < season_start - embargo_days. The holdout season (if it exists
-    in `events`) is returned separately and never appears in the fold list. `events` must
-    carry event_id and t0; folds index into it. Seasons with fewer than min_train prior events
-    are skipped."""
-    raise NotImplementedError
-
-
-def classification_metrics(p_up, y_dir) -> dict[str, float]:
-    """accuracy, balanced_accuracy, brier, log_loss, n; y_dir in {-1, +1}; zero labels dropped."""
-    raise NotImplementedError
-
-
-def regression_metrics(r_hat, r_true) -> dict[str, float]:
-    """mae, rmse, spearman_ic, n."""
-    raise NotImplementedError
-
-
-def calibration_table(p_up, y_dir, bins: int = 10) -> pd.DataFrame:
-    raise NotImplementedError
-
-
-def residual_band(r_hat, r_true, lo: float = 0.1, hi: float = 0.9) -> tuple[float, float]:
-    """Percentiles of r_true - r_hat over out-of-sample predictions."""
-    raise NotImplementedError
-
-
-def fill_price(bars: pd.DataFrame, when: pd.Timestamp, *, max_lag: pd.Timedelta) -> tuple[float, pd.Timestamp, float] | None:
-    """(open, bar_start, range_bps) of the first bar with t >= when, or None if that bar
-    starts more than max_lag after `when` or does not exist."""
-    raise NotImplementedError
-
-
-def min_detectable_improvement(n: int, metric: str, base_value: float, *, alpha: float = 0.05,
-                               power: float = 0.8) -> float:
-    """Smallest improvement in `metric` ('brier' or 'accuracy') over `base_value` detectable at
-    sample size n with a two-sided test at `alpha` and the given power (normal approximation)."""
-    raise NotImplementedError
-
-
-def simulate(predictions: pd.DataFrame, paths: Callable[[str], pd.DataFrame | None], *,
-             settings: Settings, funding: Callable[[str], pd.DataFrame | None] | None = None,
-             sizing: str = "fixed", threshold: float = 0.0, target_vol: float = 0.03) -> pd.DataFrame:
-    """Per-event trades from a predictions frame (schemas.P columns + t0, decision_time,
-    has_perp_at_t0, market). `paths(event_id)` returns the event's fine bars; `funding(market)`
-    returns archived hourly funding. Returns one row per prediction with side, entry/exit fill,
-    fill_lag_min, cost_bps, funding_bps, funding_source, gross_return, net_return, traded."""
-    raise NotImplementedError
-
-
-def portfolio_metrics(trades: pd.DataFrame, *, gross_exposure_cap: float = 1.0) -> dict[str, float]:
-    """equal_split capital rule over overlapping [entry, exit] intervals; daily PnL series keyed
-    by UTC exit date; sharpe_like, max_drawdown, turnover, n_trades, n_untraded."""
-    raise NotImplementedError
-
-
-def bootstrap_ci(values: pd.Series, stat: Callable[[pd.Series], float], *, n: int = 2000,
-                 block: pd.Series | None = None, seed: int = 7) -> tuple[float, float, float]:
-    """(point, lo95, hi95); block bootstrap by season when `block` is given."""
-    raise NotImplementedError
-
-
-def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str],
-             decision_times: list[str], final: bool = False, run_id: str | None = None,
-             target: str = "r_24h") -> dict:
-    """Walk-forward for each (model, decision_time) on folds that exclude the holdout season;
-    with final=True additionally scores the holdout once and logs it. Writes
-    reports/<run_id>/{summary.json, predictions.parquet, trades.parquet, leaderboard.md} and
-    returns the summary dict (metrics per model/decision_time/subset, trading sim, bootstrap
-    intervals, paired comparison vs best baseline, residual bands, provenance)."""
-    raise NotImplementedError
-
-
-def train_final(settings: Settings, dataset: pd.DataFrame, *, model_name: str, decision_time: str,
-                target: str = "r_24h") -> object:
-    """Fit on all non-holdout events that pass the headline filters (min_t0_confidence,
-    has_perp_at_t0 when enough events exist), attach the residual band from a walk-forward pass,
-    save under settings.models_dir/<decision_time>/<model_name>/ with model.json (decision_time,
-    dataset_sha256, git sha, config hash, trained_at, n_events, filters, holdout reference) and
-    return the model."""
-    raise NotImplementedError
+__all__ = [
+    "CAPITAL_RULE", "DEFAULT_BASELINES", "FUNDING_ARCHIVE", "FUNDING_NONE", "HOLDOUT_FOLD", "MIN_BLOCKS",
+    "SIZINGS", "TRADE_COLUMNS", "Fold", "HoldoutNotReady", "archive_funding_loader", "baseline_names",
+    "bootstrap_ci", "bootstrap_distribution", "brier_scores", "calibration_table", "check_holdout_ready",
+    "choose_blocks", "classification_metrics", "dataset_sha256", "equal_split_weights", "evaluate",
+    "fill_price", "funding_sum", "git_info", "hit_scores", "leaderboard_markdown", "leg_cost_bps",
+    "loader_paths", "make_run_id", "memoised_funding", "min_detectable_improvement", "paired_mde",
+    "paired_se", "portfolio_metrics", "position_size", "prepare_dataset", "prepare_funding",
+    "regression_metrics", "residual_band", "season_end", "season_start", "seasons_of", "simulate",
+    "spearman", "subset_masks", "to_jsonable", "train_final", "verdict", "walk_forward_folds",
+    "write_reports",
+]

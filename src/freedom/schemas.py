@@ -198,6 +198,7 @@ class P:
     test_season = "test_season"
     p_up = "p_up"
     r_hat = "r_hat"
+    magnitude_hat = "magnitude_hat"  # predicted |r_24h| (model.predict_magnitude; default |r_hat|)
     r_lo = "r_lo"  # r_hat + 10th percentile of out-of-sample residuals
     r_hi = "r_hi"  # r_hat + 90th percentile
     r_true = "r_true"
