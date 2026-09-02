@@ -1,0 +1,81 @@
+{
+ "data": {
+  "symbol": "NVDA",
+  "totalRecords": 7,
+  "tradesTable": {
+   "asOf": null,
+   "headers": {
+    "date": "Date",
+    "close": "Close/Last",
+    "volume": "Volume",
+    "open": "Open",
+    "high": "High",
+    "low": "Low"
+   },
+   "rows": [
+    {
+     "date": "09/01/2026",
+     "close": "$217.44",
+     "volume": "109,756,200",
+     "open": "$216.75",
+     "high": "$220.41",
+     "low": "$215.10"
+    },
+    {
+     "date": "08/31/2026",
+     "close": "$220.78",
+     "volume": "124,702,700",
+     "open": "$218.87",
+     "high": "$221.30",
+     "low": "$216.21"
+    },
+    {
+     "date": "08/28/2026",
+     "close": "$217.55",
+     "volume": "195,116,400",
+     "open": "$227.36",
+     "high": "$229.26",
+     "low": "$216.81"
+    },
+    {
+     "date": "08/27/2026",
+     "close": "$227.98",
+     "volume": "298,909,800",
+     "open": "$222.86",
+     "high": "$230.47",
+     "low": "$220.90"
+    },
+    {
+     "date": "08/26/2026",
+     "close": "$209.66",
+     "volume": "179,900,000",
+     "open": "$212.64",
+     "high": "$213.60",
+     "low": "$209.23"
+    },
+    {
+     "date": "08/25/2026",
+     "close": "$213.05",
+     "volume": "122,309,000",
+     "open": "$211.025",
+     "high": "$214.73",
+     "low": "$210.11"
+    },
+    {
+     "date": "08/24/2026",
+     "close": "$208.48",
+     "volume": "135,187,300",
+     "open": "$215.53",
+     "high": "$215.59",
+     "low": "$207.25"
+    }
+   ]
+  }
+ },
+ "message": null,
+ "status": {
+  "rCode": 200,
+  "bCodeMessage": null,
+  "developerMessage": null
+ }
+}
