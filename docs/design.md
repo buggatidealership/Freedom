@@ -158,7 +158,11 @@ estimate_snapshot_time, sources_used, market, listing_start, has_perp_at_t0, pen
 **Consensus provenance:** vendor estimates for past events are the vendor's final value, not
 the consensus as of `t0`; they are stored with `estimate_source = fmp_final` (upcoming rows
 carry the vendor's current, not-yet-final value as `fmp_calendar`) and the surprise
-feature group is marked non-point-in-time in reports. From now on the archiver's consensus
+feature group is marked non-point-in-time in reports: `features.groups.NON_POINT_IN_TIME`
+names it (with `perp_state.max_leverage`, §6), `estimate_source` travels with the dataset, and
+`evaluate` (summary `non_point_in_time_groups`, per-decision-time `estimate_source` counts of
+the trainable events, notes and leaderboard) and `optimize` (`best_params.json`, leaderboard,
+a flag on a best trial that used such a group) both print it. From now on the archiver's consensus
 snapshots provide `estimate_source = consensus_snapshot` with the capture time, and live
 prediction uses only those. `has_perp_at_t0 = t0 ≥ min(listing_start)` over all markets of the
 underlying; when the primary market was unlisted at `t0` but an alternate existed, the
@@ -203,7 +207,10 @@ at `post_60m` setting the event's own `r_24h` to +5.0 must leave every feature u
 Each model exposes `fit(X, y_return, y_direction)`, `predict_proba_up`, `predict_return`.
 The 10/90 % band is not a model method: for each (model, decision time) it is the empirical
 10th/90th percentile of walk-forward out-of-sample residuals `r_true − r_hat`, saved with the
-trained model and added to `r_hat` at prediction time.
+trained model and added to `r_hat` at prediction time. In the evaluation a fold's band pools
+only the folds whose test season precedes it, and the holdout's band pools only the folds
+whose test season precedes the holdout season — never a season after it, which the dataset
+holds between a season closing and the human edit that advances `holdout_season`.
 
 ## 8. Evaluation
 
@@ -237,7 +244,12 @@ trained model and added to `r_hat` at prediction time.
   round-trip cost), so a magnitude forecast has its own PnL line. The predicted `|r_24h|` is
   the model's `predict_magnitude` (predictions column `magnitude_hat`); `|r_hat|` stands in
   only for a model without one. `trade_threshold` and `target_vol` are settings and part of
-  the report's config hash.
+  the report's config hash. The simulation runs once over every row (`trades.parquet`, with a
+  `headline` flag), but its statistics and the paired PnL comparison against the best baseline
+  are computed per subset (`trading_subsets`: all rows, and the headline subset) so that a
+  leaderboard row's Sharpe and mean net PnL describe the same rows as its metric cell: a
+  pre-listing FMP-proxy print simulated at perp fees or a default-clock `t0` never reaches the
+  headline trading line.
 * Sample size is part of every result: each cell (model × decision time × subset) reports `n`,
   the bootstrap interval, and the **minimum detectable improvement** over the best baseline at
   that `n` (Brier and accuracy), derived from the paired comparison's own standard error:
@@ -251,7 +263,12 @@ trained model and added to `r_hat` at prediction time.
   next season + horizon: a dataset built mid-season passes every per-row test yet cannot hold
   the events still scheduled), while any universe event scheduled in the holdout season has
   `t0 + 24h` in the future or targets pending, or when `events.parquet` lists a holdout-season
-  event the dataset lacks. The holdout advances at most once per closed
+  event the dataset lacks. A holdout event whose fine path was chosen and whose `P0` resolved
+  but whose `+24h` label is NaN is unobservable by construction (§2: a Friday or pre-holiday
+  AMC release on the FMP proxy, or a corporate action inside `[P0, t0 + 24h]`); no rebuild can
+  fill it, so it does not block the run: the summary counts and names such events
+  (`holdout.unobservable_24h`) and they are absent from the holdout cells. A `target_missing`
+  event without a resolved path is a data gap and still refuses. The holdout advances at most once per closed
   season by a human edit of `holdout_season`; the previous holdout joins the folds, and after the
   first advance the live record (§10) is the primary honest number.
 * Portfolio metrics: capital rule `equal_split` with gross exposure cap 1.0: each position
@@ -285,7 +302,11 @@ floor. Per study the search space is: model family and hyper-parameters, feature
 The objective is the walk-forward metric on folds that exclude the pinned holdout season. The
 leaderboard is per decision time; `optimize` never scores the holdout. The report states the
 number of trials next to the improvement over the best baseline and the bootstrap probability
-that the improvement is noise.
+that the improvement is noise, computed as a paired bootstrap on the same events with the §8
+resampling scheme (season blocks with at least 5 test seasons, else UTC day of `t0`, else iid
+rows; the scheme is recorded as `p_noise_resampling`), so the number is comparable with the
+paired comparison `evaluate` reports for the same models. The admissible non-point-in-time
+groups (§5) are listed, and a best trial that used one is flagged.
 
 ## 10. Live prediction
 

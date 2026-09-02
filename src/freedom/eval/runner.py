@@ -19,11 +19,21 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .. import features as features_mod
 from .. import models as models_mod
 from ..config import Settings
+from ..features.groups import NON_POINT_IN_TIME, NON_POINT_IN_TIME_KEYS
 from ..models import MIN_TRAIN_ROWS
 from ..schemas import DECISION_TIMES, SCHEMA_VERSION, D, E, P, T, T0Source
-from .folds import HOLDOUT_FOLD, Fold, season_end, seasons_of, t0_utc, walk_forward_folds
+from .folds import (
+    HOLDOUT_FOLD,
+    Fold,
+    season_end,
+    season_start,
+    seasons_of,
+    t0_utc,
+    walk_forward_folds,
+)
 from .metrics import (
     EPS,
     MDE_METRICS,
@@ -86,8 +96,14 @@ MAX_NONFINITE_P_SHARE = 0.1  # a model returning more non-finite p_up than this 
 HEADLINE_SOURCES = frozenset({T0Source.sec_8k.value, T0Source.manual.value, T0Source.detected.value})
 STRATA = (E.t0_source, E.kind, E.timing)
 CALIBRATION_SUBSETS = ("all", "headline")
+# the trading simulation runs once over every row; its statistics (and the paired PnL comparison
+# against the best baseline) are computed per subset so the leaderboard's trading columns describe
+# the same rows as the metric cell beside them ("all" = every simulated row, as trades.parquet)
+TRADING_SUBSETS = ("all", "headline")
 META_COLUMNS = [E.t0, E.t0_source, E.t0_confidence, E.kind, E.timing, E.has_perp_at_t0, E.market,
-                "season", "price_source", "target_missing"]
+                E.estimate_source, "season", "price_source", "target_missing"]
+ESTIMATE_SOURCE_MISSING = "missing"  # estimate_source label of an event with no consensus provenance
+ESTIMATE_SOURCE_UNAVAILABLE = "unavailable"  # the dataset (and events calendar) carry no such column
 Y, DIR, TRAINABLE = "_y", "_dir", "_trainable"
 
 
@@ -125,7 +141,7 @@ def prepare_dataset(dataset: pd.DataFrame, target: str, settings: Settings) -> p
     df[E.t0] = t0_utc(df)
     df["season"] = seasons_of(df[E.t0])
     for col, default in ((E.t0_source, "unknown"), (E.kind, "unknown"), (E.timing, "unknown"),
-                         (E.market, None), (T.price_source, None)):
+                         (E.market, None), (T.price_source, None), (E.estimate_source, None)):
         if col not in df.columns:
             df[col] = default
     if E.t0_confidence not in df.columns:
@@ -153,6 +169,60 @@ def prepare_dataset(dataset: pd.DataFrame, target: str, settings: Settings) -> p
 
 def feature_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if str(c).startswith(D.feature_prefix)]
+
+
+def non_point_in_time_in_scope(feats: list[str], decision_time: str) -> dict[str, str]:
+    """{group: reason} for the features.groups.NON_POINT_IN_TIME groups that are admissible at
+    `decision_time` and have at least one of their non-point-in-time keys among the feature
+    columns `feats` (design §5, §6). The learners here are fitted on every feature column, so
+    a group in scope was consumed by every trained model of that decision time."""
+    if not feats:
+        return {}
+    admissible = set(features_mod.admissible_groups(decision_time))
+    present = set(map(str, feats))
+    out: dict[str, str] = {}
+    for group, reason in NON_POINT_IN_TIME.items():
+        if group not in admissible:
+            continue
+        keys = NON_POINT_IN_TIME_KEYS.get(group, ())
+        if any(f"{D.feature_prefix}{k}" in present for k in keys):
+            out[group] = reason
+    return out
+
+
+def estimate_source_counts(rows: pd.DataFrame) -> dict[str, int]:
+    """{estimate_source: n} over `rows` (design §5: fmp_final / nasdaq_final are the vendor's
+    final consensus, consensus_snapshot is point-in-time); events without a value count as
+    'missing', and a frame without the column reports every row as 'unavailable'."""
+    if E.estimate_source not in rows.columns:
+        return {ESTIMATE_SOURCE_UNAVAILABLE: int(len(rows))} if len(rows) else {}
+
+    def label(v: Any) -> str:
+        try:
+            if v is None or pd.isna(v):  # None, NaN, NaT and pd.NA alike
+                return ESTIMATE_SOURCE_MISSING
+        except (TypeError, ValueError):
+            pass
+        return str(v)
+
+    labels = rows[E.estimate_source].map(label)
+    return {str(k): int(v) for k, v in labels.value_counts().sort_index().items()}
+
+
+def attach_estimate_source(df: pd.DataFrame, events: pd.DataFrame | None) -> tuple[pd.DataFrame, bool]:
+    """(df, filled): `df[estimate_source]` filled from the events calendar (event_id ->
+    estimate_source) when the dataset was built before the column joined features.META_COLUMNS
+    (column absent or every value None); a dataset that carries values is left alone."""
+    if events is None or E.estimate_source not in events.columns or E.event_id not in events.columns:
+        return df, False
+    if E.estimate_source in df.columns and df[E.estimate_source].notna().any():
+        return df, False
+    cal = events[[E.event_id, E.estimate_source]].dropna(subset=[E.event_id]).copy()
+    cal[E.event_id] = cal[E.event_id].astype(str)
+    lookup = cal.drop_duplicates(E.event_id, keep="last").set_index(E.event_id)[E.estimate_source]
+    df = df.copy()
+    df[E.estimate_source] = df[D.event_id].astype(str).map(lookup)
+    return df, True
 
 
 def _X(df: pd.DataFrame, feats: list[str]) -> pd.DataFrame:
@@ -236,10 +306,12 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
                   *, holdout: Fold | None) -> pd.DataFrame:
     """Out-of-sample predictions (schemas.P columns + event metadata) for every test fold and,
     when `holdout` is given, for the holdout fold (fold = HOLDOUT_FOLD). r_lo/r_hi for a fold
-    come from the residuals of the *earlier* folds only (NaN for the first); the holdout uses
-    all walk-forward residuals."""
+    come from the residuals of the walk-forward folds whose test season *precedes* it (NaN for
+    the first); the holdout likewise uses only the folds whose test season starts before the
+    holdout season, never a season after it (the dataset holds post-holdout seasons between a
+    season closing and the human edit that advances holdout_season)."""
     frames: list[pd.DataFrame] = []
-    residuals: list[np.ndarray] = []
+    residuals: dict[str, np.ndarray] = {}  # test season -> finite out-of-sample residuals of that fold
     plan = list(folds) + ([holdout] if holdout is not None else [])
     for fold in plan:
         train = sub.loc[fold.train_idx]
@@ -247,7 +319,9 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
         test = sub.loc[fold.test_idx]
         p, r, mag, model = _fit_predict(name, settings.random_seed, train, test, feats)
         fell_back = "direction" in getattr(model, "fallback_heads_", set())
-        pooled = np.concatenate(residuals) if residuals else np.array([], dtype=float)
+        cutoff = season_start(fold.test_season)
+        use = [v for season, v in residuals.items() if season_start(season) < cutoff]
+        pooled = np.concatenate(use) if use else np.array([], dtype=float)
         q10, q90 = residual_band(np.zeros(len(pooled)), pooled) if len(pooled) else (math.nan, math.nan)
         frame = test[[D.event_id, D.decision_time, *META_COLUMNS]].copy()
         frame[P.model] = name
@@ -264,7 +338,7 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
         frames.append(frame)
         if fold.fold != HOLDOUT_FOLD:
             res = frame[P.r_true].to_numpy(dtype=float) - r
-            residuals.append(res[np.isfinite(res)])
+            residuals[fold.test_season] = res[np.isfinite(res)]
     cols = [P.event_id, P.decision_time, P.model, P.fold, P.test_season, P.p_up, P.r_hat, P.magnitude_hat,
             P.r_lo, P.r_hi, P.r_true, P.direction_true, FALLBACK, *META_COLUMNS]
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=cols)
@@ -496,59 +570,55 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
                     cell["mde"][metric] = min_detectable_improvement(cell["n_direction"], metric, base_value)
                     cell["mde_source"][metric] = MDE_UPPER_BOUND
 
-    # trading simulation, all sizing rules in one pass per model
+    # trading simulation: one pass per model over every row (trades.parquet keeps them all, with
+    # a `headline` flag), then statistics and the paired PnL comparison per TRADING_SUBSETS entry
+    # so that a headline row never carries the PnL of pre-listing FMP-proxy prints simulated at
+    # perp fees or of default-clock (calendar_flag / timing_unknown) t0s
     trade_frames: list[pd.DataFrame] = []
-    trading: dict[str, dict[str, dict]] = {}
-    pnl_by_event: dict[tuple[str, str], pd.Series] = {}
+    trading: dict[str, dict[str, dict[str, dict]]] = {}  # model -> subset -> sizing -> stats
+    pnl_by_event: dict[tuple[str, str, str], pd.Series] = {}
     for name, preds in blocks.items():
         trades = simulate_rows(preds, bar_index, settings=settings, funding=funding_fn, sizings=SIZINGS,
                                threshold=settings.trade_threshold, target_vol=settings.target_vol)
+        headline_ids = pd.Index(preds.loc[masks[name]["headline"], P.event_id].astype(str))
+        trades["headline"] = trades[P.event_id].astype(str).isin(headline_ids).to_numpy()
         trade_frames.append(trades)
         trading[name] = {}
+        for subset in TRADING_SUBSETS:
+            ids = None if subset == "all" else pd.Index(preds.loc[masks[name][subset], P.event_id].astype(str))
+            trading[name][subset] = {}
+            for sizing in SIZINGS:
+                t = trades[trades["sizing"] == sizing]
+                if ids is not None:
+                    t = t[t[P.event_id].astype(str).isin(ids)]
+                stats, pnl = _trading_stats(t, subset=subset, settings=settings, n_boot=n_boot, seed=seed)
+                trading[name][subset][sizing] = stats
+                pnl_by_event[(name, subset, sizing)] = pnl
+    for subset in TRADING_SUBSETS:
         for sizing in SIZINGS:
-            t = trades[trades["sizing"] == sizing]
-            pm = portfolio_metrics(t, gross_exposure_cap=settings.gross_exposure_cap)
-            traded = t[t["traded"]]
-            pnl = pd.Series(traded["pnl"].to_numpy(dtype=float), index=pd.Index(traded[P.event_id].astype(str)))
-            labels = pd.DataFrame({"season": traded[P.test_season].to_numpy(), "day": _day_labels(traded)},
-                                  index=pnl.index)
-            scheme, block = _blocks(labels)
-            stats: dict[str, Any] = dict(pm)
-            stats["resampling"] = scheme
-            stats["mean_pnl"] = _ci_dict(pnl, lambda v: float(v.mean()), block, n_boot, seed)
-            stats["hit_rate"] = _ci_dict(pnl, lambda v: float((v > 0).mean()), block, n_boot, seed)
-            stats["untraded_reasons"] = {str(k): int(v) for k, v in t.loc[~t["traded"], "untraded_reason"].value_counts().items()}
-            with_funding = traded["funding_source"] == FUNDING_ARCHIVE
-            stats["funding_share_events"] = float(with_funding.mean()) if len(traded) else math.nan
-            abs_pnl = traded["pnl"].abs()
-            stats["funding_share_abs_pnl"] = float(abs_pnl[with_funding].sum() / abs_pnl.sum()) if len(traded) and abs_pnl.sum() > 0 else math.nan
-            stats["comparison"] = None
-            trading[name][sizing] = stats
-            all_ids = pd.Index(t[P.event_id].astype(str))
-            pnl_by_event[(name, sizing)] = pnl.reindex(all_ids[~all_ids.duplicated()]).fillna(0.0)
-    for sizing in SIZINGS:
-        best_b = None
-        for name in blocks:
-            if name in baselines:
-                v = trading[name][sizing]["mean_pnl"]["point"]
-                if v is not None and np.isfinite(v) and (best_b is None or v > best_b[1]):
-                    best_b = (name, v)
-        for name in blocks:
-            if name in baselines or best_b is None:
-                continue
-            a, b = pnl_by_event[(name, sizing)], pnl_by_event[(best_b[0], sizing)]
-            common = a.index.intersection(b.index)
-            if len(common) == 0:
-                continue
-            diff = a.loc[common] - b.loc[common]
-            scheme, block = _blocks(scores[name][["season", "day"]].reindex(common).fillna("?"))
-            dist = bootstrap_distribution(diff, lambda v: float(v.mean()), n=n_boot, block=block, seed=seed)
-            finite = dist[np.isfinite(dist)]
-            lo, hi = (float(x) for x in np.percentile(finite, [2.5, 97.5])) if len(finite) else (math.nan, math.nan)
-            trading[name][sizing]["comparison"] = {"baseline": best_b[0], "improvement": float(diff.mean()),
-                                                   "ci": [lo, hi], "p_noise": float(np.mean(finite <= 0)) if len(finite) else math.nan,
-                                                   "se": paired_se(diff), "resampling": scheme,
-                                                   "verdict": verdict("mean_pnl", lo, hi, None, int(len(diff)))}
+            best_b = None
+            for name in blocks:
+                if name in baselines:
+                    v = trading[name][subset][sizing]["mean_pnl"]["point"]
+                    if v is not None and np.isfinite(v) and (best_b is None or v > best_b[1]):
+                        best_b = (name, v)
+            for name in blocks:
+                if name in baselines or best_b is None:
+                    continue
+                a, b = pnl_by_event[(name, subset, sizing)], pnl_by_event[(best_b[0], subset, sizing)]
+                common = a.index.intersection(b.index)
+                if len(common) == 0:
+                    continue
+                diff = a.loc[common] - b.loc[common]
+                scheme, block = _blocks(scores[name][["season", "day"]].reindex(common).fillna("?"))
+                dist = bootstrap_distribution(diff, lambda v: float(v.mean()), n=n_boot, block=block, seed=seed)
+                finite = dist[np.isfinite(dist)]
+                lo, hi = (float(x) for x in np.percentile(finite, [2.5, 97.5])) if len(finite) else (math.nan, math.nan)
+                trading[name][subset][sizing]["comparison"] = {
+                    "baseline": best_b[0], "improvement": float(diff.mean()), "ci": [lo, hi],
+                    "p_noise": float(np.mean(finite <= 0)) if len(finite) else math.nan,
+                    "se": paired_se(diff), "resampling": scheme,
+                    "verdict": verdict("mean_pnl", lo, hi, None, int(len(diff)))}
 
     per_model: dict[str, Any] = {}
     for name, preds in blocks.items():
@@ -556,12 +626,40 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
         q10, q90 = residual_band(res[P.r_hat], res[P.r_true])
         banded = res[res[P.r_lo].notna() & res[P.r_hi].notna()]
         coverage = float(((banded[P.r_true] >= banded[P.r_lo]) & (banded[P.r_true] <= banded[P.r_hi])).mean()) if len(banded) else math.nan
+        # `trading` is the every-row ("all") simulation, the shape the CLI table reads;
+        # `trading_subsets` holds the same statistics per TRADING_SUBSETS entry
         per_model[name] = {"is_baseline": name in baselines, "subsets": cells[name],
                            "residual_band": {"q10": q10, "q90": q90, "n": int(len(res)), "coverage": coverage,
                                              "n_with_band": int(len(banded))},
-                           "trading": trading[name]}
+                           "trading": trading[name]["all"], "trading_subsets": trading[name]}
     trades_all = pd.concat(trade_frames, ignore_index=True) if trade_frames else pd.DataFrame()
     return per_model, best, trades_all
+
+
+def _trading_stats(t: pd.DataFrame, *, subset: str, settings: Settings, n_boot: int,
+                   seed: int) -> tuple[dict[str, Any], pd.Series]:
+    """Portfolio metrics, bootstrap intervals of the per-event mean net PnL and hit rate,
+    untraded reasons and funding shares of one (model, sizing, subset) slice of simulated
+    trades; also the per-event PnL series (0 for untraded events) the paired comparison uses."""
+    pm = portfolio_metrics(t, gross_exposure_cap=settings.gross_exposure_cap)
+    traded = t[t["traded"]]
+    pnl = pd.Series(traded["pnl"].to_numpy(dtype=float), index=pd.Index(traded[P.event_id].astype(str)))
+    labels = pd.DataFrame({"season": traded[P.test_season].to_numpy(), "day": _day_labels(traded)}, index=pnl.index)
+    scheme, block = _blocks(labels)
+    stats: dict[str, Any] = dict(pm)
+    stats["subset"] = subset
+    stats["n_events"] = int(t[P.event_id].nunique())
+    stats["resampling"] = scheme
+    stats["mean_pnl"] = _ci_dict(pnl, lambda v: float(v.mean()), block, n_boot, seed)
+    stats["hit_rate"] = _ci_dict(pnl, lambda v: float((v > 0).mean()), block, n_boot, seed)
+    stats["untraded_reasons"] = {str(k): int(v) for k, v in t.loc[~t["traded"], "untraded_reason"].value_counts().items()}
+    with_funding = traded["funding_source"] == FUNDING_ARCHIVE
+    stats["funding_share_events"] = float(with_funding.mean()) if len(traded) else math.nan
+    abs_pnl = traded["pnl"].abs()
+    stats["funding_share_abs_pnl"] = float(abs_pnl[with_funding].sum() / abs_pnl.sum()) if len(traded) and abs_pnl.sum() > 0 else math.nan
+    stats["comparison"] = None
+    all_ids = pd.Index(t[P.event_id].astype(str))
+    return stats, pnl.reindex(all_ids[~all_ids.duplicated()]).fillna(0.0)
 
 
 def _ci_dict(values: pd.Series, stat: Callable[[pd.Series], float], block: pd.Series | None, n_boot: int,
@@ -578,9 +676,16 @@ def check_holdout_ready(df: pd.DataFrame, settings: Settings, now: pd.Timestamp,
     """The holdout rows, or HoldoutNotReady when no holdout season is pinned, the season is not
     closed yet (now < start of the next season + horizon: a dataset built mid-season cannot
     contain the events still scheduled in it), the dataset has no holdout events, any holdout
-    event has t0 + horizon in the future, any holdout row is target_missing / pending, or --
-    when the events calendar `events` (events.parquet: event_id, t0) is given -- an event
-    scheduled in the holdout season is missing from the dataset."""
+    event has t0 + horizon in the future, any holdout row is pending or target_missing without
+    a resolved price path, or -- when the events calendar `events` (events.parquet: event_id,
+    t0) is given -- an event scheduled in the holdout season is missing from the dataset.
+
+    A holdout event whose fine path was chosen and whose p0 resolved but whose +24h label is
+    NaN is unobservable by construction (design §2: the +24h checkpoint had no bar within the
+    staleness limit, as for the FMP proxy's 04:00-19:55 ET session when t0 + 24h falls in an
+    XNYS closure, or a corporate action inside [P0, t0 + 24h]); no rebuild can fill it, so it
+    never blocks the run. Such event ids are returned in `hold.attrs['unobservable_24h']` and
+    the scorer leaves them out of the holdout cells."""
     season = settings.holdout_season
     if not season:
         raise HoldoutNotReady("no holdout_season is pinned in settings; nothing to score")
@@ -599,11 +704,17 @@ def check_holdout_ready(df: pd.DataFrame, settings: Settings, now: pd.Timestamp,
         raise HoldoutNotReady(f"{future[D.event_id].nunique()} holdout event(s) have t0 + {settings.horizon_hours}h in the "
                               f"future (latest t0 {latest.isoformat()}); the season {season} is not closed")
     missing = hold["target_missing"].astype(bool)
-    if E.pending in hold.columns:
-        missing |= hold[E.pending].astype(bool)
-    if missing.any():
-        n = int(hold.loc[missing, D.event_id].nunique())
+    pending = hold[E.pending].astype(bool) if E.pending in hold.columns else pd.Series(False, index=hold.index)
+    resolved = hold[T.price_source].notna()
+    if T.p0 in hold.columns:
+        resolved &= pd.to_numeric(hold[T.p0], errors="coerce").notna()
+    unobservable = missing & resolved & ~pending
+    blocking = (missing | pending) & ~unobservable
+    if blocking.any():
+        n = int(hold.loc[blocking, D.event_id].nunique())
         raise HoldoutNotReady(f"{n} holdout event(s) have missing or pending targets; complete the dataset first")
+    hold = hold.copy()
+    hold.attrs["unobservable_24h"] = sorted(hold.loc[unobservable, D.event_id].astype(str).unique())
     if events is not None and len(events):
         for col in (E.event_id, E.t0):
             if col not in events.columns:
@@ -645,7 +756,11 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     the archive). `n_boot` bootstrap replicates per interval; `now` overrides the clock used by
     the final-run guard. `events` is the earnings calendar (events.parquet; default: read from
     settings.events_path when it exists) that a final run cross-checks for holdout-season
-    events missing from the dataset. `dataset` must be the content of `dataset_path` (default:
+    events missing from the dataset and that supplies `estimate_source` per event when the
+    dataset predates that column. Trading statistics come per subset (`trading_subsets`, see
+    TRADING_SUBSETS; `trading` is the every-row entry) and the summary marks the non-point-in-time
+    feature groups in scope (features.groups.NON_POINT_IN_TIME) with the estimate_source
+    breakdown of the trainable events. `dataset` must be the content of `dataset_path` (default:
     settings.dataset_path when it exists), whose file bytes give the dataset hash in run_id;
     without a file the frame's content hash is used and summary['dataset_hash_source'] says so.
     Provider errors from the default bar loader (budget exhausted, provider unavailable)
@@ -662,10 +777,16 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     df = prepare_dataset(dataset, target, settings)
     ds_hash, hash_source = _dataset_hash(settings, dataset, dataset_path)
     run_id = run_id or make_run_id(ds_hash, now)
+    if events is None and settings.events_path.exists():
+        events = pd.read_parquet(settings.events_path)
+    df, filled = attach_estimate_source(df, events)
+    # a dataset built before estimate_source joined features.META_COLUMNS, with no calendar to
+    # fill it, reports the provenance of its consensus inputs as 'unavailable'
+    estimate_source_known = E.estimate_source in dataset.columns or filled
+    holdout_unobservable: list[str] = []
     if final:
-        if events is None and settings.events_path.exists():
-            events = pd.read_parquet(settings.events_path)
-        check_holdout_ready(df, settings, now, events=events)
+        hold = check_holdout_ready(df, settings, now, events=events)
+        holdout_unobservable = list(hold.attrs.get("unobservable_24h", []))
     scorings_before = count_holdout_scorings(settings.holdout_log_path)
     bar_index = memoised_bar_index(paths if paths is not None else loader_paths(settings, df))
     funding_fn = memoised_funding(funding if funding is not None else archive_funding_loader(settings))
@@ -713,6 +834,12 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
                      "n_target_missing": int(sub["target_missing"].sum())}
         if T.continuation in sub.columns and T.r("24h") in sub.columns:
             extras[d]["continuation_dead_band_n"] = int((sub[T.r("24h")].notna() & sub[T.continuation].isna()).sum())
+        # design §5/§6: the inputs that were not knowable at t0, and how many trainable events
+        # carry a vendor-final consensus rather than a point-in-time snapshot
+        extras[d]["non_point_in_time_groups"] = sorted(non_point_in_time_in_scope(feats, d))
+        trainable_rows = sub[sub[TRAINABLE]]
+        extras[d]["estimate_source"] = (estimate_source_counts(trainable_rows) if estimate_source_known
+                                        else {ESTIMATE_SOURCE_UNAVAILABLE: int(len(trainable_rows))})
         blocks: dict[str, pd.DataFrame] = {}
         hold_blocks: dict[str, pd.DataFrame] = {}
         for name in model_names:
@@ -749,7 +876,9 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     predictions = pd.concat(pred_frames, ignore_index=True)
     trades_all = pd.concat([t for t in trade_frames if len(t)], ignore_index=True) if any(len(t) for t in trade_frames) else pd.DataFrame()
     git = git_info()
-    notes = _notes(results, extras, scorings_before, settings)
+    non_pit = {g: reason for d in decision_times for g, reason in non_point_in_time_in_scope(feats, d).items()}
+    notes = _notes(results, extras, scorings_before, settings, model_names=model_names, baselines=baselines,
+                   holdout_unobservable=holdout_unobservable)
     summary: dict[str, Any] = {
         "run_id": run_id, "created_at": now, "final": bool(final), "target": target,
         "schema_version": SCHEMA_VERSION, "dataset_sha256": ds_hash, "dataset_hash_source": hash_source,
@@ -760,11 +889,14 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
         "baselines": sorted(b for b in model_names if b in baselines),
         "holdout": {"season": settings.holdout_season, "scorings_before": scorings_before,
                     "scorings_after": scorings_before, "scored_now": bool(final),
-                    "n_events": int((df["season"] == settings.holdout_season)[df[D.decision_time] == decision_times[0]].sum()) if settings.holdout_season else 0},
+                    "n_events": int((df["season"] == settings.holdout_season)[df[D.decision_time] == decision_times[0]].sum()) if settings.holdout_season else 0,
+                    "n_unobservable_24h": len(holdout_unobservable), "unobservable_24h": holdout_unobservable},
         "folds": folds_info, "skipped_seasons": skipped, "cohorts": extras,
+        "non_point_in_time_groups": non_pit,
         "best_baseline": best_baseline, "results": results,
         "holdout_results": holdout_results if final else None,
-        "sizings": list(SIZINGS), "n_boot": int(n_boot), "capital_rule": CAPITAL_RULE,
+        "sizings": list(SIZINGS), "trading_subsets": list(TRADING_SUBSETS), "n_boot": int(n_boot),
+        "capital_rule": CAPITAL_RULE,
         "mde_sources": {MDE_PAIRED: "MDE = (z_0.975 + z_0.8) * SE of the mean paired score difference vs the best baseline",
                         MDE_UPPER_BOUND: "no paired comparison: closed-form unpaired bound, conservative (larger)"},
         "resampling": "block bootstrap by season with at least 5 seasons, else by UTC day of t0, else iid rows; "
@@ -782,9 +914,27 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     return summary
 
 
-def _notes(results: dict[str, Any], extras: dict[str, Any], scorings_before: int, settings: Settings) -> list[str]:
+def _notes(results: dict[str, Any], extras: dict[str, Any], scorings_before: int, settings: Settings, *,
+           model_names: list[str], baselines: frozenset[str], holdout_unobservable: list[str]) -> list[str]:
     notes = [f"holdout season {settings.holdout_season} had been scored {scorings_before} time(s) before this run; "
              "discount any holdout number accordingly"]
+    if holdout_unobservable:
+        shown = ", ".join(holdout_unobservable[:5]) + (", ..." if len(holdout_unobservable) > 5 else "")
+        notes.append(f"{len(holdout_unobservable)} holdout event(s) have a price path but no +24h label by construction "
+                     "(the +24h checkpoint had no bar within the staleness limit: the FMP proxy with t0 + 24h in an "
+                     "XNYS closure, or a corporate action inside [P0, t0 + 24h]; design §2) and are excluded from "
+                     f"the holdout cells: {shown}")
+    # every learner is fitted on every feature column, so a non-point-in-time group in scope was
+    # consumed by every trained model (and by surprise_sign, which reads the surprise itself)
+    consumers = [m for m in model_names if m not in baselines or m == "surprise_sign"]
+    for d, cohort in extras.items():
+        groups = cohort.get("non_point_in_time_groups") or []
+        if not groups or not consumers:
+            continue
+        reasons = "; ".join(f"{g} ({NON_POINT_IN_TIME.get(g, 'not point-in-time')})" for g in groups)
+        notes.append(f"{d}: non-point-in-time inputs in scope: {reasons}; estimate_source of the trainable events "
+                     f"{cohort.get('estimate_source') or {}}; learners here use every feature column, so "
+                     f"{', '.join(consumers)} consumed them and their cells are not evidence about point-in-time predictability")
     for d, per_model in results.items():
         n_cells = n_inconclusive = n_identical = 0
         for res in per_model.values():
