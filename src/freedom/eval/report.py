@@ -31,8 +31,18 @@ def utcnow() -> pd.Timestamp:
     return pd.Timestamp.now(tz="UTC")
 
 
-def dataset_sha256(dataset: pd.DataFrame) -> str:
-    """Deterministic content hash of the dataset frame (column names + row hashes)."""
+def dataset_sha256(dataset: pd.DataFrame | Path | str) -> str:
+    """sha256 of the dataset. Given a path, the hash of the parquet file's bytes, which is what
+    design §8 puts in run_id (`sha256(dataset.parquet)`) and what the CLI / optimize must use
+    too; given a frame, a deterministic content hash (column names + row hashes) for datasets
+    that only exist in memory. The two differ, so a report's 'dataset_hash_source' says which
+    one it carries."""
+    if isinstance(dataset, (Path, str)):
+        h = hashlib.sha256()
+        with Path(dataset).open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
     h = hashlib.sha256()
     h.update("|".join(map(str, dataset.columns)).encode())
     try:
@@ -175,13 +185,22 @@ def leaderboard_markdown(summary: dict[str, Any]) -> str:
     lines.append("Comparisons are against the best baseline per metric (named per row). A cell "
                  "reads `improves` only when the paired bootstrap interval excludes 0 from above, "
                  "`worse` when it lies below 0, `not_predictable` only when it excludes the minimum "
-                 "detectable improvement (MDE) at that n, and `inconclusive at n = …` otherwise.")
+                 "detectable improvement (MDE) at that n, and `inconclusive at n = …` otherwise. "
+                 "The MDE is derived from the paired comparison's own standard error "
+                 "((z₀.₉₇₅ + z₀.₈) × SE of the mean paired score difference); a value marked ‡ is the "
+                 "closed-form unpaired upper bound shown only where no comparison exists. Intervals "
+                 "use a block bootstrap by season when at least 5 seasons are present, else by UTC day "
+                 "of t0, else iid rows (the `resampling` column; a single-season block such as the "
+                 "holdout can never use season blocks).")
     lines.append("")
+    if summary.get("capital_rule"):
+        lines.append(f"Trading columns: {summary['capital_rule']}.")
+        lines.append("")
     for d, per_model in (summary.get("results") or {}).items():
         lines.append(f"## {d}")
         lines.append("")
-        lines.append("| model | subset | n | accuracy [95% CI] | brier [95% CI] | IC | MAE | Δbrier vs best baseline [95% CI] | MDE (brier) | verdict | sharpe (fixed) | mean net (bp, fixed) |")
-        lines.append("|---|---|---:|---|---|---:|---:|---|---:|---|---:|---:|")
+        lines.append("| model | subset | n | resampling | accuracy [95% CI] | brier [95% CI] | IC | MAE | magnitude MAE | Δbrier vs best baseline [95% CI] | MDE (brier) | verdict | sharpe (fixed) | mean net (bp, fixed) |")
+        lines.append("|---|---|---:|---|---|---|---:|---:|---:|---|---:|---|---:|---:|")
         for model, res in per_model.items():
             subsets = res.get("subsets") or {}
             subset = "headline" if subsets.get("headline", {}).get("n") else "all"
@@ -194,11 +213,14 @@ def leaderboard_markdown(summary: dict[str, Any]) -> str:
                 verdict = comp.get("verdict") or ""
             else:
                 delta, verdict = ("baseline" if res.get("is_baseline") else "–"), ""
+            mde = _fmt((cell.get("mde") or {}).get("brier"), 4)
+            if (cell.get("mde_source") or {}).get("brier") == "closed_form_upper_bound" and mde != "–":
+                mde += " ‡"
             lines.append(
-                f"| {model} | {subset} | {_fmt(cell.get('n'))} | {_fmt(cell.get('accuracy'))}"
+                f"| {model} | {subset} | {_fmt(cell.get('n'))} | {cell.get('resampling') or '–'} | {_fmt(cell.get('accuracy'))}"
                 f"{_fmt_ci((cell.get('ci') or {}).get('accuracy'))} | {_fmt(cell.get('brier'), 4)}"
                 f"{_fmt_ci((cell.get('ci') or {}).get('brier'), 4)} | {_fmt(cell.get('spearman_ic'))} | "
-                f"{_fmt(cell.get('mae'), 4)} | {delta} | {_fmt((cell.get('mde') or {}).get('brier'), 4)} | "
+                f"{_fmt(cell.get('mae'), 4)} | {_fmt(cell.get('magnitude_mae'), 4)} | {delta} | {mde} | "
                 f"{verdict} | {_fmt(trading.get('sharpe_like'), 2)} | "
                 f"{_fmt(mean_pnl * 1e4 if isinstance(mean_pnl, (int, float)) and mean_pnl is not None else None, 1)} |")
         lines.append("")

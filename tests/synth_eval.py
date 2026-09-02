@@ -1,8 +1,8 @@
 """Synthetic dataset, price paths, funding and stand-in models for the eval tests.
 
 Everything is generated from a fixed seed and nothing touches the network. The stand-in
-models (`zero`, `base_rate`, `linear`) are registered only when the models package does not
-already provide them, so these tests keep working once the real models land.
+models (`zero`, `base_rate`, `hist_abs_mean`, `linear`) are registered only when the models
+package does not already provide them, so these tests keep working once the real models land.
 """
 
 from __future__ import annotations
@@ -182,6 +182,26 @@ class BaseRateModel(_Fake):
         return np.full(len(X), self.r_)
 
 
+class HistAbsMeanModel(_Fake):
+    """The magnitude baseline's shape: base-rate direction, no return forecast (r_hat = 0)
+    and the training mean |r| as the magnitude forecast."""
+
+    def fit(self, X, y_return, y_direction):
+        self.feature_names_ = list(X.columns)
+        self.p_ = float(np.mean(np.asarray(y_direction) > 0))
+        self.abs_ = float(np.mean(np.abs(np.asarray(y_return, dtype=float))))
+        return self
+
+    def predict_proba_up(self, X):
+        return np.full(len(X), self.p_)
+
+    def predict_return(self, X):
+        return np.zeros(len(X))
+
+    def predict_magnitude(self, X):
+        return np.full(len(X), self.abs_)
+
+
 class LinearModel(_Fake):
     """Closed-form ridge for the return and a strongly regularised logistic for the direction,
     on standardised features with NaN imputed to the training mean."""
@@ -222,7 +242,7 @@ class LinearModel(_Fake):
         return self._z(X) @ self.w_ + self.b_
 
 
-FAKES = {"zero": ZeroModel, "base_rate": BaseRateModel, "linear": LinearModel}
+FAKES = {"zero": ZeroModel, "base_rate": BaseRateModel, "hist_abs_mean": HistAbsMeanModel, "linear": LinearModel}
 
 
 def register_fakes() -> None:

@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     slippage_range_coeff: float = 0.25  # per leg: + coeff * (high-low)/open of the execution bar
     max_fill_lag_minutes: float = 5.0  # a fill later than this after the signal is not traded
     gross_exposure_cap: float = 1.0  # equal_split capital rule across overlapping positions
+    trade_threshold: float = 0.0  # simulation: no trade unless |p_up - 0.5| >= this
+    target_vol: float = 0.03  # by_magnitude sizing: size = target_vol / predicted |r_24h|, capped at 1
     min_train_events: int = 120
     embargo_days: int = 2
     min_t0_confidence: float = 0.6  # dataset filter; fixed per run, never a search dimension

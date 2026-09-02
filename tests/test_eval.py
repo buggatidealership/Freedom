@@ -1,4 +1,6 @@
+import hashlib
 import json
+import logging
 import math
 
 import numpy as np
@@ -6,6 +8,9 @@ import pandas as pd
 import pytest
 
 from freedom import eval as ev
+from freedom import models as models_mod
+from freedom.data.base import BudgetExhausted
+from freedom.eval import runner
 from freedom.eval.folds import season_start
 from freedom.schemas import C, D, E, P, T
 from tests.synth_eval import (
@@ -39,10 +44,14 @@ def _minute_bars(start: pd.Timestamp, n: int, *, step_min: int = 1, shift: pd.Ti
 
 
 def _prediction(p_up: float, r_hat: float = 0.02, *, has_perp: bool = False, market: str | None = None,
-                decision_time: str = "post_30m", event_id: str = "TEST:2026-06") -> pd.DataFrame:
-    return pd.DataFrame([{P.event_id: event_id, P.decision_time: decision_time, P.model: "m", P.fold: 0,
-                          P.test_season: "2026Q2", P.p_up: p_up, P.r_hat: r_hat, P.r_true: 0.01,
-                          P.direction_true: 1.0, E.t0: T0, E.has_perp_at_t0: has_perp, E.market: market}])
+                decision_time: str = "post_30m", event_id: str = "TEST:2026-06",
+                magnitude: float | None = None) -> pd.DataFrame:
+    row = {P.event_id: event_id, P.decision_time: decision_time, P.model: "m", P.fold: 0,
+           P.test_season: "2026Q2", P.p_up: p_up, P.r_hat: r_hat, P.r_true: 0.01,
+           P.direction_true: 1.0, E.t0: T0, E.has_perp_at_t0: has_perp, E.market: market}
+    if magnitude is not None:  # the column is absent otherwise, so |r_hat| stands in
+        row[P.magnitude_hat] = magnitude
+    return pd.DataFrame([row])
 
 
 # ---- folds ---------------------------------------------------------------------------------------
@@ -193,6 +202,22 @@ def test_sizing_variants(settings):
     assert gated["cost_bps"] / 1e4 > 0.001  # the round-trip cost exceeds the predicted move
     passed = ev.simulate(_prediction(0.75, r_hat=0.05), lambda _e: bars, settings=settings, sizing="magnitude_gate").iloc[0]
     assert passed["traded"] and passed["size"] == 1.0
+    assert passed[P.magnitude_hat] == pytest.approx(0.05)  # |r_hat| stood in for the missing forecast
+    # the model's magnitude forecast (predict_magnitude) drives by_magnitude / magnitude_gate even
+    # when its direction forecast r_hat is 0, as for hist_abs_mean and vol_scaled
+    mag_only = ev.simulate(_prediction(0.75, r_hat=0.0, magnitude=0.06), lambda _e: bars, settings=settings,
+                           sizing="by_magnitude").iloc[0]
+    assert mag_only["traded"] and mag_only["size"] == pytest.approx(0.5) and mag_only[P.magnitude_hat] == 0.06
+    gate_ok = ev.simulate(_prediction(0.75, r_hat=0.0, magnitude=0.05), lambda _e: bars, settings=settings,
+                          sizing="magnitude_gate").iloc[0]
+    assert gate_ok["traded"] and gate_ok["size"] == 1.0
+    gate_no = ev.simulate(_prediction(0.75, r_hat=0.05, magnitude=0.0005), lambda _e: bars, settings=settings,
+                          sizing="magnitude_gate").iloc[0]
+    assert not gate_no["traded"] and gate_no["untraded_reason"] == "magnitude_gate"
+    assert ev.position_size("by_magnitude", 0.25, 0.0, target_vol=0.03, round_trip_cost=0.002, magnitude=0.06) == (0.5, None)
+    assert ev.position_size("by_magnitude", 0.25, 0.06, target_vol=0.03, round_trip_cost=0.002) == (0.5, None)
+    assert ev.position_size("magnitude_gate", 0.25, 0.0, target_vol=0.03, round_trip_cost=0.002, magnitude=0.001) == (0.0, "magnitude_gate")
+    assert ev.position_size("magnitude_gate", 0.25, 0.0, target_vol=0.03, round_trip_cost=0.002, magnitude=math.nan) == (0.0, "magnitude_gate")
     # threshold on |p_up - 0.5|
     below = ev.simulate(_prediction(0.55), lambda _e: bars, settings=settings, threshold=0.1).iloc[0]
     assert not below["traded"] and below["untraded_reason"] == "below_threshold"
@@ -244,6 +269,13 @@ def test_equal_split_exposure_never_exceeds_the_cap():
     assert pm2["max_gross_exposure"] == pytest.approx(1.0) and pm2["total_return"] == pytest.approx(0.02)
     empty = ev.portfolio_metrics(_trades_frame([base], [base + pd.Timedelta(days=1)], [1.0], [0.01], traded=[False]))
     assert empty["n_trades"] == 0 and empty["n_untraded"] == 1 and math.isnan(empty["sharpe_like"])
+    # a loss from the starting capital is a drawdown: the initial equity is the first peak
+    early_loss = _trades_frame([base, base + pd.Timedelta(days=3)], [base + pd.Timedelta(days=1), base + pd.Timedelta(days=4)],
+                               [1.0, 1.0], [-0.02, 0.01])
+    assert ev.portfolio_metrics(early_loss)["max_drawdown"] == pytest.approx(0.02)
+    single_loss = _trades_frame([base], [base + pd.Timedelta(days=1)], [1.0], [-0.05])
+    assert ev.portfolio_metrics(single_loss)["max_drawdown"] == pytest.approx(0.05)
+    assert ev.portfolio_metrics(_trades_frame([base], [base + pd.Timedelta(days=1)], [1.0], [0.05]))["max_drawdown"] == 0.0
 
 
 # ---- metrics -------------------------------------------------------------------------------------
@@ -290,20 +322,51 @@ def test_mde_is_monotone_in_n_and_matches_the_formula():
     assert math.isnan(ev.min_detectable_improvement(0, "accuracy", 0.5))
     with pytest.raises(ValueError):
         ev.min_detectable_improvement(100, "mae", 0.1)
+    # the paired MDE comes from the comparison's own standard error and sits well below the
+    # closed-form (unpaired, Bhatia-Davis) bound at the same n
+    rng = np.random.default_rng(5)
+    diff = pd.Series(rng.normal(0.01, 0.214, size=158))
+    se = ev.paired_se(diff)
+    assert se == pytest.approx(diff.std(ddof=1) / math.sqrt(158))
+    assert ev.paired_mde(se) == pytest.approx(z * se)
+    assert ev.paired_mde(se) < 0.6 * ev.min_detectable_improvement(158, "brier", 0.25)
+    assert ev.paired_mde(se, alpha=0.01) > ev.paired_mde(se)
+    assert ev.paired_se(diff.to_numpy()) == se and math.isnan(ev.paired_se([0.1])) and math.isnan(ev.paired_mde(math.nan))
+    assert ev.paired_se([0.1, np.nan, 0.3]) == pytest.approx(np.std([0.1, 0.3], ddof=1) / math.sqrt(2))
 
 
 def test_bootstrap_ci_iid_and_block():
     rng = np.random.default_rng(1)
     values = pd.Series(rng.normal(0.1, 1.0, size=400))
-    point, lo, hi = ev.bootstrap_ci(values, lambda v: float(v.mean()), n=400, seed=7)
+
+    def mean(v: pd.Series) -> float:
+        return float(v.mean())
+
+    point, lo, hi = ev.bootstrap_ci(values, mean, n=400, seed=7)
     assert point == pytest.approx(values.mean()) and lo < point < hi
-    assert ev.bootstrap_ci(values, lambda v: float(v.mean()), n=400, seed=7) == (point, lo, hi)  # deterministic
-    seasons = pd.Series(np.repeat(["2025Q1", "2025Q2", "2025Q3", "2025Q4"], 100))
-    bp, blo, bhi = ev.bootstrap_ci(values, lambda v: float(v.mean()), n=400, block=seasons, seed=7)
-    assert bp == pytest.approx(point) and blo < bp < bhi
-    one_block = ev.bootstrap_ci(values, lambda v: float(v.mean()), n=50, block=pd.Series(["s"] * 400), seed=7)
-    assert one_block[1] == pytest.approx(point) and one_block[2] == pytest.approx(point)
-    assert all(math.isnan(v) for v in ev.bootstrap_ci(pd.Series([], dtype=float), lambda v: float(v.mean()))[1:])
+    assert ev.bootstrap_ci(values, mean, n=400, seed=7) == (point, lo, hi)  # deterministic
+    assert ev.MIN_BLOCKS == 5
+    seasons = pd.Series(np.repeat(["2025Q1", "2025Q2", "2025Q3", "2025Q4", "2026Q1"], 80))
+    bp, blo, bhi = ev.bootstrap_ci(values, mean, n=400, block=seasons, seed=7)
+    assert bp == pytest.approx(point) and blo < bp < bhi and (blo, bhi) != (lo, hi)
+    # a single block (the holdout season) must not give a degenerate [point, point] interval:
+    # with fewer than MIN_BLOCKS distinct blocks the rows are resampled iid instead
+    one_block = ev.bootstrap_ci(values, mean, n=400, block=pd.Series(["s"] * 400), seed=7)
+    assert one_block[1] < point < one_block[2] and one_block == (point, lo, hi)
+    four = pd.Series(np.repeat(list("abcd"), 100))
+    assert ev.bootstrap_ci(values, mean, n=400, block=four, seed=7) == (point, lo, hi)
+    four_block = ev.bootstrap_ci(values, mean, n=400, block=four, seed=7, min_blocks=4)
+    assert four_block != (point, lo, hi) and four_block[1] < point < four_block[2]
+    dist = ev.bootstrap_distribution(values, mean, n=200, block=pd.Series(["s"] * 400), seed=7)
+    assert dist.std() > 0.02  # not collapsed onto the point estimate
+    # choose_blocks takes the coarsest structure that has enough blocks and reports it
+    days = pd.Series([f"d{i % 40}" for i in range(400)])
+    name, labels = ev.choose_blocks([("block:season", pd.Series(["s"] * 400)), ("block:day", days)])
+    assert name == "block:day" and labels is days
+    assert ev.choose_blocks([("block:season", seasons), ("block:day", days)])[0] == "block:season"
+    assert ev.choose_blocks([("block:season", pd.Series(["s"] * 400))]) == ("iid", None)
+    assert ev.choose_blocks([("block:season", None)]) == ("iid", None)
+    assert all(math.isnan(v) for v in ev.bootstrap_ci(pd.Series([], dtype=float), mean)[1:])
 
 
 def test_verdicts():
@@ -326,6 +389,8 @@ def test_evaluate_end_to_end_writes_reports(settings, dataset):
     assert loaded["run_id"] == summary["run_id"] and len(loaded["dataset_sha256"]) == 64
     assert summary["run_id"].endswith(summary["dataset_sha256"][:8]) and "T" in summary["run_id"]
     assert summary["git"]["sha"] and "pandas" in summary["versions"] and "fmp_api_key" not in summary["settings"]
+    assert summary["settings"]["trade_threshold"] == 0.0 and summary["settings"]["target_vol"] == 0.03
+    assert summary["dataset_hash_source"] == "content" and summary["capital_rule"] == ev.CAPITAL_RULE
     assert summary["final"] is False and summary["holdout_results"] is None
     assert summary["holdout"] == {"season": "2026Q3", "scorings_before": 0, "scorings_after": 0,
                                   "scored_now": False, "n_events": 40}
@@ -348,20 +413,35 @@ def test_evaluate_end_to_end_writes_reports(settings, dataset):
     assert (lin.loc[lin[P.fold] > 0, P.r_lo] < lin.loc[lin[P.fold] > 0, P.r_hat]).all()
     # low-confidence events are predicted (kept in the table) but never trained on: they are in the test rows
     assert (preds[E.t0_confidence] < settings.min_t0_confidence).any()
+    # the magnitude forecast is a column of its own; these stand-ins use the default |r_hat|
+    assert (preds[P.magnitude_hat] == preds[P.r_hat].abs()).all()
 
     res = summary["results"]["post_30m"]
     cell = res["linear"]["subsets"]["all"]
     assert cell["n"] > 100 and cell["n_direction"] <= cell["n"]
-    for key in ("accuracy", "balanced_accuracy", "brier", "log_loss", "spearman_ic", "mae", "rmse"):
+    for key in ("accuracy", "balanced_accuracy", "brier", "log_loss", "spearman_ic", "mae", "rmse", "magnitude_mae"):
         assert key in cell and cell[key] is not None
+    assert cell["n_magnitude"] == cell["n_return"] and cell["magnitude_mae"] > 0
     assert cell["spearman_ic"] > 0.3  # the synthetic signal is recoverable
     assert set(cell["mde"]) == {"accuracy", "brier"} and cell["mde"]["brier"] > 0
-    assert cell["ci"]["brier"][0] <= cell["brier"] <= cell["ci"]["brier"][1]
+    assert cell["ci"]["brier"][0] < cell["brier"] < cell["ci"]["brier"][1]
+    # four test seasons are too few for season blocks: the report says which scheme it used
+    assert cell["resampling"] == "block:day"
     cmp = cell["comparison"]["brier"]
     assert cmp["baseline"] in ("zero", "base_rate") and cmp["mde"] == cell["mde"]["brier"]
     assert cmp["ci"][0] <= cmp["improvement"] <= cmp["ci"][1] and 0 <= cmp["p_noise"] <= 1
     assert cmp["verdict"] in ("improves", "not_predictable", "worse") or cmp["verdict"].startswith("inconclusive at n = ")
     assert summary["best_baseline"]["post_30m"]["all"]["brier"]["model"] == cmp["baseline"]
+    # the MDE is the paired comparison's own, below the closed-form upper bound at the same n
+    assert cell["mde_source"] == {"accuracy": "paired_se", "brier": "paired_se"} and cmp["mde_source"] == "paired_se"
+    assert cmp["se"] > 0 and cmp["mde"] == pytest.approx(ev.paired_mde(cmp["se"]))
+    assert cmp["mde"] < ev.min_detectable_improvement(cmp["n"], "brier", cmp["baseline_value"])
+    assert cmp["resampling"] == cell["resampling"] and cmp["se_bootstrap"] > 0
+    assert cell["comparison"]["magnitude_mae"]["baseline"] in ("zero", "base_rate")
+    assert res["zero"]["subsets"]["all"]["mde_source"]["brier"] == "closed_form_upper_bound"
+    best_brier = summary["best_baseline"]["post_30m"]["all"]["brier"]["value"]  # the bound is taken at the best baseline
+    assert res["zero"]["subsets"]["all"]["mde"]["brier"] == pytest.approx(
+        ev.min_detectable_improvement(res["zero"]["subsets"]["all"]["n_direction"], "brier", best_brier))
     assert res["zero"]["is_baseline"] and res["zero"]["subsets"]["all"]["comparison"] is None
     assert res["zero"]["subsets"]["all"]["accuracy"] == pytest.approx(0.5)
     assert res["zero"]["subsets"]["all"]["brier"] == pytest.approx(0.25)
@@ -397,12 +477,16 @@ def test_evaluate_end_to_end_writes_reports(settings, dataset):
     assert tr["n_trades"] == len(taken) and tr["max_gross_exposure"] <= settings.gross_exposure_cap + 1e-12
     assert 0 < tr["funding_share_events"] < 1 and "sharpe_like" in tr and "max_drawdown" in tr
     assert tr["mean_pnl"]["n"] == len(taken) and tr["comparison"]["baseline"] in ("zero", "base_rate")
+    assert tr["resampling"] == "block:day" and tr["mean_pnl"]["lo"] < tr["mean_pnl"]["point"] < tr["mean_pnl"]["hi"]
+    assert tr["comparison"]["resampling"] == "block:day" and tr["comparison"]["ci"][0] < tr["comparison"]["ci"][1]
+    assert P.magnitude_hat in trades.columns and (taken[P.magnitude_hat] == taken[P.r_hat].abs()).all()
     assert tr["untraded_reasons"].get("no_bars", 0) == int(lin[P.r_true].isna().sum())  # no path without targets
     assert res["linear"]["trading"]["magnitude_gate"]["n_trades"] < tr["n_trades"]
     assert res["base_rate"]["trading"]["fixed"]["comparison"] is None
 
     md = (out / "leaderboard.md").read_text()
     assert "## post_30m" in md and "| linear |" in md and "MDE" in md and summary["run_id"] in md
+    assert "magnitude MAE" in md and "block:day" in md and "‡" in md and "equal_split" in md
     assert any("inconclusive" in n or "Brier comparisons" in n for n in summary["notes"])
     assert "continuation_dead_band_n" in summary["cohorts"]["post_30m"]
 
@@ -415,6 +499,142 @@ def test_evaluate_rejects_bad_inputs(settings, dataset):
     tiny = dataset[dataset["season"].isin(["2026Q1", "2026Q2"])]
     with pytest.raises(ValueError, match="trainable events"):
         ev.evaluate(settings, tiny, model_names=["zero"], decision_times=["post_30m"], paths=lambda _e: None)
+
+
+def test_trade_threshold_and_target_vol_are_settings(settings, dataset):
+    strict = settings.model_copy(update={"trade_threshold": 0.45, "target_vol": 0.01})
+    assert ev.report.config_hash(strict) != ev.report.config_hash(settings)
+    summary = ev.evaluate(strict, dataset, model_names=["linear"], decision_times=["post_30m"],
+                          paths=make_paths(dataset), n_boot=10)
+    assert summary["settings"]["trade_threshold"] == 0.45 and summary["settings"]["target_vol"] == 0.01
+    tr = summary["results"]["post_30m"]["linear"]["trading"]
+    assert tr["fixed"]["untraded_reasons"].get("below_threshold", 0) > 0
+    trades = pd.read_parquet(strict.reports_dir / summary["run_id"] / "trades.parquet")
+    taken = trades[trades["traded"] & (trades["sizing"] == "by_magnitude")]
+    assert (taken["size"] == np.minimum(1.0, 0.01 / taken[P.magnitude_hat])).all()
+
+
+def test_magnitude_forecasts_reach_the_simulation_and_metrics(settings, dataset):
+    """hist_abs_mean forecasts r_hat = 0 and a magnitude of its own: it must trade under
+    by_magnitude / magnitude_gate and be scored as a magnitude forecast."""
+    summary = ev.evaluate(settings, dataset, model_names=["zero", "hist_abs_mean", "linear"],
+                          decision_times=["post_30m"], paths=make_paths(dataset), funding=make_funding(), n_boot=20)
+    out = settings.reports_dir / summary["run_id"]
+    preds = pd.read_parquet(out / "predictions.parquet")
+    ham = preds[preds[P.model] == "hist_abs_mean"]
+    assert (ham[P.r_hat] == 0).all() and (ham[P.magnitude_hat] > 0).all()
+    res = summary["results"]["post_30m"]
+    assert res["hist_abs_mean"]["is_baseline"]
+    tr = res["hist_abs_mean"]["trading"]
+    assert tr["magnitude_gate"]["n_trades"] > 0 and tr["by_magnitude"]["n_trades"] > 0
+    assert tr["magnitude_gate"]["untraded_reasons"].get("magnitude_gate", 0) == 0
+    trades = pd.read_parquet(out / "trades.parquet")
+    bym = trades[(trades[P.model] == "hist_abs_mean") & (trades["sizing"] == "by_magnitude") & trades["traded"]]
+    assert len(bym) and np.allclose(bym["size"], np.minimum(1.0, settings.target_vol / bym[P.magnitude_hat]))
+    cell = res["hist_abs_mean"]["subsets"]["all"]
+    assert np.isfinite(cell["magnitude_mae"]) and cell["magnitude_mae"] < res["zero"]["subsets"]["all"]["magnitude_mae"]
+    assert summary["best_baseline"]["post_30m"]["all"]["magnitude_mae"]["model"] == "hist_abs_mean"
+    cmp = res["linear"]["subsets"]["all"]["comparison"]["magnitude_mae"]
+    assert cmp["baseline"] == "hist_abs_mean" and cmp["ci"][0] <= cmp["improvement"] <= cmp["ci"][1]
+    assert cmp["mde"] is None  # MDE is reported for brier / accuracy only
+
+
+class _Recorder(models_mod.BaseModel):
+    """Stand-in that records the direction target it was fitted on and returns preset outputs."""
+
+    fitted: list[np.ndarray] = []
+    p_out: np.ndarray | None = None
+    r_out: np.ndarray | None = None
+    m_out: np.ndarray | None = None
+
+    def fit(self, X, y_return, y_direction):
+        type(self).fitted.append(np.asarray(y_direction, dtype=float))
+        return self
+
+    def predict_proba_up(self, X):
+        return self.p_out if self.p_out is not None else np.full(len(X), 0.6)
+
+    def predict_return(self, X):
+        return self.r_out if self.r_out is not None else np.full(len(X), 0.01)
+
+    def predict_magnitude(self, X):
+        return self.m_out if self.m_out is not None else np.abs(self.predict_return(X))
+
+
+def test_fit_predict_passes_zero_direction_through_and_validates_outputs(caplog):
+    if "recorder" not in models_mod.REGISTRY:
+        models_mod.register("recorder")(_Recorder)
+    train = pd.DataFrame({"f_a": [0.1, 0.2, 0.3], runner.Y: [0.0, 0.02, -0.01], runner.DIR: [0.0, 1.0, -1.0]})
+    test = pd.DataFrame({"f_a": [0.5, 0.6, 0.7]})
+    _Recorder.fitted.clear()
+    _Recorder.p_out = _Recorder.r_out = _Recorder.m_out = None
+    p, r, mag, model = runner._fit_predict("recorder", 7, train, test, ["f_a"])
+    assert list(_Recorder.fitted[-1]) == [0.0, 1.0, -1.0]  # a zero move is not 'up'
+    assert list(p) == [0.6] * 3 and list(mag) == [0.01] * 3 and isinstance(model, _Recorder)
+    # out-of-range probabilities are clipped with a warning; NaN magnitude falls back to |r_hat|
+    _Recorder.p_out = np.array([1.2, -0.1, 0.7])
+    _Recorder.r_out = np.array([0.02, -0.03, np.nan])
+    _Recorder.m_out = np.array([np.nan, -0.03, 0.04])
+    with caplog.at_level(logging.WARNING, logger="freedom.eval.runner"):
+        p, r, mag, _ = runner._fit_predict("recorder", 7, train, test, ["f_a"])
+    assert list(p) == [1.0, 0.0, 0.7] and "outside [0, 1]" in caplog.text and "non-finite r_hat" in caplog.text
+    assert mag[0] == pytest.approx(0.02) and mag[1] == pytest.approx(0.03) and mag[2] == pytest.approx(0.04)
+    assert math.isnan(r[2])
+    # too many non-finite probabilities reject the model outright
+    _Recorder.p_out = np.array([np.nan, 0.5, 0.5])
+    with pytest.raises(ValueError, match="non-finite p_up"):
+        runner._fit_predict("recorder", 7, train, test, ["f_a"])
+    _Recorder.p_out = np.array([0.5, 0.5])
+    with pytest.raises(ValueError, match="predictions for 3 rows"):
+        runner._fit_predict("recorder", 7, train, test, ["f_a"])
+    _Recorder.p_out = _Recorder.r_out = _Recorder.m_out = None
+
+
+def test_loader_paths_propagates_provider_aborts(settings, dataset, monkeypatch):
+    from freedom.targets import loaders
+
+    events = pd.DataFrame([{E.event_id: "TEST:2026-06", E.t0: T0, E.market: "xyz:TEST", E.underlying: "TEST"}])
+
+    def exhausted(*_a, **_k):
+        raise BudgetExhausted("FMP daily budget exhausted; wait for the next UTC day")
+
+    monkeypatch.setattr(loaders, "load_event_bars", exhausted)
+    with pytest.raises(BudgetExhausted, match="budget"):
+        ev.loader_paths(settings, events)("TEST:2026-06")
+
+    def missing(*_a, **_k):
+        raise FileNotFoundError("no archive")
+
+    monkeypatch.setattr(loaders, "load_event_bars", missing)
+    assert ev.loader_paths(settings, events)("TEST:2026-06") is None
+    monkeypatch.setattr(loaders, "load_event_bars", lambda *_a, **_k: (pd.DataFrame(), None))
+    assert ev.loader_paths(settings, events)("TEST:2026-06") is None
+    assert ev.loader_paths(settings, events)("UNKNOWN:2026-06") is None
+    # and evaluate aborts instead of reporting trades on a partially fetched set of events
+    with pytest.raises(BudgetExhausted):
+        ev.evaluate(settings, dataset, model_names=["linear"], decision_times=["post_30m"], paths=exhausted, n_boot=10)
+    assert not any(settings.reports_dir.iterdir())
+
+
+def test_dataset_sha256_of_the_parquet_file_is_used_when_it_exists(settings, dataset):
+    path = settings.dataset_path
+    dataset.to_parquet(path, index=False)
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert ev.dataset_sha256(path) == expected == ev.dataset_sha256(str(path))
+    assert ev.dataset_sha256(dataset) != expected and len(ev.dataset_sha256(dataset)) == 64
+    summary = ev.evaluate(settings, dataset, model_names=["zero"], decision_times=["post_30m"],
+                          paths=lambda _e: None, n_boot=10)
+    assert summary["dataset_sha256"] == expected and summary["dataset_hash_source"] == f"file:{path}"
+    assert summary["run_id"].endswith(expected[:8])
+    ev.train_final(settings, dataset, model_name="zero", decision_time="post_30m")
+    meta = json.loads((settings.models_dir / "post_30m" / "zero" / "model.json").read_text())
+    assert meta["dataset_sha256"] == expected and meta["dataset_hash_source"] == f"file:{path}"
+    # an explicit path wins over the default
+    other = settings.data_dir / "other.parquet"
+    dataset.head(200).to_parquet(other, index=False)
+    explicit = ev.evaluate(settings, dataset, model_names=["zero"], decision_times=["post_30m"],
+                           paths=lambda _e: None, n_boot=10, dataset_path=other)
+    assert explicit["dataset_sha256"] == hashlib.sha256(other.read_bytes()).hexdigest()
 
 
 # ---- final: holdout scoring ----------------------------------------------------------------------------
@@ -430,6 +650,30 @@ def test_final_refuses_an_open_holdout_season(settings, dataset):
     with pytest.raises(ev.HoldoutNotReady, match="future"):
         ev.evaluate(settings, clean, model_names=["zero"], decision_times=["post_30m"], final=True, paths=paths,
                     now=pd.Timestamp("2026-08-01", tz=UTC), n_boot=20)
+    assert not settings.holdout_log_path.exists() and not any(settings.reports_dir.iterdir())
+    # a dataset built mid-season: every holdout event it holds is closed, but the season is not,
+    # so events still scheduled in it cannot be in the dataset
+    cutoff = pd.Timestamp("2026-08-15", tz=UTC)
+    mid = clean[~((clean["season"] == "2026Q3") & (clean[E.t0] >= cutoff))].reset_index(drop=True)
+    assert (mid.loc[mid["season"] == "2026Q3", E.t0] + pd.Timedelta(hours=24) < pd.Timestamp("2026-09-01", tz=UTC)).all()
+    with pytest.raises(ev.HoldoutNotReady, match="not closed"):
+        ev.evaluate(settings, mid, model_names=["zero"], decision_times=["post_30m"], final=True, paths=make_paths(mid),
+                    now=pd.Timestamp("2026-09-01", tz=UTC), n_boot=20)
+    assert ev.season_end("2026Q3") == pd.Timestamp("2026-10-01", tz=UTC)
+    with pytest.raises(ev.HoldoutNotReady, match="not closed"):
+        ev.check_holdout_ready(runner.prepare_dataset(clean, "r_24h", settings), settings,
+                               pd.Timestamp("2026-10-01 23:59", tz=UTC))
+    # the earnings calendar lists a holdout-season event the dataset lacks
+    calendar = pd.DataFrame({E.event_id: ["NEW:2026-09", str(clean[D.event_id].iloc[0])],
+                             E.t0: [pd.Timestamp("2026-09-15 20:30", tz=UTC), clean[E.t0].iloc[0]]})
+    with pytest.raises(ev.HoldoutNotReady, match=r"not in the dataset \(NEW:2026-09\)"):
+        ev.evaluate(settings, clean, model_names=["zero"], decision_times=["post_30m"], final=True, paths=paths,
+                    now=pd.Timestamp("2026-12-01", tz=UTC), n_boot=20, events=calendar)
+    calendar.to_parquet(settings.events_path, index=False)  # read by default when it exists
+    with pytest.raises(ev.HoldoutNotReady, match="not in the dataset"):
+        ev.evaluate(settings, clean, model_names=["zero"], decision_times=["post_30m"], final=True, paths=paths,
+                    now=pd.Timestamp("2026-12-01", tz=UTC), n_boot=20)
+    settings.events_path.unlink()
     assert not settings.holdout_log_path.exists() and not any(settings.reports_dir.iterdir())
     # every holdout event closed, but one has missing targets
     missing = clean.copy()
@@ -461,8 +705,20 @@ def test_final_scores_the_holdout_once_and_logs_it(settings, dataset):
     assert summary["final"] is True and summary["holdout"]["scorings_before"] == 0
     assert summary["holdout"]["scorings_after"] == 1 and summary["holdout"]["scored_now"] is True
     hold = summary["holdout_results"]["post_30m"]["models"]
-    assert hold["linear"]["subsets"]["all"]["n"] == n_holdout
-    assert hold["linear"]["subsets"]["all"]["comparison"]["brier"]["baseline"] in ("zero", "base_rate")
+    cell = hold["linear"]["subsets"]["all"]
+    assert cell["n"] == n_holdout
+    cmp = cell["comparison"]["brier"]
+    assert cmp["baseline"] in ("zero", "base_rate")
+    # one season can never be season-blocked: the holdout intervals must not collapse to a point
+    assert cell["resampling"] == "block:day" and cmp["resampling"] == "block:day"
+    assert cell["ci"]["brier"][0] < cell["ci"]["brier"][1] and cell["ci"]["accuracy"][0] < cell["ci"]["accuracy"][1]
+    assert cmp["ci"][0] < cmp["ci"][1] and cmp["mde_source"] == "paired_se"
+    for sizing, stats in hold["linear"]["trading"].items():
+        if stats["n_trades"] > 1:
+            assert stats["mean_pnl"]["lo"] < stats["mean_pnl"]["hi"], sizing
+            if stats["comparison"] is not None:  # absent when no baseline traded under this sizing
+                assert stats["comparison"]["ci"][0] < stats["comparison"]["ci"][1], sizing
+    assert hold["linear"]["trading"]["fixed"]["comparison"]["resampling"] == "block:day"
     # the walk-forward cells never contain the holdout season
     assert "2026Q3" not in [f["test_season"] for f in summary["folds"]["post_30m"]]
     preds = pd.read_parquet(settings.reports_dir / summary["run_id"] / "predictions.parquet")
@@ -492,6 +748,7 @@ def test_train_final_saves_model_with_provenance(settings, dataset):
     assert (out / "fake_model.json").exists()
     assert meta["decision_time"] == "post_30m" and meta["model"] == "linear" and meta["target"] == "r_24h"
     assert len(meta["dataset_sha256"]) == 64 and meta["git_sha"] and len(meta["config_hash"]) == 64
+    assert meta["dataset_hash_source"] == "content"  # no dataset.parquet in this data_dir
     assert meta["trained_at"] and meta["schema_version"] == 2
     sub = dataset[(dataset[D.decision_time] == "post_30m") & (dataset["season"] != "2026Q3")]
     trainable = sub[(sub[E.t0_confidence] >= settings.min_t0_confidence) & ~sub["target_missing"]]

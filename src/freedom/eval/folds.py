@@ -34,6 +34,11 @@ def season_start(season: str) -> pd.Timestamp:
     return pd.Timestamp(year=int(year), month=3 * (q - 1) + 1, day=1, tz=UTC)
 
 
+def season_end(season: str) -> pd.Timestamp:
+    """First instant (UTC) after a season, i.e. the start of the following one."""
+    return season_start(season) + pd.DateOffset(months=3)
+
+
 def t0_utc(events: pd.DataFrame) -> pd.Series:
     """The t0 column as tz-aware UTC (NaT preserved)."""
     return pd.to_datetime(events[E.t0], utc=True)

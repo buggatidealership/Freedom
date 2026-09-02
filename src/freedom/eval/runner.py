@@ -13,6 +13,7 @@ import json
 import logging
 import math
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,7 +22,7 @@ import pandas as pd
 from .. import models as models_mod
 from ..config import Settings
 from ..schemas import DECISION_TIMES, SCHEMA_VERSION, D, E, P, T, T0Source
-from .folds import HOLDOUT_FOLD, Fold, seasons_of, t0_utc, walk_forward_folds
+from .folds import HOLDOUT_FOLD, Fold, season_end, seasons_of, t0_utc, walk_forward_folds
 from .metrics import (
     EPS,
     MDE_METRICS,
@@ -29,9 +30,12 @@ from .metrics import (
     bootstrap_distribution,
     brier_scores,
     calibration_table,
+    choose_blocks,
     classification_metrics,
     hit_scores,
     min_detectable_improvement,
+    paired_mde,
+    paired_se,
     regression_metrics,
     residual_band,
     spearman,
@@ -51,9 +55,11 @@ from .report import (
     write_reports,
 )
 from .sim import (
+    CAPITAL_RULE,
     FUNDING_ARCHIVE,
     SIZINGS,
     archive_funding_loader,
+    as_utc,
     loader_paths,
     memoised_bar_index,
     memoised_funding,
@@ -65,9 +71,14 @@ log = logging.getLogger(__name__)
 
 DEFAULT_BASELINES = frozenset({"zero", "base_rate", "historical_mean", "hist_abs_mean", "vol_scaled",
                                "sign_of_reaction", "always_extends", "surprise_sign"})
-COMPARED_METRICS = ("accuracy", "brier", "log_loss", "spearman_ic", "mae")
+COMPARED_METRICS = ("accuracy", "brier", "log_loss", "spearman_ic", "mae", "magnitude_mae")
 HIGHER_IS_BETTER = {"accuracy": True, "balanced_accuracy": True, "brier": False, "log_loss": False,
-                    "spearman_ic": True, "mae": False, "rmse": False}
+                    "spearman_ic": True, "mae": False, "rmse": False, "magnitude_mae": False,
+                    "magnitude_ic": True}
+SCORE_COLUMNS = {"accuracy": "hit", "brier": "brier", "log_loss": "ll", "mae": "ae", "magnitude_mae": "mag_ae"}
+MDE_PAIRED = "paired_se"  # MDE from the paired comparison's own standard error
+MDE_UPPER_BOUND = "closed_form_upper_bound"  # no comparison: the unpaired closed form (conservative)
+MAX_NONFINITE_P_SHARE = 0.1  # a model returning more non-finite p_up than this is rejected
 HEADLINE_SOURCES = frozenset({T0Source.sec_8k.value, T0Source.manual.value, T0Source.detected.value})
 STRATA = (E.t0_source, E.kind, E.timing)
 CALIBRATION_SUBSETS = ("all", "headline")
@@ -146,18 +157,55 @@ def _X(df: pd.DataFrame, feats: list[str]) -> pd.DataFrame:
     return df[feats].apply(pd.to_numeric, errors="coerce").astype(float)
 
 
+def _direction_target(train: pd.DataFrame) -> pd.Series:
+    """The direction label as the model sees it: sign(direction_24h) in {-1, 0, +1}, passed
+    through unchanged (a zero move is 'no direction', never 'up'); NaN -> 0."""
+    return pd.Series(np.sign(train[DIR].to_numpy(dtype=float)), index=train.index).fillna(0.0)
+
+
+def _validate_predictions(name: str, p: np.ndarray, r: np.ndarray, mag: np.ndarray,
+                          n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Check the model output: p_up must be a probability (values outside [0, 1] are clipped
+    with a warning; more than MAX_NONFINITE_P_SHARE non-finite values reject the model),
+    r_hat is warned about when non-finite, magnitude falls back to |r_hat| where it is missing
+    and is made non-negative."""
+    if len(p) != n or len(r) != n or len(mag) != n:
+        raise ValueError(f"model {name!r} returned {len(p)}/{len(r)}/{len(mag)} predictions for {n} rows")
+    if n == 0:
+        return p, r, mag
+    bad_p = ~np.isfinite(p)
+    if bad_p.mean() > MAX_NONFINITE_P_SHARE:
+        raise ValueError(f"model {name!r} returned {int(bad_p.sum())} non-finite p_up out of {n} rows "
+                         f"(more than {MAX_NONFINITE_P_SHARE:.0%}); models must return a probability per row")
+    out_of_range = ~bad_p & ((p < 0.0) | (p > 1.0))
+    if out_of_range.any():
+        log.warning("model %r returned %d p_up outside [0, 1] (min %.4f, max %.4f); clipping",
+                    name, int(out_of_range.sum()), float(np.nanmin(p)), float(np.nanmax(p)))
+        p = np.where(bad_p, p, np.clip(p, 0.0, 1.0))
+    bad_r = ~np.isfinite(r)
+    if bad_r.any():
+        log.warning("model %r returned %d non-finite r_hat out of %d rows", name, int(bad_r.sum()), n)
+    bad_m = ~np.isfinite(mag)
+    if bad_m.any():
+        mag = np.where(bad_m, np.abs(r), mag)
+    if np.any(mag[np.isfinite(mag)] < 0):
+        log.warning("model %r returned negative magnitude forecasts; using their absolute value", name)
+        mag = np.abs(mag)
+    return p, r, mag
+
+
 def _fit_predict(name: str, seed: int, train: pd.DataFrame, test: pd.DataFrame,
-                 feats: list[str]) -> tuple[np.ndarray, np.ndarray, Any]:
+                 feats: list[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray, Any]:
+    """Fit `name` on `train` and predict `test`: (p_up, r_hat, magnitude_hat, model). The
+    magnitude comes from model.predict_magnitude (BaseModel default: |r_hat|)."""
     model = models_mod.make_model(name, seed=seed)
-    y = train[Y].astype(float)
-    direction = pd.Series(np.where(train[DIR].fillna(0) >= 0, 1.0, -1.0), index=train.index)
-    model.fit(_X(train, feats), y, direction)
+    model.fit(_X(train, feats), train[Y].astype(float), _direction_target(train))
     X_te = _X(test, feats)
     p = np.asarray(model.predict_proba_up(X_te), dtype=float).reshape(-1)
     r = np.asarray(model.predict_return(X_te), dtype=float).reshape(-1)
-    if len(p) != len(test) or len(r) != len(test):
-        raise ValueError(f"model {name!r} returned {len(p)}/{len(r)} predictions for {len(test)} rows")
-    return p, r, model
+    mag = np.asarray(model.predict_magnitude(X_te), dtype=float).reshape(-1)
+    p, r, mag = _validate_predictions(name, p, r, mag, len(test))
+    return p, r, mag, model
 
 
 # ---- walk-forward ------------------------------------------------------------------------------
@@ -191,7 +239,7 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
         train = sub.loc[fold.train_idx]
         train = train[train[TRAINABLE]]
         test = sub.loc[fold.test_idx]
-        p, r, _ = _fit_predict(name, settings.random_seed, train, test, feats)
+        p, r, mag, _ = _fit_predict(name, settings.random_seed, train, test, feats)
         pooled = np.concatenate(residuals) if residuals else np.array([], dtype=float)
         q10, q90 = residual_band(np.zeros(len(pooled)), pooled) if len(pooled) else (math.nan, math.nan)
         frame = test[[D.event_id, D.decision_time, *META_COLUMNS]].copy()
@@ -200,6 +248,7 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
         frame[P.test_season] = fold.test_season
         frame[P.p_up] = p
         frame[P.r_hat] = r
+        frame[P.magnitude_hat] = mag
         frame[P.r_lo] = r + q10
         frame[P.r_hi] = r + q90
         frame[P.r_true] = test[Y].to_numpy(dtype=float)
@@ -208,15 +257,16 @@ def _walk_forward(sub: pd.DataFrame, feats: list[str], folds: list[Fold], name: 
         if fold.fold != HOLDOUT_FOLD:
             res = frame[P.r_true].to_numpy(dtype=float) - r
             residuals.append(res[np.isfinite(res)])
-    cols = [P.event_id, P.decision_time, P.model, P.fold, P.test_season, P.p_up, P.r_hat, P.r_lo, P.r_hi,
-            P.r_true, P.direction_true, *META_COLUMNS]
+    cols = [P.event_id, P.decision_time, P.model, P.fold, P.test_season, P.p_up, P.r_hat, P.magnitude_hat,
+            P.r_lo, P.r_hi, P.r_true, P.direction_true, *META_COLUMNS]
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=cols)
     return out[cols]
 
 
 # ---- scoring ---------------------------------------------------------------------------------------
 def _scores(preds: pd.DataFrame) -> pd.DataFrame:
-    """Per-event scores indexed by event_id: hit, brier, ll, ae plus the raw columns."""
+    """Per-event scores indexed by event_id: hit, brier, ll, ae, mag_ae (|magnitude_hat| vs
+    |r_true|) plus the raw columns and the bootstrap block labels season / day (UTC day of t0)."""
     p = preds[P.p_up].to_numpy(dtype=float)
     y = preds[P.direction_true].to_numpy(dtype=float)
     yb = (y > 0).astype(float)
@@ -225,11 +275,30 @@ def _scores(preds: pd.DataFrame) -> pd.DataFrame:
     ll[~(np.isfinite(p) & np.isfinite(y) & (y != 0))] = np.nan
     r_hat = preds[P.r_hat].to_numpy(dtype=float)
     r_true = preds[P.r_true].to_numpy(dtype=float)
+    if P.magnitude_hat in preds.columns:
+        mag = preds[P.magnitude_hat].to_numpy(dtype=float)
+    else:
+        mag = np.abs(r_hat)
     out = pd.DataFrame({"hit": hit_scores(p, y), "brier": brier_scores(p, y), "ll": ll,
-                        "ae": np.abs(r_true - r_hat), P.p_up: p, P.r_hat: r_hat, P.r_true: r_true,
-                        P.direction_true: y, "season": preds[P.test_season].to_numpy()},
+                        "ae": np.abs(r_true - r_hat), "mag_ae": np.abs(np.abs(r_true) - mag),
+                        P.p_up: p, P.r_hat: r_hat, P.magnitude_hat: mag, P.r_true: r_true,
+                        P.direction_true: y, "season": preds[P.test_season].to_numpy(),
+                        "day": _day_labels(preds)},
                        index=pd.Index(preds[P.event_id].astype(str), name=P.event_id))
     return out[~out.index.duplicated(keep="first")]
+
+
+def _day_labels(frame: pd.DataFrame) -> np.ndarray:
+    """UTC day of t0 as strings (bootstrap block labels); 'NaT' where t0 is missing."""
+    if E.t0 not in frame.columns or len(frame) == 0:
+        return np.full(len(frame), "NaT", dtype=object)
+    return as_utc(frame[E.t0]).dt.strftime("%Y-%m-%d").fillna("NaT").to_numpy(dtype=object)
+
+
+def _blocks(frame: pd.DataFrame) -> tuple[str, pd.Series | None]:
+    """Bootstrap resampling scheme for a scores slice: season blocks when at least MIN_BLOCKS
+    seasons are present, else UTC-day-of-t0 blocks, else iid rows (metrics.choose_blocks)."""
+    return choose_blocks([("block:season", frame["season"]), ("block:day", frame["day"])])
 
 
 def subset_masks(preds: pd.DataFrame, *, min_t0_confidence: float) -> dict[str, pd.Series]:
@@ -253,18 +322,25 @@ def subset_masks(preds: pd.DataFrame, *, min_t0_confidence: float) -> dict[str, 
 def _cell(preds: pd.DataFrame, scores: pd.DataFrame, *, n_boot: int, seed: int, with_calibration: bool) -> dict[str, Any]:
     cm = classification_metrics(preds[P.p_up], preds[P.direction_true])
     rm = regression_metrics(preds[P.r_hat], preds[P.r_true])
-    cell: dict[str, Any] = {"n": int(len(preds)), "n_direction": cm["n"], "n_return": rm["n"]}
+    mag_col = preds[P.magnitude_hat] if P.magnitude_hat in preds.columns else preds[P.r_hat].abs()
+    mm = regression_metrics(mag_col, preds[P.r_true].abs())
+    cell: dict[str, Any] = {"n": int(len(preds)), "n_direction": cm["n"], "n_return": rm["n"],
+                            "n_magnitude": mm["n"]}
     cell.update({k: v for k, v in cm.items() if k != "n"})
     cell.update({k: v for k, v in rm.items() if k != "n"})
+    cell["magnitude_mae"], cell["magnitude_ic"] = mm["mae"], mm["spearman_ic"]
+    scheme, block = _blocks(scores)
+    cell["resampling"] = scheme
     ci: dict[str, list[float]] = {}
     for metric, col in (("accuracy", "hit"), ("brier", "brier")):
         s = scores[col].dropna()
         if len(s):
             _, lo, hi = bootstrap_ci(s, lambda v: float(v.mean()), n=n_boot,
-                                     block=scores.loc[s.index, "season"], seed=seed)
+                                     block=block.loc[s.index] if block is not None else None, seed=seed)
             ci[metric] = [lo, hi]
     cell["ci"] = ci
     cell["mde"] = {}
+    cell["mde_source"] = {}
     cell["comparison"] = None
     cell["calibration"] = calibration_table(preds[P.p_up], preds[P.direction_true]) if with_calibration else None
     return cell
@@ -306,15 +382,18 @@ def verdict(metric: str, lo: float | None, hi: float | None, mde: float | None, 
 def _compare(sm: pd.DataFrame, sb: pd.DataFrame, ids: pd.Index, metric: str, *, n_boot: int,
              seed: int) -> dict[str, Any] | None:
     """Paired bootstrap of the improvement of model scores `sm` over baseline scores `sb` on the
-    events `ids` (block by season). Improvement is signed so that positive is better."""
+    events `ids` (blocks chosen by `_blocks`, recorded as 'resampling'). Improvement is signed
+    so that positive is better. `se` is the empirical standard error of the mean paired
+    difference (metrics.paired_se; the bootstrap SD of the improvement for spearman_ic), the
+    input of the paired MDE."""
     common = ids.intersection(sm.index).intersection(sb.index)
     if len(common) == 0:
         return None
     a, b = sm.loc[common], sb.loc[common]
-    season = a["season"]
+    se = math.nan
     if metric == "spearman_ic":
         keep = np.isfinite(a[P.r_true].to_numpy(dtype=float))
-        a, b, season = a[keep], b[keep], season[keep]
+        a, b = a[keep], b[keep]
         if len(a) < 3:
             return None
         pos = pd.Series(np.arange(len(a)), index=a.index)
@@ -326,27 +405,33 @@ def _compare(sm: pd.DataFrame, sb: pd.DataFrame, ids: pd.Index, metric: str, *, 
 
         values = pos
     else:
-        col = {"accuracy": "hit", "brier": "brier", "log_loss": "ll", "mae": "ae"}[metric]
+        col = SCORE_COLUMNS[metric]
         sign = 1.0 if HIGHER_IS_BETTER[metric] else -1.0
         diff = sign * (a[col].astype(float) - b[col].astype(float))
         keep = diff.notna()
-        diff, season = diff[keep], season[keep]
+        diff, a = diff[keep], a[keep]
         if len(diff) == 0:
             return None
         values = diff
+        se = paired_se(diff)
 
         def stat(v: pd.Series) -> float:
             return float(v.mean())
 
+    scheme, block = _blocks(a)
     point = float(stat(values))
-    dist = bootstrap_distribution(values, stat, n=n_boot, block=season, seed=seed)
+    dist = bootstrap_distribution(values, stat, n=n_boot, block=block, seed=seed)
     finite = dist[np.isfinite(dist)]
     if len(finite):
         lo, hi = (float(x) for x in np.percentile(finite, [2.5, 97.5]))
         p_noise = float(np.mean(finite <= 0))
+        se_boot = float(np.std(finite, ddof=1)) if len(finite) > 1 else math.nan
     else:
-        lo = hi = p_noise = math.nan
-    return {"improvement": point, "ci": [lo, hi], "p_noise": p_noise, "n": int(len(values))}
+        lo = hi = p_noise = se_boot = math.nan
+    if metric == "spearman_ic":
+        se = se_boot
+    return {"improvement": point, "ci": [lo, hi], "p_noise": p_noise, "n": int(len(values)), "se": se,
+            "se_bootstrap": se_boot, "resampling": scheme}
 
 
 def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselines: frozenset[str],
@@ -367,26 +452,33 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
     for name, preds in blocks.items():
         for subset, cell in cells[name].items():
             ids = pd.Index(preds.loc[masks[name][subset], P.event_id].astype(str))
-            for metric in MDE_METRICS:
-                base = best.get(subset, {}).get(metric)
-                base_value = base["value"] if base else cell.get(metric)
-                cell["mde"][metric] = min_detectable_improvement(cell["n_direction"], metric, base_value)
-            if name in baselines:
-                continue
             comparison: dict[str, Any] = {}
-            for metric in COMPARED_METRICS:
-                base = best.get(subset, {}).get(metric)
-                if base is None:
-                    continue
-                cmp = _compare(scores[name], scores[base["model"]], ids, metric, n_boot=n_boot, seed=seed)
-                if cmp is None:
-                    continue
-                cmp.update({"baseline": base["model"], "baseline_value": base["value"], "model_value": cell.get(metric)})
-                mde = cell["mde"].get(metric) if metric in MDE_METRICS else None
-                cmp["mde"] = mde
-                cmp["verdict"] = verdict(metric, cmp["ci"][0], cmp["ci"][1], mde, cmp["n"])
-                comparison[metric] = cmp
+            if name not in baselines:
+                for metric in COMPARED_METRICS:
+                    base = best.get(subset, {}).get(metric)
+                    if base is None:
+                        continue
+                    cmp = _compare(scores[name], scores[base["model"]], ids, metric, n_boot=n_boot, seed=seed)
+                    if cmp is None:
+                        continue
+                    cmp.update({"baseline": base["model"], "baseline_value": base["value"], "model_value": cell.get(metric)})
+                    # the MDE of the test actually run: from the paired comparison's own standard error
+                    mde = paired_mde(cmp["se"]) if metric in MDE_METRICS else None
+                    cmp["mde"] = mde
+                    cmp["mde_source"] = MDE_PAIRED if metric in MDE_METRICS else None
+                    cmp["verdict"] = verdict(metric, cmp["ci"][0], cmp["ci"][1], mde, cmp["n"])
+                    comparison[metric] = cmp
             cell["comparison"] = comparison or None
+            for metric in MDE_METRICS:
+                cmp = comparison.get(metric)
+                if cmp is not None and cmp["mde"] is not None and np.isfinite(cmp["mde"]):
+                    cell["mde"][metric] = cmp["mde"]
+                    cell["mde_source"][metric] = MDE_PAIRED
+                else:  # no paired comparison (a baseline, or no baseline present): the closed-form upper bound
+                    base = best.get(subset, {}).get(metric)
+                    base_value = base["value"] if base else cell.get(metric)
+                    cell["mde"][metric] = min_detectable_improvement(cell["n_direction"], metric, base_value)
+                    cell["mde_source"][metric] = MDE_UPPER_BOUND
 
     # trading simulation, all sizing rules in one pass per model
     trade_frames: list[pd.DataFrame] = []
@@ -394,7 +486,7 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
     pnl_by_event: dict[tuple[str, str], pd.Series] = {}
     for name, preds in blocks.items():
         trades = simulate_rows(preds, bar_index, settings=settings, funding=funding_fn, sizings=SIZINGS,
-                               threshold=0.0, target_vol=0.03)
+                               threshold=settings.trade_threshold, target_vol=settings.target_vol)
         trade_frames.append(trades)
         trading[name] = {}
         for sizing in SIZINGS:
@@ -402,10 +494,13 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
             pm = portfolio_metrics(t, gross_exposure_cap=settings.gross_exposure_cap)
             traded = t[t["traded"]]
             pnl = pd.Series(traded["pnl"].to_numpy(dtype=float), index=pd.Index(traded[P.event_id].astype(str)))
-            season = pd.Series(traded[P.test_season].to_numpy(), index=pnl.index)
+            labels = pd.DataFrame({"season": traded[P.test_season].to_numpy(), "day": _day_labels(traded)},
+                                  index=pnl.index)
+            scheme, block = _blocks(labels)
             stats: dict[str, Any] = dict(pm)
-            stats["mean_pnl"] = _ci_dict(pnl, lambda v: float(v.mean()), season, n_boot, seed)
-            stats["hit_rate"] = _ci_dict(pnl, lambda v: float((v > 0).mean()), season, n_boot, seed)
+            stats["resampling"] = scheme
+            stats["mean_pnl"] = _ci_dict(pnl, lambda v: float(v.mean()), block, n_boot, seed)
+            stats["hit_rate"] = _ci_dict(pnl, lambda v: float((v > 0).mean()), block, n_boot, seed)
             stats["untraded_reasons"] = {str(k): int(v) for k, v in t.loc[~t["traded"], "untraded_reason"].value_counts().items()}
             with_funding = traded["funding_source"] == FUNDING_ARCHIVE
             stats["funding_share_events"] = float(with_funding.mean()) if len(traded) else math.nan
@@ -430,12 +525,13 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
             if len(common) == 0:
                 continue
             diff = a.loc[common] - b.loc[common]
-            season = scores[name]["season"].reindex(common).fillna("?")
-            dist = bootstrap_distribution(diff, lambda v: float(v.mean()), n=n_boot, block=season, seed=seed)
+            scheme, block = _blocks(scores[name][["season", "day"]].reindex(common).fillna("?"))
+            dist = bootstrap_distribution(diff, lambda v: float(v.mean()), n=n_boot, block=block, seed=seed)
             finite = dist[np.isfinite(dist)]
             lo, hi = (float(x) for x in np.percentile(finite, [2.5, 97.5])) if len(finite) else (math.nan, math.nan)
             trading[name][sizing]["comparison"] = {"baseline": best_b[0], "improvement": float(diff.mean()),
                                                    "ci": [lo, hi], "p_noise": float(np.mean(finite <= 0)) if len(finite) else math.nan,
+                                                   "se": paired_se(diff), "resampling": scheme,
                                                    "verdict": verdict("mean_pnl", lo, hi, None, int(len(diff)))}
 
     per_model: dict[str, Any] = {}
@@ -452,7 +548,7 @@ def _score_block(blocks: dict[str, pd.DataFrame], *, settings: Settings, baselin
     return per_model, best, trades_all
 
 
-def _ci_dict(values: pd.Series, stat: Callable[[pd.Series], float], block: pd.Series, n_boot: int,
+def _ci_dict(values: pd.Series, stat: Callable[[pd.Series], float], block: pd.Series | None, n_boot: int,
              seed: int) -> dict[str, float]:
     if len(values) == 0:
         return {"point": math.nan, "lo": math.nan, "hi": math.nan, "n": 0}
@@ -461,17 +557,26 @@ def _ci_dict(values: pd.Series, stat: Callable[[pd.Series], float], block: pd.Se
 
 
 # ---- holdout guard ------------------------------------------------------------------------------
-def check_holdout_ready(df: pd.DataFrame, settings: Settings, now: pd.Timestamp) -> pd.DataFrame:
-    """The holdout rows, or HoldoutNotReady when no holdout season is pinned, the dataset has
-    no holdout events, any holdout event has t0 + horizon in the future, or any holdout row is
-    target_missing / pending."""
+def check_holdout_ready(df: pd.DataFrame, settings: Settings, now: pd.Timestamp, *,
+                        events: pd.DataFrame | None = None) -> pd.DataFrame:
+    """The holdout rows, or HoldoutNotReady when no holdout season is pinned, the season is not
+    closed yet (now < start of the next season + horizon: a dataset built mid-season cannot
+    contain the events still scheduled in it), the dataset has no holdout events, any holdout
+    event has t0 + horizon in the future, any holdout row is target_missing / pending, or --
+    when the events calendar `events` (events.parquet: event_id, t0) is given -- an event
+    scheduled in the holdout season is missing from the dataset."""
     season = settings.holdout_season
     if not season:
         raise HoldoutNotReady("no holdout_season is pinned in settings; nothing to score")
+    horizon = pd.Timedelta(hours=settings.horizon_hours)
+    closes = season_end(season) + horizon
+    if now < closes:
+        raise HoldoutNotReady(f"the holdout season {season} is not closed: events scheduled in it can still have "
+                              f"t0 + {settings.horizon_hours}h in the future until {closes.isoformat()} "
+                              f"(now {now.isoformat()})")
     hold = df[df["season"] == season]
     if hold.empty:
         raise HoldoutNotReady(f"the dataset has no events in the holdout season {season}")
-    horizon = pd.Timedelta(hours=settings.horizon_hours)
     future = hold[hold[E.t0] + horizon > now]
     if len(future):
         latest = future[E.t0].max()
@@ -483,7 +588,27 @@ def check_holdout_ready(df: pd.DataFrame, settings: Settings, now: pd.Timestamp)
     if missing.any():
         n = int(hold.loc[missing, D.event_id].nunique())
         raise HoldoutNotReady(f"{n} holdout event(s) have missing or pending targets; complete the dataset first")
+    if events is not None and len(events):
+        for col in (E.event_id, E.t0):
+            if col not in events.columns:
+                raise ValueError(f"events calendar lacks the {col!r} column")
+        scheduled = events.loc[seasons_of(t0_utc(events)) == season, E.event_id].astype(str)
+        absent = sorted(set(scheduled) - set(hold[D.event_id].astype(str)))
+        if absent:
+            shown = ", ".join(absent[:5]) + (", ..." if len(absent) > 5 else "")
+            raise HoldoutNotReady(f"{len(absent)} event(s) scheduled in the holdout season {season} are not in the "
+                                  f"dataset ({shown}); rebuild the dataset before scoring the holdout")
     return hold
+
+
+def _dataset_hash(settings: Settings, dataset: pd.DataFrame, dataset_path: Path | str | None) -> tuple[str, str]:
+    """(sha256, source): the parquet file's bytes when `dataset_path` is given or
+    settings.dataset_path exists (design §8: run_id = <ts>-<sha256(dataset.parquet)[:8]>, so
+    the CLI and optimize see the same id), else the content hash of the frame."""
+    path = Path(dataset_path) if dataset_path is not None else (settings.dataset_path if settings.dataset_path.exists() else None)
+    if path is not None:
+        return dataset_sha256(path), f"file:{path}"
+    return dataset_sha256(dataset), "content"
 
 
 # ---- public entry points --------------------------------------------------------------------------
@@ -491,7 +616,8 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
              decision_times: list[str], final: bool = False, run_id: str | None = None,
              target: str = "r_24h", paths: Callable[[str], pd.DataFrame | None] | None = None,
              funding: Callable[[str], pd.DataFrame | None] | None = None, n_boot: int = 1000,
-             now: pd.Timestamp | None = None) -> dict:
+             now: pd.Timestamp | None = None, events: pd.DataFrame | None = None,
+             dataset_path: Path | str | None = None) -> dict:
     """Walk-forward for each (model, decision_time) on folds that exclude the holdout season;
     with final=True additionally scores the holdout once and logs it. Writes
     reports/<run_id>/{summary.json, predictions.parquet, trades.parquet, leaderboard.md} and
@@ -501,7 +627,13 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     `paths(event_id)` supplies the fine bars for the simulation (default: targets.loaders through
     the archive / live candles / FMP); `funding(market)` the archived hourly funding (default:
     the archive). `n_boot` bootstrap replicates per interval; `now` overrides the clock used by
-    the final-run guard."""
+    the final-run guard. `events` is the earnings calendar (events.parquet; default: read from
+    settings.events_path when it exists) that a final run cross-checks for holdout-season
+    events missing from the dataset. `dataset` must be the content of `dataset_path` (default:
+    settings.dataset_path when it exists), whose file bytes give the dataset hash in run_id;
+    without a file the frame's content hash is used and summary['dataset_hash_source'] says so.
+    Provider errors from the default bar loader (budget exhausted, provider unavailable)
+    propagate: a run never silently reports trades on a partially fetched set of events."""
     now = now or utcnow()
     for name in model_names:
         if name not in models_mod.REGISTRY:
@@ -512,10 +644,12 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     if not model_names or not decision_times:
         raise ValueError("model_names and decision_times must be non-empty")
     df = prepare_dataset(dataset, target, settings)
-    ds_hash = dataset_sha256(dataset)
+    ds_hash, hash_source = _dataset_hash(settings, dataset, dataset_path)
     run_id = run_id or make_run_id(ds_hash, now)
     if final:
-        check_holdout_ready(df, settings, now)
+        if events is None and settings.events_path.exists():
+            events = pd.read_parquet(settings.events_path)
+        check_holdout_ready(df, settings, now, events=events)
     scorings_before = count_holdout_scorings(settings.holdout_log_path)
     bar_index = memoised_bar_index(paths if paths is not None else loader_paths(settings, df))
     funding_fn = memoised_funding(funding if funding is not None else archive_funding_loader(settings))
@@ -571,7 +705,8 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
     notes = _notes(results, extras, scorings_before, settings)
     summary: dict[str, Any] = {
         "run_id": run_id, "created_at": now, "final": bool(final), "target": target,
-        "schema_version": SCHEMA_VERSION, "dataset_sha256": ds_hash, "n_rows": int(len(dataset)),
+        "schema_version": SCHEMA_VERSION, "dataset_sha256": ds_hash, "dataset_hash_source": hash_source,
+        "n_rows": int(len(dataset)),
         "n_events": int(df[D.event_id].nunique()), "git": git, "settings": public_settings(settings),
         "config_hash": config_hash(settings), "versions": library_versions(),
         "decision_times": list(decision_times), "models": list(model_names),
@@ -582,7 +717,12 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
         "folds": folds_info, "skipped_seasons": skipped, "cohorts": extras,
         "best_baseline": best_baseline, "results": results,
         "holdout_results": holdout_results if final else None,
-        "sizings": list(SIZINGS), "n_boot": int(n_boot), "notes": notes,
+        "sizings": list(SIZINGS), "n_boot": int(n_boot), "capital_rule": CAPITAL_RULE,
+        "mde_sources": {MDE_PAIRED: "MDE = (z_0.975 + z_0.8) * SE of the mean paired score difference vs the best baseline",
+                        MDE_UPPER_BOUND: "no paired comparison: closed-form unpaired bound, conservative (larger)"},
+        "resampling": "block bootstrap by season with at least 5 seasons, else by UTC day of t0, else iid rows; "
+                      "recorded per cell as 'resampling'",
+        "notes": notes,
     }
     if final:
         append_holdout_log(settings.holdout_log_path, {
@@ -619,12 +759,13 @@ def _notes(results: dict[str, Any], extras: dict[str, Any], scorings_before: int
 
 
 def train_final(settings: Settings, dataset: pd.DataFrame, *, model_name: str, decision_time: str,
-                target: str = "r_24h") -> object:
+                target: str = "r_24h", dataset_path: Path | str | None = None) -> object:
     """Fit on all non-holdout events that pass the headline filters (min_t0_confidence,
     has_perp_at_t0 when enough events exist), attach the residual band from a walk-forward pass,
     save under settings.models_dir/<decision_time>/<model_name>/ with model.json (decision_time,
     dataset_sha256, git sha, config hash, trained_at, n_events, filters, holdout reference) and
-    return the model."""
+    return the model. The dataset hash follows the same rule as `evaluate` (file bytes of
+    `dataset_path` / settings.dataset_path when present, else the frame's content hash)."""
     if model_name not in models_mod.REGISTRY:
         raise KeyError(f"unknown model {model_name!r}; available: {models_mod.available_models()}")
     if decision_time not in DECISION_TIMES:
@@ -650,15 +791,14 @@ def train_final(settings: Settings, dataset: pd.DataFrame, *, model_name: str, d
                                       embargo_days=settings.embargo_days, holdout_season=settings.holdout_season)
         for fold in folds:
             tr, te = cohort.loc[fold.train_idx], cohort.loc[fold.test_idx]
-            _, r, _ = _fit_predict(model_name, settings.random_seed, tr, te, feats)
+            _, r, _, _ = _fit_predict(model_name, settings.random_seed, tr, te, feats)
             res = te[Y].to_numpy(dtype=float) - r
             residuals.append(res[np.isfinite(res)])
         if residuals and sum(len(r) for r in residuals) > 0:
             source = label
             break
     model = models_mod.make_model(model_name, seed=settings.random_seed)
-    direction = pd.Series(np.where(train[DIR].fillna(0) >= 0, 1.0, -1.0), index=train.index)
-    model.fit(_X(train, feats), train[Y].astype(float), direction)
+    model.fit(_X(train, feats), train[Y].astype(float), _direction_target(train))
     if not residuals or sum(len(r) for r in residuals) == 0:
         source = "in_sample"
         r_in = np.asarray(model.predict_return(_X(train, feats)), dtype=float).reshape(-1)
@@ -679,9 +819,10 @@ def train_final(settings: Settings, dataset: pd.DataFrame, *, model_name: str, d
         joblib.dump(model, out_dir / "model.joblib")
     git = git_info()
     log_path = settings.holdout_log_path
+    ds_hash, hash_source = _dataset_hash(settings, dataset, dataset_path)
     meta = {
         "model": model_name, "decision_time": decision_time, "target": target,
-        "dataset_sha256": dataset_sha256(dataset), "git_sha": git["sha"], "git_dirty": git["dirty"],
+        "dataset_sha256": ds_hash, "dataset_hash_source": hash_source, "git_sha": git["sha"], "git_dirty": git["dirty"],
         "config_hash": config_hash(settings), "trained_at": utcnow(), "n_events": int(len(train)),
         "filters": {"min_t0_confidence": settings.min_t0_confidence, "has_perp_at_t0": bool(use_perp),
                     "holdout_season_excluded": settings.holdout_season, "target_present": True},
