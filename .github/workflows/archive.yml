@@ -1,0 +1,29 @@
+name: archive-candles
+# Hyperliquid serves only the most recent 5000 candles per interval (1m ≈ 3.5 days),
+# so fine-grained perp history must be captured continuously. This job pulls the
+# universe's 1m/5m/15m/1h candles and funding into parquet and uploads them as an artifact.
+on:
+  schedule:
+    - cron: "17 */12 * * *"
+  workflow_dispatch:
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.11
+      - run: uv venv && uv pip install -e .
+      - name: Restore previous archive
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: candle-archive
+          path: data/archive
+      - run: uv run freedom universe
+      - run: uv run freedom archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candle-archive
+          path: data/archive
+          retention-days: 90

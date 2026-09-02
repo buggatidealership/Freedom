@@ -1,0 +1,187 @@
+# Curated classification of Hyperliquid HIP-3 markets. Reviewed by a human; the automatic
+# SEC-ticker match is only a hint. Keys are market names (dex:SYMBOL).
+#
+# kind: equity_us | equity_fpi | equity_intl | etf | index | commodity | fx | crypto | preipo | rate | other
+# underlying: US ticker used for FMP / SEC lookups (defaults to SYMBOL for equities)
+# verify: true  -> classification uncertain; the universe command prints these for review
+# exclude_reason: free text; any kind other than equity_us / equity_fpi is excluded from events
+#
+# Entries marked verify were classified from the SEC ticker file and public knowledge as of
+# 2026-09-02 and may be wrong (e.g. a pre-IPO name may have listed since). Fix here, not in code.
+
+defaults:
+  dex_priority: [xyz, para, io, mkts, hyna]   # primary market tie-break after volume
+
+markets:
+  # ---- xyz: indices / commodities / fx ------------------------------------------------------
+  "xyz:XYZ100":   {kind: index}
+  "xyz:SP500":    {kind: index, note: market benchmark used for abnormal returns}
+  "xyz:JP225":    {kind: index}
+  "xyz:KR200":    {kind: index}
+  "xyz:NIFTY":    {kind: index}
+  "xyz:IBOV":     {kind: index}
+  "xyz:DXY":      {kind: index}
+  "xyz:VIX":      {kind: index, note: volatility context feature if listed}
+  "xyz:GOLD":     {kind: commodity, note: SEC match to Gold.com is a false positive}
+  "xyz:SILVER":   {kind: commodity}
+  "xyz:COPPER":   {kind: commodity}
+  "xyz:PLATINUM": {kind: commodity}
+  "xyz:PALLADIUM": {kind: commodity}
+  "xyz:ALUMINIUM": {kind: commodity}
+  "xyz:NATGAS":   {kind: commodity}
+  "xyz:BRENTOIL": {kind: commodity}
+  "xyz:CL":       {kind: commodity, note: WTI crude; SEC match to Colgate is a false positive}
+  "xyz:TTF":      {kind: commodity}
+  "xyz:CORN":     {kind: commodity}
+  "xyz:WHEAT":    {kind: commodity}
+  "xyz:URANIUM":  {kind: commodity}
+  "xyz:DRAM":     {kind: commodity, note: memory price index}
+  "xyz:H100":     {kind: commodity, note: GPU rental price index}
+  "xyz:JPY":      {kind: fx}
+  "xyz:EUR":      {kind: fx}
+  "xyz:GBP":      {kind: fx}
+  "xyz:KRW":      {kind: fx}
+  "xyz:PURRDAT":  {kind: other, verify: true, note: unknown reference; excluded until identified}
+  "xyz:VOL":      {kind: other, verify: true}
+  # ---- xyz: ETFs ---------------------------------------------------------------------------
+  "xyz:EWY":  {kind: etf}
+  "xyz:EWJ":  {kind: etf}
+  "xyz:EWZ":  {kind: etf}
+  "xyz:EWT":  {kind: etf}
+  "xyz:XLE":  {kind: etf}
+  "xyz:XBI":  {kind: etf}
+  "xyz:SMH":  {kind: etf}
+  "xyz:SOXL": {kind: etf}
+  "xyz:MAGS": {kind: etf}
+  "xyz:URNM": {kind: etf}
+  "xyz:KORU": {kind: etf, verify: true}
+  "xyz:LYTE": {kind: other, verify: true, note: unidentified; possibly an ETF or index}
+  "xyz:NCLD": {kind: other, verify: true, note: unidentified; possibly a neocloud basket}
+  # ---- xyz: non-US listings (no US data source; excluded for now) --------------------------
+  "xyz:SMSN":     {kind: equity_intl, note: Samsung Electronics (KRX)}
+  "xyz:SKHX":     {kind: equity_intl, note: SK hynix Korean line (KRX)}
+  "xyz:HYUNDAI":  {kind: equity_intl}
+  "xyz:KIOXIA":   {kind: equity_intl, note: Tokyo listing}
+  "xyz:SOFTBANK": {kind: equity_intl, note: Tokyo listing}
+  "xyz:IBIDEN":   {kind: equity_intl}
+  "xyz:CXMT":     {kind: equity_intl, note: ChangXin Memory (Shanghai)}
+  "xyz:GIGADEV":  {kind: equity_intl, note: GigaDevice (Shanghai)}
+  "xyz:UNITREE":  {kind: equity_intl, note: Unitree Robotics (STAR)}
+  "xyz:ZHIPU":    {kind: equity_intl, note: Zhipu AI (HKEX)}
+  "xyz:MINIMAX":  {kind: equity_intl, note: MiniMax (HKEX)}
+  "xyz:SHEIN":    {kind: preipo, verify: true}
+  "xyz:SPCX":     {kind: preipo, verify: true, note: SpaceX; promote to equity_us if it has listed}
+  # ---- xyz: US equities and US-listed foreign issuers ---------------------------------------
+  "xyz:TSLA":  {kind: equity_us}
+  "xyz:NVDA":  {kind: equity_us}
+  "xyz:HOOD":  {kind: equity_us}
+  "xyz:INTC":  {kind: equity_us}
+  "xyz:PLTR":  {kind: equity_us}
+  "xyz:COIN":  {kind: equity_us}
+  "xyz:META":  {kind: equity_us}
+  "xyz:AAPL":  {kind: equity_us}
+  "xyz:MSFT":  {kind: equity_us}
+  "xyz:ORCL":  {kind: equity_us}
+  "xyz:GOOGL": {kind: equity_us}
+  "xyz:AMZN":  {kind: equity_us}
+  "xyz:AMD":   {kind: equity_us}
+  "xyz:MU":    {kind: equity_us}
+  "xyz:SNDK":  {kind: equity_us}
+  "xyz:MSTR":  {kind: equity_us}
+  "xyz:STRC":  {kind: other, note: Strategy preferred stock; earnings belong to MSTR, excluded}
+  "xyz:CRCL":  {kind: equity_us}
+  "xyz:NFLX":  {kind: equity_us}
+  "xyz:COST":  {kind: equity_us}
+  "xyz:LLY":   {kind: equity_us}
+  "xyz:TSM":   {kind: equity_fpi, note: ADR; 6-K filer}
+  "xyz:RIVN":  {kind: equity_us}
+  "xyz:BABA":  {kind: equity_fpi, note: ADR; 6-K filer}
+  "xyz:USAR":  {kind: equity_us}
+  "xyz:CRWV":  {kind: equity_us}
+  "xyz:GME":   {kind: equity_us}
+  "xyz:HIMS":  {kind: equity_us}
+  "xyz:DKNG":  {kind: equity_us}
+  "xyz:LITE":  {kind: equity_us}
+  "xyz:BX":    {kind: equity_us}
+  "xyz:MRVL":  {kind: equity_us}
+  "xyz:RKLB":  {kind: equity_us}
+  "xyz:BIRD":  {kind: equity_us, verify: true, note: SEC maps BIRD to Smartbird Inc.; confirm the underlying}
+  "xyz:CBRS":  {kind: equity_us, verify: true, note: Cerebras; confirm it is listed and has earnings history}
+  "xyz:ZM":    {kind: equity_us}
+  "xyz:EBAY":  {kind: equity_us}
+  "xyz:ARM":   {kind: equity_fpi, note: Arm Holdings plc ADR; 6-K filer}
+  "xyz:ASML":  {kind: equity_fpi, note: 6-K filer}
+  "xyz:BB":    {kind: equity_us, note: BlackBerry files 10-K/8-K as a domestic filer}
+  "xyz:QNT":   {kind: equity_us, verify: true, note: Quantinuum; confirm listing and history}
+  "xyz:DELL":  {kind: equity_us}
+  "xyz:IBM":   {kind: equity_us}
+  "xyz:AVGO":  {kind: equity_us}
+  "xyz:NOW":   {kind: equity_us}
+  "xyz:NBIS":  {kind: equity_fpi, note: Nebius Group N.V.; 6-K filer}
+  "xyz:WDC":   {kind: equity_us}
+  "xyz:NOK":   {kind: equity_fpi, note: 6-K filer}
+  "xyz:BE":    {kind: equity_us}
+  "xyz:QCOM":  {kind: equity_us}
+  "xyz:BOT":   {kind: other, verify: true, note: SEC maps BOT to RoboStrategy Inc.; confirm what the perp tracks}
+  "xyz:AMAT":  {kind: equity_us}
+  "xyz:SHAZ":  {kind: equity_us, verify: true, note: SharonAI Holdings; confirm history}
+  "xyz:SKHY":  {kind: equity_fpi, verify: true, note: SK hynix US line per SEC file; confirm data availability}
+  "xyz:GEV":   {kind: equity_us}
+  "xyz:IREN":  {kind: equity_fpi, verify: true, note: IREN Ltd; may file 10-K as domestic filer, resolver decides}
+  "xyz:NET":   {kind: equity_us}
+  "xyz:CRWD":  {kind: equity_us}
+  "xyz:RDDT":  {kind: equity_us}
+  "xyz:AAOI":  {kind: equity_us}
+  "xyz:MRNA":  {kind: equity_us}
+  # ---- para --------------------------------------------------------------------------------
+  "para:TOTAL2": {kind: crypto}
+  "para:OTHERS": {kind: crypto}
+  "para:BTCD":   {kind: crypto}
+  "para:10Y":    {kind: rate}
+  "para:30Y":    {kind: rate}
+  "para:2Y":     {kind: rate}
+  "para:IGV":    {kind: etf}
+  "para:H100":   {kind: commodity}
+  "para:AVGO":   {kind: equity_us}
+  "para:COHR":   {kind: equity_us}
+  "para:GLW":    {kind: equity_us}
+  "para:CRDO":   {kind: equity_us, note: Credo files 10-K}
+  "para:LRCX":   {kind: equity_us}
+  "para:NET":    {kind: equity_us}
+  "para:STX":    {kind: equity_us, note: Seagate files 10-K}
+  "para:IREN":   {kind: equity_fpi, verify: true}
+  "para:VST":    {kind: equity_us}
+  "para:TER":    {kind: equity_us}
+  "para:AAOI":   {kind: equity_us}
+  "para:CIEN":   {kind: equity_us}
+  "para:RDDT":   {kind: equity_us}
+  "para:CRWD":   {kind: equity_us}
+  "para:MELI":   {kind: equity_us, note: MercadoLibre files 10-K}
+  "para:SMCI":   {kind: equity_us}
+  "para:SOFI":   {kind: equity_us}
+  "para:TTWO":   {kind: equity_us}
+  "para:UNITREE": {kind: equity_intl}
+  "para:NAVER":  {kind: equity_intl}
+  "para:TENCENT": {kind: equity_intl}
+  "para:CAMBRICON": {kind: equity_intl}
+  "para:INNOLIGHT": {kind: equity_intl}
+  "para:ANSEM":  {kind: other, verify: true, note: unidentified}
+  "para:ANTH":   {kind: preipo}
+  # ---- mkts / io / hyna ----------------------------------------------------------------------
+  "mkts:US500":     {kind: index}
+  "mkts:USBOND":    {kind: rate}
+  "mkts:SMALL2000": {kind: index}
+  "mkts:USTECH":    {kind: index}
+  "io:ANTH":  {kind: preipo}
+  "io:OAI":   {kind: preipo}
+  "io:SNDK":  {kind: equity_us}
+  "io:NBIS":  {kind: equity_fpi}
+  "io:GPRO":  {kind: equity_us}
+  "io:IONQ":  {kind: equity_us}
+  "io:EWY":   {kind: etf}
+  "hyna:BTC": {kind: crypto, note: SEC match to a Grayscale ETF is a false positive}
+  "hyna:ETH": {kind: crypto}
+  "hyna:HYPE": {kind: crypto}
+  "hyna:SOL": {kind: crypto}
+  "hyna:PUMP": {kind: crypto, note: SEC match to ProPetro is a false positive}
+  "hyna:ENA": {kind: crypto}
