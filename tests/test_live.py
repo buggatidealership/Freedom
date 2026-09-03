@@ -139,7 +139,7 @@ def world(settings, monkeypatch):
         return T0_LIVE if len(bars) else None
 
     monkeypatch.setattr(events_mod, "detect_release_live", detect_release_live)
-    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: events.iloc[0:0])
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14, **kw: events.iloc[0:0])
     contexts: list[features_mod.FeatureContext] = []
 
     def build_features(ctx, groups=None):
@@ -286,7 +286,7 @@ def test_upcoming_event_ids_are_minted_from_the_report_date():
 
 def test_upcoming_event_is_found_under_the_printed_id_or_its_bare_underlying(world, monkeypatch):
     s = world["settings"]
-    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: _upcoming([("AMD", "2026-09-15")]))
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14, **kw: _upcoming([("AMD", "2026-09-15")]))
     now = to_utc("2026-09-15 19:30", assume_tz="UTC")
     kw = dict(decision="pre_5m", now=now, hl=FakeHL(now), fmp=FakeFMP(now), append=False)
     row = live.predict_event(s, event_id="AMD:2026-06", **kw)["row"]
@@ -296,7 +296,7 @@ def test_upcoming_event_is_found_under_the_printed_id_or_its_bare_underlying(wor
     with pytest.raises(live.EventNotFound, match="freedom upcoming"):
         live.predict_event(s, event_id="AMD:2026-03", **kw)
     monkeypatch.setattr(events_mod, "upcoming_events",
-                        lambda s, days=14: _upcoming([("AMD", "2026-09-15"), ("AMD", "2026-09-29")]))
+                        lambda s, days=14, **kw: _upcoming([("AMD", "2026-09-15"), ("AMD", "2026-09-29")]))
     with pytest.raises(live.EventNotFound, match="matches 2 upcoming events .*AMD:2026-06"):
         live.predict_event(s, event_id="AMD", **kw)
 
@@ -423,7 +423,7 @@ def test_live_features_use_the_dataset_loader_inputs(world, monkeypatch):
 def test_a_calendar_hit_the_table_knows_is_predicted_from_the_table_row(world, monkeypatch):
     s = world["settings"]
     up = _upcoming([("NVDA", "2026-08-26")]).assign(**{E.event_id: [EVENT]})  # `freedom upcoming` prints the table id
-    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: up)
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14, **kw: up)
     now = to_utc("2026-08-26 19:30", assume_tz="UTC")
     row = live.predict_event(s, event_id="nvda", decision="pre_5m", now=now, hl=FakeHL(now), fmp=FakeFMP(now),
                              append=False)["row"]

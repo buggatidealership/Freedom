@@ -423,10 +423,10 @@ def test_upcoming_lists_events_with_the_id_predict_takes(dirs, monkeypatch):
     monkeypatch.setattr(events_mod, "upcoming_events", upcoming)
     result = runner.invoke(app, ["upcoming", "--days", "30"])
     assert result.exit_code == 0 and "NVDA:2026-09" in result.output and "30 days" in result.output
-    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: upcoming(s, days, "NVDA:2026-10"))
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14, **kw: upcoming(s, days, "NVDA:2026-10"))
     result = runner.invoke(app, ["upcoming"])  # the events table's id (off-calendar fiscal year) is printed as is
     assert result.exit_code == 0 and "NVDA:2026-10" in result.output and "NVDA:2026-09" not in result.output
-    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: pd.DataFrame())
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14, **kw: pd.DataFrame())
     assert "no universe events" in runner.invoke(app, ["upcoming"]).output
 
     def no_key(s, days=14):

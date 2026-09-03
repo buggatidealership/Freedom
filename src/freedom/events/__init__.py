@@ -1447,9 +1447,34 @@ def expected_t0_for(events: pd.DataFrame | None, underlying: str, report_date_ny
     return calendar_default_t0(d, "AMC"), "calendar default (AMC)"
 
 
-def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
-    """Future events for the event universe from the FMP calendar, with the consensus taken from
-    the newest archived snapshot when present and `expected_t0` from `expected_t0_for`."""
+UPCOMING_SOURCES = frozenset({"fmp", "table"})
+
+
+def table_calendar(events: pd.DataFrame | None, today: date, days: int) -> pd.DataFrame:
+    """The events table's rows reporting in [today, today + days] in the FMP calendar's shape
+    (symbol, report_date_ny, eps/revenue estimates): the schedule source that costs no provider
+    request. Every `freedom events` build carries the issuer's next event, so the scheduled cards
+    job can find its instants from the data artifact alone."""
+    cols = [U.symbol, E.report_date_ny, E.eps_estimate, E.rev_estimate]
+    if events is None or len(events) == 0 or E.report_date_ny not in events.columns:
+        return pd.DataFrame(columns=cols)
+    days_ = events[E.report_date_ny].map(lambda x: None if _isna(x) else _as_date(x))
+    keep = days_.map(lambda d: d is not None and today <= d <= today + timedelta(days=days)).to_numpy()
+    e = events[keep]
+    out = pd.DataFrame({
+        U.symbol: e[E.underlying].astype(str).str.upper().to_numpy(),
+        E.report_date_ny: days_[keep].to_numpy(),
+        E.eps_estimate: pd.to_numeric(e[E.eps_estimate], errors="coerce").to_numpy() if E.eps_estimate in e else math.nan,
+        E.rev_estimate: pd.to_numeric(e[E.rev_estimate], errors="coerce").to_numpy() if E.rev_estimate in e else math.nan,
+    }, columns=cols)
+    return out.drop_duplicates([U.symbol, E.report_date_ny]).reset_index(drop=True)
+
+
+def upcoming_events(settings: Settings, days: int = 14, *, source: str = "fmp") -> pd.DataFrame:
+    """Future events for the event universe, with the consensus taken from the newest archived
+    snapshot when present and `expected_t0` from `expected_t0_for`. `source` "fmp" reads the FMP
+    calendar (one request) and falls back to the events table's own upcoming rows when the key or
+    the daily budget is missing; "table" never touches a provider (the cards job)."""
     from ..data.fmp import FMPClient
     from ..data.nasdaq import NasdaqClient
     from ..universe import event_universe, load_universe
@@ -1458,9 +1483,18 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
     ev = event_universe(universe)
     by_underlying = {str(r[U.underlying]).upper(): r for _, r in ev.iterrows() if not _isna(r[U.underlying])}
     today = _today_ny()
-    cal = FMPClient(settings).earnings_calendar(pd.Timestamp(today), pd.Timestamp(today) + pd.Timedelta(days=int(days)))
-    snapshots = load_consensus_snapshots(settings)
+    if source not in UPCOMING_SOURCES:
+        raise ValueError(f"unknown upcoming source {source!r}; choose from {sorted(UPCOMING_SOURCES)}")
     events = load_events(settings) if settings.events_path.exists() else None
+    cal = None
+    if source == "fmp":
+        try:
+            cal = FMPClient(settings).earnings_calendar(pd.Timestamp(today), pd.Timestamp(today) + pd.Timedelta(days=int(days)))
+        except (BudgetExhausted, ProviderUnavailable) as exc:
+            log.warning("FMP calendar unavailable (%s); using the events table's upcoming rows", exc)
+    if cal is None:
+        cal = table_calendar(events, today, int(days))
+    snapshots = load_consensus_snapshots(settings)
     date_overrides = _load_report_date_overrides(settings)
     manual = _load_manual_overrides(settings)  # applied here too: no table rebuild needed
     release_clocks = _load_release_clock_overrides(settings)  # likewise

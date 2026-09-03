@@ -1157,3 +1157,42 @@ def test_t0_override_reaches_the_upcoming_schedule_without_a_table_rebuild(setti
     assert up.loc["TSM", E.event_id] == eid and up.loc["TSM", E.report_date_ny] == date(2026, 9, 14)
     assert up.loc["TSM", "expected_t0"] == pd.Timestamp("2026-09-14 06:00", tz="UTC")
     assert up.loc["TSM", "expected_t0_source"].startswith("manual override") and "vendor said 2026-09-11" in up.loc["TSM", "expected_t0_source"]
+
+
+def test_upcoming_schedule_comes_from_the_events_table_without_a_provider(settings, fake, monkeypatch):
+    """The cards job must find its instants from the data artifact alone: with the FMP key or
+    budget gone `upcoming_events` falls back to the table's own upcoming rows, and
+    source="table" never calls the provider."""
+    from freedom.data.base import ProviderUnavailable
+    from freedom.data.fmp import FMPClient
+    from freedom.events import table_calendar
+
+    write_universe(settings)
+
+    def cal_row(sym: str, day: str) -> dict:
+        return {"symbol": sym, "date": day, "epsActual": None, "epsEstimated": 1.5,
+                "revenueActual": None, "revenueEstimated": 9.0e10, "lastUpdated": "2026-09-02"}
+
+    fake.calendar = [cal_row("TSM", "2026-09-11")]
+    fake.earnings["TSM"] = [cal_row("TSM", "2026-09-11")]
+    build_events(settings, underlyings=["TSM"], since=pd.Timestamp("2026-09-01"))
+    table = load_events(settings)
+    cal = table_calendar(table, date(2026, 9, 2), 14)
+    assert cal["symbol"].tolist() == ["TSM"] and cal[E.report_date_ny].tolist() == [date(2026, 9, 11)]
+    assert table_calendar(table, date(2026, 9, 12), 14).empty and table_calendar(None, date(2026, 9, 2), 14).empty
+
+    def no_calendar(self, start, end):
+        raise ProviderUnavailable("FMP_API_KEY is not set")
+
+    monkeypatch.setattr(FMPClient, "earnings_calendar", no_calendar)
+    up = upcoming_events(settings, days=14)
+    assert up[E.underlying].tolist() == ["TSM"] and up[E.report_date_ny].tolist() == [date(2026, 9, 11)]
+    assert up["expected_t0"].iloc[0].tz_convert("UTC").date() == date(2026, 9, 11)
+
+    def never(self, start, end):
+        raise AssertionError("source='table' must not call the provider")
+
+    monkeypatch.setattr(FMPClient, "earnings_calendar", never)
+    assert upcoming_events(settings, days=14, source="table")[E.underlying].tolist() == ["TSM"]
+    with pytest.raises(ValueError):
+        upcoming_events(settings, days=14, source="nasdaq")

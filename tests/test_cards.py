@@ -53,7 +53,7 @@ def world(dirs, monkeypatch):
     """One NVDA event expected at T0. predict_event records its calls and returns the predict
     test's fake result for the requested pair (or the next queued outcome: a result to return or
     an exception to raise). time.sleep records its calls and advances the faked clock."""
-    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: _upcoming([("NVDA", T0)]))
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14, **kw: _upcoming([("NVDA", T0)]))
     calls: list[dict] = []
     outcomes: list = []
 
@@ -230,7 +230,7 @@ def test_a_late_release_reruns_the_post_card_at_its_as_of(world):
 
 def test_a_failed_card_is_a_note_and_the_run_continues(world, monkeypatch):
     _, reports = world["dirs"]
-    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14: _upcoming([("NVDA", T0), ("AMD", T0)]))
+    monkeypatch.setattr(events_mod, "upcoming_events", lambda s, days=14, **kw: _upcoming([("NVDA", T0), ("AMD", T0)]))
     world["outcomes"].append(RuntimeError("FMP is down"))
     result = runner.invoke(app, ["cards", "--now", "2026-08-26T19:55:00Z", "--decisions", "pre_10m"])
     assert result.exit_code == 0, result.output
@@ -245,14 +245,14 @@ def test_a_failed_card_is_a_note_and_the_run_continues(world, monkeypatch):
 def test_prerequisites_and_bad_options_exit_2(world, monkeypatch):
     assert runner.invoke(app, ["cards", "--decisions", "noon"]).exit_code == 2
 
-    def no_key(s, days=14):
+    def no_key(s, days=14, **kw):
         raise ProviderUnavailable("FMP_API_KEY is not set")
 
     monkeypatch.setattr(events_mod, "upcoming_events", no_key)
     result = runner.invoke(app, ["cards"])
     assert result.exit_code == 2 and "FMP_API_KEY" in result.output
 
-    def no_universe(s, days=14):
+    def no_universe(s, days=14, **kw):
         raise FileNotFoundError(f"{s.universe_path} missing")
 
     monkeypatch.setattr(events_mod, "upcoming_events", no_universe)

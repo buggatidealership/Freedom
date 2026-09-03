@@ -153,7 +153,7 @@ def due_instants(settings: Settings, *, now: pd.Timestamp, horizon: pd.Timedelta
                  days: int = LOOKAHEAD_DAYS, lookback: pd.Timedelta = DUE_LOOKBACK) -> tuple[list[Due], list[Due]]:
     """(due, already predicted): the (event, decision) instants inside [now - lookback,
     now + horizon] in chronological order, split by whether a live row exists for the pair."""
-    upcoming = events_mod.upcoming_events(settings, days=days)
+    upcoming = events_mod.upcoming_events(settings, days=days, source="table")  # never spends provider quota
     if upcoming is None or len(upcoming) == 0:
         return [], []
     upcoming = live.with_event_ids(upcoming)
