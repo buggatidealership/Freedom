@@ -53,6 +53,11 @@ Implementation notes (what the code below relies on):
   checkpoint; budget exhaustion on it is one, like the intraday request.
 * Optional manual overrides live in ``configs/t0_overrides.yaml`` as
   ``{"NVDA:2026-07": "2026-08-26T20:20:00Z"}`` (keys may also be ``"NVDA:2026-08-26"``).
+* ``configs/report_date_overrides.yaml`` corrects the vendor's report DATE before anything else
+  runs: ``{"ORCL:2026-09-08": "2026-09-10"}`` maps the FMP date of an issuer's event to the
+  issuer-confirmed one. The 8-K search, the Nasdaq flag lookup, the event id and the
+  ``upcoming_events`` schedule all use the corrected date; the row is flagged
+  ``report_date_override``. A t0 override for such an event is keyed by the corrected date.
 * ``upcoming_events`` takes ``expected_t0`` from, in order: a manual override recorded on the
   matching upcoming row of events.parquet, the issuer's median sec_8k acceptance clock, the
   calendar-flag time of that upcoming row, the Nasdaq calendar's time flag, the AMC default
@@ -765,6 +770,30 @@ def _load_manual_overrides(settings: Settings) -> dict[str, pd.Timestamp]:
     return out
 
 
+def _load_report_date_overrides(settings: Settings) -> dict[str, date]:
+    """configs/report_date_overrides.yaml: {"ORCL:2026-09-08": "2026-09-10"}, the vendor's
+    report date of an issuer's event -> the issuer-confirmed date. Keys are UNDERLYING:date."""
+    path = settings.configs_dir / "report_date_overrides.yaml"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    out: dict[str, date] = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        try:
+            sym, vendor_day = str(k).strip().upper().split(":", 1)
+            out[f"{sym}:{_as_date(vendor_day).isoformat()}"] = _as_date(str(v).strip())
+        except (ValueError, TypeError) as exc:
+            log.warning("ignoring report date override %r: %s", k, exc)
+    return out
+
+
+def corrected_report_date(overrides: dict[str, date], underlying: str, d: date) -> tuple[date, bool]:
+    """(report date, corrected?) after the report_date_overrides mapping."""
+    hit = overrides.get(f"{str(underlying).upper()}:{d.isoformat()}")
+    return (hit, True) if hit is not None and hit != d else (d, False)
+
+
 # ---- row assembly --------------------------------------------------------------------------------
 @dataclass
 class _Event:
@@ -774,6 +803,7 @@ class _Event:
     eps_estimate: float
     rev_actual: float
     rev_estimate: float
+    date_override: bool = False  # the vendor's date was corrected by report_date_overrides.yaml
 
 
 def _base_row(ev: _Event) -> dict[str, Any]:
@@ -829,6 +859,8 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
     name, d_fmp = ev.name, ev.report_date_ny
     row = _base_row(ev)
     flags: list[str] = list(name.flags)
+    if ev.date_override:
+        flags.append("report_date_override")
     sources: list[str] = ["fmp"]
 
     sec = providers.sec_data(name.cik)
@@ -1105,10 +1137,12 @@ def build_events(settings: Settings, *, underlyings: list[str] | None = None,
     providers = _Providers(settings)
     snapshots = load_consensus_snapshots(settings)
     manual = _load_manual_overrides(settings)
+    date_overrides = _load_report_date_overrides(settings)
     today_ny = _today_ny()
 
     budget_error: BudgetExhausted | None = None
     events: list[_Event] = []
+    seen: set[tuple[str, date]] = set()
     unfetched: list[_Name] = []
     for name in sorted(names, key=lambda n: n.underlying):
         try:
@@ -1121,11 +1155,14 @@ def build_events(settings: Settings, *, underlyings: list[str] | None = None,
             d = r[E.report_date_ny]
             if d is None or _isna(d):
                 continue
-            d = _as_date(d)
+            d, corrected = corrected_report_date(date_overrides, name.underlying, _as_date(d))
             if since_d is not None and d < since_d:
                 continue
+            if (name.underlying, d) in seen:
+                continue  # the vendor lists the corrected date as well: one event, not two
+            seen.add((name.underlying, d))
             events.append(_Event(name, d, float(r[E.eps_actual]), float(r[E.eps_estimate]),
-                                 float(r[E.rev_actual]), float(r[E.rev_estimate])))
+                                 float(r[E.rev_actual]), float(r[E.rev_estimate]), date_override=corrected))
     events.sort(key=lambda e: (e.report_date_ny, e.name.underlying), reverse=True)
 
     rows: list[dict[str, Any]] = []
@@ -1312,6 +1349,7 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
     cal = FMPClient(settings).earnings_calendar(pd.Timestamp(today), pd.Timestamp(today) + pd.Timedelta(days=int(days)))
     snapshots = load_consensus_snapshots(settings)
     events = load_events(settings) if settings.events_path.exists() else None
+    date_overrides = _load_report_date_overrides(settings)
     nasdaq = NasdaqClient(settings)
     nasdaq_flags: dict[date, dict[str, Any]] = {}
 
@@ -1334,8 +1372,11 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
         u = by_underlying.get(sym)
         if u is None:
             continue
-        d = _as_date(r[E.report_date_ny])
+        d_vendor = _as_date(r[E.report_date_ny])
+        d, corrected = corrected_report_date(date_overrides, sym, d_vendor)
         expected_t0, expected_src = expected_t0_for(events, sym, d, nasdaq_flag(sym, d))
+        if corrected:
+            expected_src += f"; report date overridden (vendor said {d_vendor.isoformat()})"
         snap = consensus_before(snapshots, sym, d, None)
         rows.append({
             E.event_id: _events_table_id(events, sym, d),  # None until `freedom events` has the row

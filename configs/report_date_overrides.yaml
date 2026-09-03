@@ -1,0 +1,5 @@
+# Vendor report date -> issuer-confirmed report date (New York calendar dates).
+# Key: UNDERLYING:<date the FMP calendar shows>. Value: the date the company announced.
+# Applied before the 8-K search, the Nasdaq flag lookup and the `freedom upcoming` schedule.
+# Remove an entry once the vendor calendar carries the right date (it then no longer matches).
+ORCL:2026-09-08: 2026-09-10   # Oracle: Q1 FY2027 results Thursday Sep 10 after the close (investor.oracle.com, Aug 2026); FMP said Sep 8, Finnhub Sep 14

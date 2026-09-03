@@ -965,3 +965,41 @@ def test_merge_existing_keeps_rows_of_an_older_additive_schema(settings):
     merged = _merge_existing(settings, new, processed={"NVDA"}, since=None)
     assert set(merged[E.event_id]) == {"TSLA:2026-06", "NVDA:2026-07"}
     assert E.ca_ex_date in merged.columns
+
+
+def test_report_date_override_moves_the_event_and_the_upcoming_schedule(settings, fake):
+    """configs/report_date_overrides.yaml corrects the vendor's day before the 8-K search, the
+    Nasdaq lookup, the event id and the upcoming schedule; the vendor's own row on the corrected
+    day does not make a second event; a malformed entry is ignored."""
+    from freedom.events import _load_report_date_overrides, corrected_report_date
+
+    write_universe(settings)
+    settings.configs_dir = settings.data_dir / "configs"
+    settings.configs_dir.mkdir()
+    (settings.configs_dir / "report_date_overrides.yaml").write_text(
+        'tsm:2026-09-11: 2026-09-14   # issuer moved the date\n"BAD": "2026-09-14"\n"TSM:nonsense": "2026-09-14"\n')
+    over = _load_report_date_overrides(settings)
+    assert over == {"TSM:2026-09-11": date(2026, 9, 14)}
+    assert corrected_report_date(over, "TSM", date(2026, 9, 11)) == (date(2026, 9, 14), True)
+    assert corrected_report_date(over, "TSM", date(2026, 9, 12)) == (date(2026, 9, 12), False)
+
+    def cal_row(sym: str, day: str) -> dict:
+        return {"symbol": sym, "date": day, "epsActual": None, "epsEstimated": 1.5,
+                "revenueActual": None, "revenueEstimated": 9.0e10, "lastUpdated": "2026-09-02"}
+
+    fake.calendar = [cal_row("TSM", "2026-09-11")]
+    fake.nasdaq["2026-09-14"] = [nasdaq_row("TSM", time_flag="time-pre-market")]
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["TSM", E.report_date_ny] == date(2026, 9, 14)
+    assert up.loc["TSM", "expected_t0"] == ny("2026-09-14 07:00")  # the Nasdaq flag of the corrected day
+    assert up.loc["TSM", "expected_t0_source"] == ("nasdaq flag 'time-pre-market' (BMO default); "
+                                                   "report date overridden (vendor said 2026-09-11)")
+    # the events table: one row on the corrected day, flagged, even when the vendor lists both days
+    fake.earnings["TSM"] = [cal_row("TSM", "2026-09-11"), cal_row("TSM", "2026-09-14")]
+    build_events(settings, underlyings=["TSM"], since=pd.Timestamp("2026-09-01"))
+    table = load_events(settings)
+    tsm = table[table[E.underlying] == "TSM"]
+    assert len(tsm) == 1 and tsm.iloc[0][E.report_date_ny] == date(2026, 9, 14)
+    assert "report_date_override" in tsm.iloc[0][E.flags].split(";")
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["TSM", E.event_id] == tsm.iloc[0][E.event_id]  # the upcoming row finds its table row

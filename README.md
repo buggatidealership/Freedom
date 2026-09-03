@@ -77,6 +77,12 @@ freedom predict --event NVDA:2026-10 --decision pre_10m   # card 1, ten minutes 
 freedom predict --event NVDA:2026-10 --decision post_30m  # card 2, thirty minutes after
 ```
 
+When a vendor calendar has the wrong day (Oracle's Q1 FY2027 date was two days off in FMP and
+four in Finnhub), put the correction in `configs/report_date_overrides.yaml` as
+`ORCL:2026-09-08: 2026-09-10` (vendor date to issuer-confirmed date). It applies before the 8-K
+search, the Nasdaq lookup and the `upcoming` schedule. `configs/t0_overrides.yaml` still pins an
+exact release instant when the time, not the day, is wrong.
+
 Each `predict` prints a card first: `CALL: LONG | SHORT | NO TRADE` (NO TRADE unless `p_up` is at
 least `no_trade_band` = 0.10 away from 0.5), the expected 24 h move with its 10/90 % band, and the
 five features that pushed the call, signed, each with a plain-language description. When the
