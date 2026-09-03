@@ -1003,3 +1003,36 @@ def test_report_date_override_moves_the_event_and_the_upcoming_schedule(settings
     assert "report_date_override" in tsm.iloc[0][E.flags].split(";")
     up = upcoming_events(settings, days=14).set_index(E.underlying)
     assert up.loc["TSM", E.event_id] == tsm.iloc[0][E.event_id]  # the upcoming row finds its table row
+
+
+def test_t0_override_reaches_the_upcoming_schedule_without_a_table_rebuild(settings, fake):
+    """A foreign issuer releasing overnight: the t0 override in configs/t0_overrides.yaml sets the
+    upcoming row's expected_t0 directly (keyed by UNDERLYING:date, or by the table's event id),
+    and the live stratum key reads it as a manual schedule."""
+    from freedom.live import expected_t0_source_key
+
+    write_universe(settings)
+    settings.configs_dir = settings.data_dir / "configs"
+    settings.configs_dir.mkdir()
+
+    def cal_row(sym: str, day: str) -> dict:
+        return {"symbol": sym, "date": day, "epsActual": None, "epsEstimated": 1.5,
+                "revenueActual": None, "revenueEstimated": 9.0e10, "lastUpdated": "2026-09-02"}
+
+    fake.calendar = [cal_row("TSM", "2026-09-11"), cal_row("AAPL", "2026-09-15")]
+    (settings.configs_dir / "t0_overrides.yaml").write_text('"tsm:2026-09-11": "2026-09-11T06:00:00Z"\n')
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["TSM", "expected_t0"] == pd.Timestamp("2026-09-11 06:00", tz="UTC")
+    assert up.loc["TSM", "expected_t0_source"] == "manual override (configs/t0_overrides.yaml)"
+    assert expected_t0_source_key(up.loc["TSM", "expected_t0_source"]) == "expected_manual"
+    assert up.loc["AAPL", "expected_t0"] == ny("2026-09-15 16:05")  # untouched
+    # keyed by the table's event id once the row exists, and composed with a report-date override
+    (settings.configs_dir / "report_date_overrides.yaml").write_text("TSM:2026-09-11: 2026-09-14\n")
+    fake.earnings["TSM"] = [cal_row("TSM", "2026-09-11")]
+    build_events(settings, underlyings=["TSM"], since=pd.Timestamp("2026-09-01"))
+    eid = load_events(settings).set_index(E.underlying).loc["TSM", E.event_id]
+    (settings.configs_dir / "t0_overrides.yaml").write_text(f'"{eid}": "2026-09-14T06:00:00Z"\n')
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["TSM", E.event_id] == eid and up.loc["TSM", E.report_date_ny] == date(2026, 9, 14)
+    assert up.loc["TSM", "expected_t0"] == pd.Timestamp("2026-09-14 06:00", tz="UTC")
+    assert up.loc["TSM", "expected_t0_source"].startswith("manual override") and "vendor said 2026-09-11" in up.loc["TSM", "expected_t0_source"]

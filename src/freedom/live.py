@@ -209,6 +209,7 @@ class Schedule:
 # events.expected_t0_for's provenance text -> the fixed live stratum key (anything else is a
 # calendar-level default: the table's calendar flag, the Nasdaq flag or the AMC/BMO clock)
 EXPECTED_T0_SOURCES: tuple[tuple[str, str], ...] = (("events table: manual", "expected_manual"),
+                                                    ("manual override", "expected_manual"),
                                                     ("median of", "expected_sec_8k"))
 
 

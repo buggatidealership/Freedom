@@ -1,0 +1,15 @@
+# Exact release instant (UTC) for one event, keyed by event_id ("NVDA:2026-07") or by
+# UNDERLYING:<report date in New York> ("ASML:2026-10-14"). Wins over every other source, so use
+# it only when the vendor timing class is wrong (a foreign issuer releasing overnight) and keep
+# the value at the issuer's habitual wire time.
+# ASML publishes quarterly results at 07:00 Central European time (Q2 2026 hit the wire at
+# 01:00 ET); Oct 14 2026 is CEST (UTC+2), so 07:00 CEST = 05:00 UTC = 01:00 ET. Date confirmed by
+# asml.com/en/investors/financial-calendar and the FY2025 20-F financial calendar. Without this
+# the harness assumed 07:00 ET, six hours after the release.
+ASML:2026-10-14: 2026-10-14T05:00:00Z
+# TSMC holds its quarterly earnings conference at 14:00 Taipei (UTC+8) = 06:00 UTC = 02:00 ET
+# and posts results at that time; the harness default assumed 16:05 ET, fourteen hours late.
+# The Oct 15 2026 DATE is the FMP calendar's, NOT yet announced by TSMC (checked
+# investor.tsmc.com on 2026-09-03; 3Q25 was Thu Oct 16 2025). Re-key this entry if TSMC
+# announces another day.
+TSM:2026-10-15: 2026-10-15T06:00:00Z

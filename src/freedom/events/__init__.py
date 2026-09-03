@@ -58,8 +58,10 @@ Implementation notes (what the code below relies on):
   issuer-confirmed one. The 8-K search, the Nasdaq flag lookup, the event id and the
   ``upcoming_events`` schedule all use the corrected date; the row is flagged
   ``report_date_override``. A t0 override for such an event is keyed by the corrected date.
-* ``upcoming_events`` takes ``expected_t0`` from, in order: a manual override recorded on the
-  matching upcoming row of events.parquet, the issuer's median sec_8k acceptance clock, the
+* ``upcoming_events`` takes ``expected_t0`` from, in order: a t0 override in
+  ``configs/t0_overrides.yaml`` (read directly, keyed by ``UNDERLYING:date`` or the table's
+  event id), a manual override recorded on the matching upcoming row of events.parquet, the
+  issuer's median sec_8k acceptance clock, the
   calendar-flag time of that upcoming row, the Nasdaq calendar's time flag, the AMC default
   (``expected_t0_for``, which ``freedom predict`` also runs with the decision clock as
   ``before`` so a replay never sees a later acceptance). Each upcoming row carries the
@@ -125,6 +127,7 @@ UPCOMING_COLUMNS: list[str] = [
 # events.parquet rows whose release time is a schedule (known before the release), as opposed
 # to sec_8k / detected rows whose t0 IS the release: only these may seed an expected t0
 SCHEDULE_T0_SOURCES = frozenset({T0Source.manual.value, T0Source.calendar_flag.value})
+MANUAL_UPCOMING_SOURCE = "manual override (configs/t0_overrides.yaml)"  # upcoming_events provenance
 DATETIME_COLUMNS = (E.t0, E.estimate_snapshot_time, E.listing_start, E.ca_ex_date, "t0_acceptance")
 CORPORATE_ACTION_LOOKBACK = pd.Timedelta(days=60)  # design §2: ex-date in [t0 - 60 d, t0 + horizon]
 FLAG_CORPORATE_ACTION = "corporate_action"
@@ -1350,6 +1353,7 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
     snapshots = load_consensus_snapshots(settings)
     events = load_events(settings) if settings.events_path.exists() else None
     date_overrides = _load_report_date_overrides(settings)
+    manual = _load_manual_overrides(settings)  # applied here too: no table rebuild needed
     nasdaq = NasdaqClient(settings)
     nasdaq_flags: dict[date, dict[str, Any]] = {}
 
@@ -1374,12 +1378,17 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
             continue
         d_vendor = _as_date(r[E.report_date_ny])
         d, corrected = corrected_report_date(date_overrides, sym, d_vendor)
-        expected_t0, expected_src = expected_t0_for(events, sym, d, nasdaq_flag(sym, d))
+        table_id = _events_table_id(events, sym, d)
+        man = manual.get(f"{sym}:{d.isoformat()}") or (manual.get(str(table_id).upper()) if table_id else None)
+        if man is not None:
+            expected_t0, expected_src = man, MANUAL_UPCOMING_SOURCE
+        else:
+            expected_t0, expected_src = expected_t0_for(events, sym, d, nasdaq_flag(sym, d))
         if corrected:
             expected_src += f"; report date overridden (vendor said {d_vendor.isoformat()})"
         snap = consensus_before(snapshots, sym, d, None)
         rows.append({
-            E.event_id: _events_table_id(events, sym, d),  # None until `freedom events` has the row
+            E.event_id: table_id,  # None until `freedom events` has the row
             E.underlying: sym, E.market: u[U.market], E.kind: u[U.kind], E.report_date_ny: d,
             "expected_t0": expected_t0, "expected_t0_source": expected_src,
             E.eps_estimate: snap["eps_estimate"] if snap else r[E.eps_estimate],
