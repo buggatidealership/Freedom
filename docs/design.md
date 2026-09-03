@@ -39,8 +39,17 @@ behind them. Whether anything is predictable is an output of the harness, not an
 
 * **Event** `e = (underlying, fiscal_period, t0)`. `t0` is the release instant in UTC.
 * **Release-time resolver**, in priority order, each producing `(t0, confidence, source)`:
+  0. Manual override file (`configs/t0_overrides.yaml`, one event, confidence 1.0).
   1. SEC 8-K with item 2.02: `acceptanceDateTime` (US filers; measured within ~1 min of the
-     press release).
+     press release), confidence 0.95.
+  1b. The issuer's documented habitual release clock (`configs/release_clock_overrides.yaml`,
+     `ASML: "07:00 Europe/Amsterdam"`, `TSM: "14:00 Asia/Taipei"`): `t0` = the report date at
+     that local clock converted to UTC through the zone (DST follows the issuer's calendar),
+     `t0_source = issuer_clock`, confidence 0.7 (above `min_t0_confidence`). It beats a
+     detection because the FMP proxy has no bars between 20:00 and 04:00 ET: for an overnight
+     release the detector fires on the first bar of the next session, an artefact, and the
+     calendar defaults below land hours after the release, so `P0` would sit inside the
+     reaction. It ranks below an 8-K because the acceptance measures the event itself.
   2. Event detection: first 1-minute extended-hours bar on the report date whose volume
      z-score against the same-clock-minute baseline exceeds a threshold and whose absolute return
      exceeds a threshold. Detection may only move an 8-K time **earlier**: `t0 = min(acceptance,
@@ -54,7 +63,6 @@ behind them. Whether anything is predictable is an output of the harness, not an
      auction's volume spike fired the detector on MU 2026-06-24 and was rejected by this rule).
   3. Calendar flag (`post-market` / `pre-market` from Alpha Vantage or Nasdaq) mapped to a
      default clock time (16:05 / 07:00 America/New_York), low confidence.
-  4. Manual override file.
   Events whose resolver confidence is below `min_t0_confidence` (a fixed run parameter, default
   0.6, raisable from the CLI, **never** a search dimension) are kept in the table but excluded
   from training. Every metric is additionally stratified by `t0_source` and `kind`; the headline
@@ -67,8 +75,17 @@ behind them. Whether anything is predictable is an output of the harness, not an
   NaN. Every target row carries `price_source`, `price_interval` and `price_market`.
 * **Reference price** `P0`: close of the last bar with `t_end ≤ t0 − δ(t0_source)`, where
   `δ = 3 min` for `sec_8k` (acceptance trails the wire by 25–134 s on the five NVDA/AAPL filings
-  measured) and `0` for `manual` and `detected`. Bars are half-open `[t, t_end)`; a bar containing
-  the instant is never used. `p0_time` and `p0_staleness_min` are recorded on every row.
+  measured) and `0` for `manual`, `issuer_clock` and `detected`. Bars are half-open `[t, t_end)`;
+  a bar containing the instant is never used. `p0_time` and `p0_staleness_min` are recorded on
+  every row, and the checkpoint staleness limit below applies to `P0` too: when the `P0` bar
+  ended more than `max(2 × interval, 5 min)` before `t0 − δ` the row keeps `p0`, `p0_time` and
+  `p0_staleness_min` but computes **no** checkpoint or label (`label_reason = p0_stale`). That
+  is the FMP proxy on a release outside its 04:00–20:00 ET bars (ASML at 07:00 Amsterdam, TSMC
+  at 14:00 Taipei): the "last pre-release bar" would be the previous evening's close, hours
+  stale, and a return measured from it is overnight drift plus the reaction. Every targets row
+  names the reason its headline label is NaN in `label_reason` (`no_t0`, `no_path`,
+  `coarse_bars`, `no_p0`, `p0_stale`, `corporate_action`, `no_24h_bar`; None when it exists),
+  and `evaluate` counts them per decision time (`target_missing_reasons`).
 * **Checkpoints** `h ∈ {+5m, +15m, +30m, +60m, +2h, next_open, next_open+30m, next_close,
   +24h}`; `next_open/close` are the next XNYS regular-session boundaries after `t0`.
   `P(t0+h)` is the close of the last bar with `t_end ≤ t0+h`. A checkpoint is **valid only if**
@@ -166,7 +183,8 @@ the trainable events, notes and leaderboard) and `optimize` (`best_params.json`,
 a flag on a best trial that used such a group) both print it. `estimate_source` joined the
 dataset's meta columns at `schemas.SCHEMA_VERSION = 3`; a dataset written under an earlier
 version still evaluates, but reports the provenance as `unavailable` unless `data/events.parquet`
-supplies it per event. From now on the archiver's consensus snapshots provide
+supplies it per event. `label_reason` (§2) joined `targets.parquet` and the dataset at
+`SCHEMA_VERSION = 4`; every reader treats it as optional. From now on the archiver's consensus snapshots provide
 `estimate_source = consensus_snapshot` with the capture time, and live prediction uses only
 those. `has_perp_at_t0 = t0 ≥ min(listing_start)` over all markets of the
 underlying; when the primary market was unlisted at `t0` but an alternate existed, the
@@ -323,13 +341,15 @@ builds features `as_of` a well-defined instant and loads the trained model for `
 
 * **pre_5m**: `as_of = expected_t0 − 5 min`, where `expected_t0` is the issuer's median
   acceptance clock time over its past `sec_8k` events (a manual override on the matching
-  upcoming row of `events.parquet` wins; fallbacks in order: that row's calendar-flag time,
-  the Nasdaq calendar's time flag, the event's own AMC/BMO class, the AMC default). Only
-  acceptances at or before the decision clock count, and a resolved row's own `t0` never
-  seeds the expectation, so replaying a decision for an event the table has since resolved
-  cannot learn the clock from that event. The live row stores `as_of`, `expected_t0`, the
-  stratum key `t0_source_live` (`expected_manual`, `expected_sec_8k`, `expected_calendar_flag`)
-  and, once the 8-K arrives, `t0_actual` and `t0_lag_s`.
+  upcoming row of `events.parquet` wins; fallbacks in order: the issuer's documented release
+  clock from `configs/release_clock_overrides.yaml` (or the matching table row resolved by
+  it), that row's calendar-flag time, the Nasdaq calendar's time flag, the event's own AMC/BMO
+  class, the AMC default). Only acceptances at or before the decision clock count, and a
+  resolved row's own `t0` never seeds the expectation, so replaying a decision for an event
+  the table has since resolved cannot learn the clock from that event. The live row stores
+  `as_of`, `expected_t0`, the stratum key `t0_source_live` (`expected_manual`,
+  `expected_sec_8k`, `expected_issuer_clock`, `expected_calendar_flag`) and, once the 8-K
+  arrives, `t0_actual` and `t0_lag_s`.
 * **post_k**: `t0_live` comes from the live detector on 1-minute perp or FMP bars (the same
   code as the historical detector); the 8-K acceptance is back-filled afterwards and the row is
   scored in the `detected` stratum. `predict` marks the row `off_schedule` (and does not trade)

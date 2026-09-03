@@ -38,6 +38,9 @@ class Timing(StrEnum):
 
 class T0Source(StrEnum):
     sec_8k = "sec_8k"
+    # the issuer's documented habitual release clock (configs/release_clock_overrides.yaml,
+    # "HH:MM <IANA zone>") applied to the report date; ranks below an 8-K, above a detection
+    issuer_clock = "issuer_clock"
     detected = "detected"
     calendar_flag = "calendar_flag"
     manual = "manual"
@@ -150,6 +153,9 @@ class T:
     continuation_15m = "continuation_15m"
     continuation_30m = "continuation_30m"
     continuation = continuation_30m  # headline continuation label
+    # why the headline label is NaN (targets.LABEL_REASONS: no_t0, no_path, coarse_bars, no_p0,
+    # p0_stale, corporate_action, no_24h_bar); None when r_24h exists
+    label_reason = "label_reason"
 
     @staticmethod
     def r(cp: str) -> str:
@@ -212,7 +218,9 @@ class P:
     direction_true = "direction_true"
 
 
-SCHEMA_VERSION = 3  # bump when any artifact's columns change; written into every parquet's metadata
+SCHEMA_VERSION = 4  # bump when any artifact's columns change; written into every parquet's metadata
+# 4 (2026-09-03): targets.parquet and dataset.parquet gain `label_reason` (T.label_reason); a
+# dataset stamped 3 still evaluates (every reader treats the column as optional).
 # 3 (2026-09-02): estimate_source joins dataset.parquet and predictions.parquet, trades.parquet gains
 # `headline`; a dataset stamped 2 still evaluates (eval.runner.attach_estimate_source fills the
 # column from the events calendar, else reports it as 'unavailable').

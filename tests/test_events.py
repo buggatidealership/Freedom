@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 
 import numpy as np
@@ -32,6 +32,7 @@ from freedom.events import (
     EVENT_COLUMNS,
     SNAPSHOT_COLUMNS,
     UPCOMING_COLUMNS,
+    ReleaseClock,
     ResolvedT0,
     build_events,
     consensus_path,
@@ -43,6 +44,7 @@ from freedom.events import (
     fiscal_period_for,
     load_events,
     project_quarter_end,
+    release_clock_for,
     resolve_release_time,
     snapshot_consensus,
     upcoming_events,
@@ -675,8 +677,9 @@ def test_budget_exhaustion_before_any_history_yields_placeholders(settings, fake
 
 
 def test_fpi_uses_alphavantage_flag_and_fiscal_period(tmp_path, fake):
+    (tmp_path / "configs").mkdir()  # no release clock for TSM here: the calendar flag is the subject
     s = Settings(data_dir=tmp_path / "data", reports_dir=tmp_path / "reports",
-                 configs_dir=Path(__file__).parent.parent / "configs",
+                 configs_dir=tmp_path / "configs",
                  fmp_api_key="test", alphavantage_api_key="test-key", _env_file=None)
     s.ensure_dirs()
     write_universe(s)
@@ -784,11 +787,15 @@ def test_upcoming_events_prefers_archived_consensus(settings, fake):
     assert nvda[E.estimate_snapshot_time] == pd.Timestamp("2026-09-01 08:00", tz="UTC")
     assert nvda["expected_t0"] == ny("2026-09-10 16:21") and nvda["expected_t0_source"].startswith("median")
     tsm = up.set_index(E.underlying).loc["TSM"]
-    assert tsm["expected_t0"] == ny("2026-09-11 16:05") and tsm[E.market] == "xyz:TSM"
+    # TSM: the shipped release clock (14:00 Asia/Taipei), not the AMC default
+    assert tsm["expected_t0"] == pd.Timestamp("2026-09-11 06:00", tz="UTC") and tsm[E.market] == "xyz:TSM"
+    assert tsm["expected_t0_source"] == "issuer release clock 14:00 Asia/Taipei (configs/release_clock_overrides.yaml)"
 
 
 def test_upcoming_expected_t0_fallbacks(settings, fake):
     write_universe(settings)
+    settings.configs_dir = settings.data_dir / "configs"  # no release clock: the fallbacks are the subject
+    settings.configs_dir.mkdir()
 
     def cal_row(sym: str, day: str) -> dict:
         return {"symbol": sym, "date": day, "epsActual": None, "epsEstimated": 1.5,
@@ -821,8 +828,6 @@ def test_upcoming_expected_t0_fallbacks(settings, fake):
     assert up.loc["TSM", "expected_t0"] == ny("2026-09-11 07:00")
     assert up.loc["TSM", "expected_t0_source"].startswith("nasdaq flag")
     # a manual override recorded on the upcoming row wins over everything
-    settings.configs_dir = settings.data_dir / "configs"
-    settings.configs_dir.mkdir()
     (settings.configs_dir / "t0_overrides.yaml").write_text('"TSM:2026-09-11": "2026-09-11T12:30:00Z"\n')
     build_events(settings, underlyings=["TSM"], since=pd.Timestamp("2026-09-01"))
     up = upcoming_events(settings, days=14).set_index(E.underlying)
@@ -867,6 +872,120 @@ def test_expected_release_clock_before_gate_and_expected_t0_chain():
                                                                  "events table: manual")
     flagged = own.assign(**{E.t0_source: "calendar_flag", E.t0: ny("2026-08-26 07:00"), E.flags: "upcoming"})
     assert expected_t0_for(flagged, "NVDA", d, before=before) == (ny("2026-08-26 07:00"), "events table: calendar_flag")
+
+
+# ---- issuer release clock ------------------------------------------------------------------------
+def test_release_clock_overrides_parse_zones_and_follow_dst(settings):
+    """The shipped configs/release_clock_overrides.yaml parses; a clock converts through its zone
+    (ASML 07:00 Amsterdam is 06:00 UTC in January and 05:00 UTC in July; Taipei has no DST);
+    malformed entries and unknown zones are skipped."""
+    clocks = ev_mod._load_release_clock_overrides(settings)
+    assert clocks["ASML"] == ReleaseClock(time(7, 0), "Europe/Amsterdam")
+    assert str(clocks["ASML"]) == "07:00 Europe/Amsterdam"
+    assert clocks["TSM"] == ReleaseClock(time(14, 0), "Asia/Taipei")
+    assert clocks["ASML"].t0_on(date(2026, 1, 28)) == pd.Timestamp("2026-01-28 06:00", tz="UTC")
+    assert clocks["ASML"].t0_on(date(2026, 7, 15)) == pd.Timestamp("2026-07-15 05:00", tz="UTC")
+    assert clocks["ASML"].t0_on(pd.Timestamp("2026-10-14")) == pd.Timestamp("2026-10-14 05:00", tz="UTC")
+    assert clocks["TSM"].t0_on(date(2026, 1, 15)) == pd.Timestamp("2026-01-15 06:00", tz="UTC")
+    assert clocks["TSM"].t0_on(date(2026, 7, 16)) == pd.Timestamp("2026-07-16 06:00", tz="UTC")
+    assert release_clock_for(settings, "tsm") == clocks["TSM"] and release_clock_for(settings, "NVDA") is None
+    settings.configs_dir = settings.data_dir / "configs"
+    settings.configs_dir.mkdir()
+    assert ev_mod._load_release_clock_overrides(settings) == {}  # no file
+    (settings.configs_dir / "release_clock_overrides.yaml").write_text(
+        'asml: "07:00 Europe/Amsterdam"\nBAD1: "7am Europe/Amsterdam"\nBAD2: "07:00 Mars/Olympus"\n'
+        'BAD3: 700\nBAD4: "07:00"\n')
+    assert ev_mod._load_release_clock_overrides(settings) == {"ASML": ReleaseClock(time(7, 0), "Europe/Amsterdam")}
+
+
+def test_resolver_issuer_clock_beats_detection_and_flags_but_not_an_8k(settings):
+    clock = release_clock_for(settings, "ASML")
+    day = pd.Timestamp("2026-01-28")
+    # the proxy has no overnight bars: the 04:00 ET first-bar spike is the artefact the clock beats
+    bars = synthetic_bars(["2026-01-27", "2026-01-28"], spike_ny="04:00", spike_day="2026-01-28")
+    r = resolve_release_time(report_date_ny=day, sec_filings=tsm_filings(), intraday=bars,
+                             calendar_flag="pre-market", issuer_clock=clock)
+    assert r.t0 == pd.Timestamp("2026-01-28 06:00", tz="UTC") and r.source == "issuer_clock"
+    assert r.confidence == CONFIDENCE["issuer_clock"] == 0.7 and r.flags == () and r.t0_lag_s is None
+    assert r.detail.startswith("issuer release clock 07:00 Europe/Amsterdam -> 2026-01-28T06:00:00Z")
+    assert "detection 2026-01-28T09:00:00Z on the first bar of the session not used" in r.detail
+    # July: the same clock is an hour earlier in UTC; no bars and no flag still give the clock
+    r = resolve_release_time(report_date_ny=pd.Timestamp("2026-07-15"), sec_filings=None, intraday=None,
+                             calendar_flag=None, issuer_clock=clock)
+    assert r.t0 == pd.Timestamp("2026-07-15 05:00", tz="UTC")
+    assert r.detail == "issuer release clock 07:00 Europe/Amsterdam -> 2026-07-15T05:00:00Z"
+    # an 8-K acceptance on the day outranks the clock; a manual override outranks both
+    r = resolve_release_time(report_date_ny=day, sec_filings=filings_at("2026-01-28T06:02:00.000Z"),
+                             intraday=None, calendar_flag=None, issuer_clock=clock)
+    assert r.source == "sec_8k" and r.t0 == pd.Timestamp("2026-01-28 06:02", tz="UTC")
+    manual = pd.Timestamp("2026-01-28 06:01", tz="UTC")
+    r = resolve_release_time(report_date_ny=day, sec_filings=None, intraday=None, calendar_flag=None,
+                             manual=manual, issuer_clock=clock)
+    assert r.source == "manual" and r.t0 == manual
+
+
+def test_issuer_clock_drives_the_builder_and_the_upcoming_schedule(settings, fake):
+    """TSM (6-K filer: no 8-K; no bars served): every event gets t0 = 14:00 Asia/Taipei = 06:00
+    UTC on its report date from the shipped configs/release_clock_overrides.yaml; `freedom
+    upcoming` reads the same file, and the live stratum key is expected_issuer_clock."""
+    from freedom.live import expected_t0_source_key
+
+    write_universe(settings)
+
+    def cal_row(sym: str, day: str, **over) -> dict:
+        row = {"symbol": sym, "date": day, "epsActual": None, "epsEstimated": 2.9,
+               "revenueActual": None, "revenueEstimated": 3.0e10, "lastUpdated": "2026-09-02"}
+        row.update(over)
+        return row
+
+    fake.earnings["TSM"] = [cal_row("TSM", "2026-04-16", epsActual=2.47), cal_row("TSM", "2026-09-11"),
+                            cal_row("TSM", "2026-10-15")]
+    fake.nasdaq["2026-04-16"] = [nasdaq_row("TSM", time_flag="time-pre-market")]
+    df = build_events(settings, underlyings=["TSM"], since=pd.Timestamp("2026-04-01")).set_index(E.report_date_ny)
+    past, upcoming = df.loc[date(2026, 4, 16)], df.loc[date(2026, 9, 11)]
+    for row, day in ((past, "2026-04-16"), (upcoming, "2026-09-11")):
+        assert row[E.t0] == pd.Timestamp(f"{day} 06:00", tz="UTC") and row[E.t0_source] == "issuer_clock"
+        assert row[E.t0_confidence] == 0.7 and row[E.timing] == "BMO"
+        assert "issuer_clock" in row[E.sources_used].split(";")
+        assert row["t0_detail"].startswith("issuer release clock 14:00 Asia/Taipei -> ")
+        flags = row[E.flags].split(";")
+        assert "timing_from_history" not in flags and "timing_unknown" not in flags
+    assert "upcoming" in upcoming[E.flags].split(";") and "upcoming" not in past[E.flags].split(";")
+    assert past[E.n_estimates] == 32  # the Nasdaq row is still the consensus cross-check
+    # configs/t0_overrides.yaml still pins Oct 15 2026 by hand, and a manual override outranks the clock
+    pinned = df.loc[date(2026, 10, 15)]
+    assert pinned[E.t0_source] == "manual" and pinned[E.t0] == pd.Timestamp("2026-10-15 06:00", tz="UTC")
+
+    fake.calendar = [cal_row("TSM", "2026-09-11")]
+    up = upcoming_events(settings, days=14).set_index(E.underlying)
+    assert up.loc["TSM", E.event_id] == upcoming[E.event_id]
+    assert up.loc["TSM", "expected_t0"] == pd.Timestamp("2026-09-11 06:00", tz="UTC")
+    assert up.loc["TSM", "expected_t0_source"] == "issuer release clock 14:00 Asia/Taipei (configs/release_clock_overrides.yaml)"
+    assert expected_t0_source_key(up.loc["TSM", "expected_t0_source"]) == "expected_issuer_clock"
+    # a table row resolved by the clock seeds the expectation too, under its own label
+    table = load_events(settings)
+    assert expected_t0_for(table, "TSM", date(2026, 9, 11)) == (pd.Timestamp("2026-09-11 06:00", tz="UTC"),
+                                                                "events table: issuer_clock")
+    assert expected_t0_source_key("events table: issuer_clock") == "expected_issuer_clock"
+
+
+def test_expected_t0_issuer_clock_ranks_below_the_median_and_above_the_flags():
+    clock = ReleaseClock(time(14, 0), "Asia/Taipei")
+    d = date(2026, 9, 11)
+    hit = (pd.Timestamp("2026-09-11 06:00", tz="UTC"),
+           "issuer release clock 14:00 Asia/Taipei (configs/release_clock_overrides.yaml)")
+    # the clock beats the Nasdaq flag and a table calendar flag ...
+    assert expected_t0_for(None, "TSM", d, "time-pre-market", issuer_clock=clock) == hit
+    flagged = pd.DataFrame([_sec_8k_row("TSM:2026-06", "2026-09-11", "2026-09-11 11:00:00",
+                                        **{E.underlying: "TSM", E.t0_source: "calendar_flag", E.flags: "upcoming"})])
+    assert expected_t0_for(flagged, "TSM", d, issuer_clock=clock) == hit
+    # ... and loses to a manual row and to the issuer's measured 8-K acceptance clock
+    manual = flagged.assign(**{E.t0_source: "manual"})
+    assert expected_t0_for(manual, "TSM", d, issuer_clock=clock) == (pd.Timestamp("2026-09-11 11:00", tz="UTC"),
+                                                                     "events table: manual")
+    acc = pd.DataFrame([_sec_8k_row("TSM:2026-03", "2026-04-16", "2026-04-16 12:00:00", **{E.underlying: "TSM"})])
+    assert expected_t0_for(acc, "TSM", d, issuer_clock=clock) == (ny("2026-09-11 08:00"),
+                                                                  "median of 1 sec_8k acceptances")
 
 
 def test_upcoming_events_carry_the_events_table_id(settings, fake):

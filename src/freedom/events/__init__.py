@@ -6,6 +6,14 @@ Decisions from review (docs/design.md §2, §5):
 * a detection on the very first bar of the extended session is flagged `detection_first_bar`
   and downgraded to calendar-flag confidence;
 * calendar-flag defaults: AMC -> 16:05, BMO -> 07:00 America/New_York, confidence 0.5;
+* an issuer's documented habitual release clock (``configs/release_clock_overrides.yaml``,
+  ``ASML: "07:00 Europe/Amsterdam"``) gives t0 = the report date at that local clock in UTC
+  (DST follows the zone), source ``issuer_clock``, confidence 0.7. Precedence: manual > sec_8k
+  (8-K acceptance) > issuer_clock > detected > calendar_flag > default. The clock beats a
+  detection because the FMP proxy has no bars between 20:00 and 04:00 ET: a detection of an
+  overnight release fires on the first bar of the next session, an artefact, and the calendar
+  defaults (07:00 / 16:05 ET) fall hours after the release, so P0 would land inside the
+  reaction. It ranks below an 8-K because the acceptance is a measurement of the event itself;
 * event_id = f"{underlying}:{fiscal_period}" with fiscal_period = fiscal quarter-end month;
   when the period's own facts are not on file yet (a fresh or upcoming event) the month is
   projected from the issuer's latest SEC period end in whole quarters, so the id is the same
@@ -53,6 +61,11 @@ Implementation notes (what the code below relies on):
   checkpoint; budget exhaustion on it is one, like the intraday request.
 * Optional manual overrides live in ``configs/t0_overrides.yaml`` as
   ``{"NVDA:2026-07": "2026-08-26T20:20:00Z"}`` (keys may also be ``"NVDA:2026-08-26"``).
+* ``configs/release_clock_overrides.yaml`` maps an UNDERLYING to its habitual release clock
+  ``"HH:MM <IANA zone>"``; ``_load_release_clock_overrides`` parses it into ``ReleaseClock``
+  values and ``_resolve_event`` hands the issuer's clock to the resolver, so every past and
+  upcoming event of that issuer gets the same clock unless an 8-K or a manual override says
+  otherwise. Malformed entries and unknown zones are skipped with a warning.
 * ``configs/report_date_overrides.yaml`` corrects the vendor's report DATE before anything else
   runs: ``{"ORCL:2026-09-08": "2026-09-10"}`` maps the FMP date of an issuer's event to the
   issuer-confirmed one. The 8-K search, the Nasdaq flag lookup, the event id and the
@@ -61,7 +74,9 @@ Implementation notes (what the code below relies on):
 * ``upcoming_events`` takes ``expected_t0`` from, in order: a t0 override in
   ``configs/t0_overrides.yaml`` (read directly, keyed by ``UNDERLYING:date`` or the table's
   event id), a manual override recorded on the matching upcoming row of events.parquet, the
-  issuer's median sec_8k acceptance clock, the
+  issuer's median sec_8k acceptance clock, the issuer's release clock
+  (``configs/release_clock_overrides.yaml``, read directly like the t0 override, or the
+  matching table row resolved by it), the
   calendar-flag time of that upcoming row, the Nasdaq calendar's time flag, the AMC default
   (``expected_t0_for``, which ``freedom predict`` also runs with the decision clock as
   ``before`` so a replay never sees a later acceptance). Each upcoming row carries the
@@ -79,6 +94,7 @@ from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import numpy as np
@@ -94,8 +110,10 @@ from ..timeutil import classify_timing, to_utc
 
 log = logging.getLogger(__name__)
 
-CONFIDENCE = {"manual": 1.0, "sec_8k": 0.95, "detected": 0.8, "calendar_flag": 0.5}
+CONFIDENCE = {"manual": 1.0, "sec_8k": 0.95, "detected": 0.8, "issuer_clock": 0.7, "calendar_flag": 0.5}
 CONFIDENCE_UNKNOWN = 0.25  # no timing source at all: AMC default, flagged timing_unknown
+RELEASE_CLOCK_FILE = "release_clock_overrides.yaml"  # configs/: UNDERLYING -> "HH:MM <IANA zone>"
+ISSUER_CLOCK_UPCOMING_SOURCE = "issuer release clock"  # prefix of the upcoming / live provenance text
 DETECTION_WINDOW = pd.Timedelta(minutes=15)
 DATE_MATCH_WINDOW_DAYS = 10  # Nasdaq / Alpha Vantage rows match the FMP row within this
 DATE_CONFLICT_DAYS = 1  # a matched pair further apart than this is a date conflict
@@ -126,7 +144,8 @@ UPCOMING_COLUMNS: list[str] = [
 ]
 # events.parquet rows whose release time is a schedule (known before the release), as opposed
 # to sec_8k / detected rows whose t0 IS the release: only these may seed an expected t0
-SCHEDULE_T0_SOURCES = frozenset({T0Source.manual.value, T0Source.calendar_flag.value})
+SCHEDULE_T0_SOURCES = frozenset({T0Source.manual.value, T0Source.issuer_clock.value,
+                                 T0Source.calendar_flag.value})
 MANUAL_UPCOMING_SOURCE = "manual override (configs/t0_overrides.yaml)"  # upcoming_events provenance
 DATETIME_COLUMNS = (E.t0, E.estimate_snapshot_time, E.listing_start, E.ca_ex_date, "t0_acceptance")
 CORPORATE_ACTION_LOOKBACK = pd.Timedelta(days=60)  # design §2: ex-date in [t0 - 60 d, t0 + horizon]
@@ -148,6 +167,39 @@ class ResolvedT0:
     detail: str = ""
     t0_lag_s: float | None = None  # acceptance - detected start, seconds (8-K events only)
     flags: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ReleaseClock:
+    """An issuer's habitual release clock: a local time of day in an IANA zone, from
+    configs/release_clock_overrides.yaml (``ASML: "07:00 Europe/Amsterdam"``)."""
+
+    clock: time
+    zone: str
+
+    def __str__(self) -> str:
+        return f"{self.clock.strftime('%H:%M')} {self.zone}"
+
+    def t0_on(self, report_date_ny: Any) -> pd.Timestamp:
+        """The clock on the report date, read as the issuer's local calendar date, as a UTC
+        instant. The zone's own DST rule applies: 07:00 Europe/Amsterdam is 06:00 UTC in
+        January and 05:00 UTC in July."""
+        d = _as_date(report_date_ny)
+        return to_utc(pd.Timestamp.combine(d, self.clock), assume_tz=self.zone)
+
+    @classmethod
+    def parse(cls, value: Any) -> ReleaseClock:
+        """``"HH:MM <IANA zone>"`` -> ReleaseClock; ValueError when malformed or the zone is
+        unknown to zoneinfo."""
+        parts = str(value).strip().split()
+        if len(parts) != 2:
+            raise ValueError(f"expected 'HH:MM <IANA zone>', got {value!r}")
+        hhmm, zone = parts
+        try:
+            ZoneInfo(zone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown time zone {zone!r}") from exc
+        return cls(time.fromisoformat(hhmm), zone)
 
 
 # ---- small helpers -----------------------------------------------------------------------------
@@ -268,14 +320,19 @@ def resolve_release_time(
     intraday: pd.DataFrame | None,
     calendar_flag: str | None,
     manual: pd.Timestamp | None = None,
+    issuer_clock: ReleaseClock | None = None,
 ) -> ResolvedT0:
     """Priority: manual > SEC 8-K item 2.02 acceptance on the report date (or the next calendar
-    day before 04:00 NY for late acceptances) > detection from 1-minute extended-hours bars >
-    calendar flag. When both an 8-K time and a detection exist: t0 = min(acceptance, detected
-    bar start) if detected is within DETECTION_WINDOW before acceptance, else t0 = acceptance;
-    t0_lag_s = acceptance - detected_start is recorded either way. 6-K rows are never a time
-    source. Returns a ResolvedT0 with the CONFIDENCE of its source; `detection_first_bar`
-    lowers a detected source to calendar-flag confidence."""
+    day before 04:00 NY for late acceptances) > the issuer's documented release clock
+    (`issuer_clock`, configs/release_clock_overrides.yaml) on the report date > detection from
+    1-minute extended-hours bars > calendar flag. When both an 8-K time and a detection exist:
+    t0 = min(acceptance, detected bar start) if detected is within DETECTION_WINDOW before
+    acceptance, else t0 = acceptance; t0_lag_s = acceptance - detected_start is recorded either
+    way. The issuer clock outranks a detection because on a proxy with no overnight bars a
+    detection of an overnight release is the first bar of the next session (module docstring);
+    a detection is then only reported in `detail`. 6-K rows are never a time source. Returns a
+    ResolvedT0 with the CONFIDENCE of its source; `detection_first_bar` lowers a detected
+    source to calendar-flag confidence."""
     d = _as_date(report_date_ny)
     if manual is not None and not _isna(manual):
         t0 = to_utc(manual, assume_tz=UTC)
@@ -313,6 +370,16 @@ def resolve_release_time(
                           t0_lag_s=lag, flags=flags)
 
     det = detect_release_from_bars(intraday, d) if intraday is not None and len(intraday) else None
+    if issuer_clock is not None:
+        t0 = issuer_clock.t0_on(d)
+        detail = f"issuer release clock {issuer_clock} -> {_fmt_ts(t0)}"
+        if det is not None:
+            # kept as a diagnostic only: on a proxy without overnight bars this is the first
+            # bar of the next session, not the release
+            start, first_bar = det
+            where = " on the first bar of the session" if first_bar else ""
+            detail += f"; detection {_fmt_ts(start)}{where} not used"
+        return ResolvedT0(t0, CONFIDENCE["issuer_clock"], T0Source.issuer_clock.value, detail=detail)
     if det is not None:
         start, first_bar = det
         if first_bar:
@@ -791,6 +858,35 @@ def _load_report_date_overrides(settings: Settings) -> dict[str, date]:
     return out
 
 
+def _load_release_clock_overrides(settings: Settings) -> dict[str, ReleaseClock]:
+    """configs/release_clock_overrides.yaml: {"ASML": "07:00 Europe/Amsterdam"}, an issuer's
+    habitual local release clock keyed by UNDERLYING. Malformed entries and unknown zones are
+    skipped with a warning."""
+    path = settings.configs_dir / RELEASE_CLOCK_FILE
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    out: dict[str, ReleaseClock] = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        try:
+            out[str(k).strip().upper()] = ReleaseClock.parse(v)
+        except (ValueError, TypeError) as exc:
+            log.warning("ignoring release clock override %r: %s", k, exc)
+    return out
+
+
+def release_clock_for(settings: Settings, underlying: str) -> ReleaseClock | None:
+    """The issuer's release clock from configs/release_clock_overrides.yaml, or None."""
+    return _load_release_clock_overrides(settings).get(str(underlying).strip().upper())
+
+
+def issuer_clock_source(clock: ReleaseClock) -> str:
+    """Provenance text of an expected t0 taken from the issuer's release clock (the prefix is
+    ISSUER_CLOCK_UPCOMING_SOURCE, which live.expected_t0_source_key maps to its stratum)."""
+    return f"{ISSUER_CLOCK_UPCOMING_SOURCE} {clock} (configs/{RELEASE_CLOCK_FILE})"
+
+
 def corrected_report_date(overrides: dict[str, date], underlying: str, d: date) -> tuple[date, bool]:
     """(report date, corrected?) after the report_date_overrides mapping."""
     hit = overrides.get(f"{str(underlying).upper()}:{d.isoformat()}")
@@ -857,9 +953,13 @@ def _pending_row(ev: _Event, providers: _Providers | None, *, today_ny: date | N
 
 
 def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame,
-                   manual: dict[str, pd.Timestamp], today_ny: date) -> dict[str, Any]:
-    """One completed event row. Raises BudgetExhausted from the FMP intraday request."""
+                   manual: dict[str, pd.Timestamp], today_ny: date,
+                   release_clocks: dict[str, ReleaseClock] | None = None) -> dict[str, Any]:
+    """One completed event row. Raises BudgetExhausted from the FMP intraday request.
+    `release_clocks` (configs/release_clock_overrides.yaml) hands the issuer's habitual clock
+    to the resolver, where it ranks below an 8-K and a manual override."""
     name, d_fmp = ev.name, ev.report_date_ny
+    clock = (release_clocks or {}).get(name.underlying)
     row = _base_row(ev)
     flags: list[str] = list(name.flags)
     if ev.date_override:
@@ -942,7 +1042,7 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
             bars = None
             flags.append("no_intraday")
 
-    if calendar_flag is None and d_eff > today_ny:
+    if calendar_flag is None and d_eff > today_ny and clock is None:
         hist = _typical_timing_from_filings(sec.filings)
         if hist is not None:
             calendar_flag, _ = hist
@@ -950,7 +1050,7 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
 
     man = manual.get(event_id) or manual.get(f"{name.underlying}:{d_fmp.isoformat()}")
     res = resolve_release_time(report_date_ny=d_eff, sec_filings=sec.filings, intraday=bars,
-                               calendar_flag=calendar_flag, manual=man)
+                               calendar_flag=calendar_flag, manual=man, issuer_clock=clock)
     flags.extend(res.flags)
     t0 = res.t0
     row[E.t0], row[E.t0_source], row[E.t0_confidence] = t0, res.source, res.confidence
@@ -959,6 +1059,8 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
     row["t0_detail"] = res.detail
     if res.source == T0Source.sec_8k.value:
         sources.append("sec_8k")
+    elif res.source == T0Source.issuer_clock.value:
+        sources.append("issuer_clock")
     if date_conflict:
         row[E.t0_confidence] = 0.0
     row[E.timing] = _timing_of(t0)
@@ -1141,6 +1243,7 @@ def build_events(settings: Settings, *, underlyings: list[str] | None = None,
     snapshots = load_consensus_snapshots(settings)
     manual = _load_manual_overrides(settings)
     date_overrides = _load_report_date_overrides(settings)
+    release_clocks = _load_release_clock_overrides(settings)
     today_ny = _today_ny()
 
     budget_error: BudgetExhausted | None = None
@@ -1176,7 +1279,7 @@ def build_events(settings: Settings, *, underlyings: list[str] | None = None,
             continue
         try:
             rows.append(_resolve_event(ev, providers, snapshots=snapshots, manual=manual,
-                                       today_ny=today_ny))
+                                       today_ny=today_ny, release_clocks=release_clocks))
             n_done += 1
         except BudgetExhausted as exc:
             budget_error = exc
@@ -1313,13 +1416,17 @@ def _events_table_clock(events: pd.DataFrame | None, underlying: str, d: date) -
 
 def expected_t0_for(events: pd.DataFrame | None, underlying: str, report_date_ny: Any,
                     nasdaq_flag: Any = None, *, before: pd.Timestamp | None = None,
-                    timing: str | None = None) -> tuple[pd.Timestamp, str]:
+                    timing: str | None = None,
+                    issuer_clock: ReleaseClock | None = None) -> tuple[pd.Timestamp, str]:
     """(expected_t0 UTC, source) for an event, in order: a manual override recorded on the
-    matching events.parquet row, the issuer's median sec_8k acceptance clock, the
-    calendar-flag time of the matching events.parquet row, the Nasdaq calendar's time flag
-    (BMO 07:00 / AMC 16:05), the event's own AMC/BMO class `timing` when given, else the AMC
-    default. `before` gates the median clock (expected_release_clock): pass the decision
-    clock so a replay never uses acceptances it could not have seen."""
+    matching events.parquet row, the issuer's median sec_8k acceptance clock, the issuer's
+    documented release clock (`issuer_clock` from configs/release_clock_overrides.yaml, else
+    the matching events.parquet row resolved by it), the calendar-flag time of the matching
+    events.parquet row, the Nasdaq calendar's time flag (BMO 07:00 / AMC 16:05), the event's
+    own AMC/BMO class `timing` when given, else the AMC default. `before` gates the median
+    clock (expected_release_clock): pass the decision clock so a replay never uses
+    acceptances it could not have seen. The issuer clock is a documented habit, not a
+    measurement of any event, so it needs no gate."""
     d = _as_date(report_date_ny)
     table = _events_table_clock(events, underlying, d)
     if table is not None and table[1] == T0Source.manual.value:
@@ -1328,6 +1435,8 @@ def expected_t0_for(events: pd.DataFrame | None, underlying: str, report_date_ny
     if clock is not None:
         hh, mm = (int(x) for x in clock[0].split(":"))
         return to_utc(pd.Timestamp.combine(d, time(hh, mm)), assume_tz=NY), clock[1]
+    if issuer_clock is not None:
+        return issuer_clock.t0_on(d), issuer_clock_source(issuer_clock)
     if table is not None:
         return to_utc(pd.Timestamp.combine(d, table[0]), assume_tz=NY), table[2]
     flag_timing = timing_from_flag(nasdaq_flag)
@@ -1354,6 +1463,7 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
     events = load_events(settings) if settings.events_path.exists() else None
     date_overrides = _load_report_date_overrides(settings)
     manual = _load_manual_overrides(settings)  # applied here too: no table rebuild needed
+    release_clocks = _load_release_clock_overrides(settings)  # likewise
     nasdaq = NasdaqClient(settings)
     nasdaq_flags: dict[date, dict[str, Any]] = {}
 
@@ -1383,7 +1493,8 @@ def upcoming_events(settings: Settings, days: int = 14) -> pd.DataFrame:
         if man is not None:
             expected_t0, expected_src = man, MANUAL_UPCOMING_SOURCE
         else:
-            expected_t0, expected_src = expected_t0_for(events, sym, d, nasdaq_flag(sym, d))
+            expected_t0, expected_src = expected_t0_for(events, sym, d, nasdaq_flag(sym, d),
+                                                        issuer_clock=release_clocks.get(sym))
         if corrected:
             expected_src += f"; report date overridden (vendor said {d_vendor.isoformat()})"
         snap = consensus_before(snapshots, sym, d, None)

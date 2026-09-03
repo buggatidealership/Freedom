@@ -8,9 +8,11 @@ appends one row to data/live_predictions.parquet:
   design's precedence (events.expected_t0_for): a manual override on the matching
   events.parquet row (`t0_source_live = expected_manual`), the issuer's median 8-K acceptance
   clock over acceptances at or before `now` (`expected_sec_8k`; the gate keeps a replay from
-  learning the clock from the event it predicts), then that row's calendar-flag time, the
-  Nasdaq flag or the AMC/BMO default (16:05 / 07:00 America/New_York, all
-  `expected_calendar_flag`). A row from the upcoming calendar already carries the result. The
+  learning the clock from the event it predicts), the issuer's documented release clock from
+  configs/release_clock_overrides.yaml or a table row resolved by it
+  (`expected_issuer_clock`), then that row's calendar-flag time, the Nasdaq flag or the
+  AMC/BMO default (16:05 / 07:00 America/New_York, all `expected_calendar_flag`). A row from
+  the upcoming calendar already carries the result. The
   provenance text goes into `schedule_note`. The row is `off_schedule` when `now` is not
   inside [as_of - PRE_WINDOW, expected_t0].
 * post-release decisions: `t0_live` comes from events.detect_release_live on 1-minute bars —
@@ -201,7 +203,9 @@ class Schedule:
     offset_min: int
     as_of: pd.Timestamp
     t0: pd.Timestamp  # expected (pre) or detected (post) release instant, UTC
-    t0_source: str  # expected_manual | expected_sec_8k | expected_calendar_flag | detected (the live stratum key)
+    # expected_manual | expected_sec_8k | expected_issuer_clock | expected_calendar_flag |
+    # detected (the live stratum key)
+    t0_source: str
     off_schedule: bool
     note: str  # free text: schedule state and where expected_t0 came from
 
@@ -210,7 +214,9 @@ class Schedule:
 # calendar-level default: the table's calendar flag, the Nasdaq flag or the AMC/BMO clock)
 EXPECTED_T0_SOURCES: tuple[tuple[str, str], ...] = (("events table: manual", "expected_manual"),
                                                     ("manual override", "expected_manual"),
-                                                    ("median of", "expected_sec_8k"))
+                                                    ("median of", "expected_sec_8k"),
+                                                    ("events table: issuer_clock", "expected_issuer_clock"),
+                                                    (events_mod.ISSUER_CLOCK_UPCOMING_SOURCE, "expected_issuer_clock"))
 
 
 def expected_t0_source_key(detail: str) -> str:
@@ -238,7 +244,8 @@ def ny_day_start_utc(day: pd.Timestamp) -> pd.Timestamp:
 def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, decision: str,
                  now: pd.Timestamp) -> Schedule:
     """The pre-release schedule: expected_t0 through events.expected_t0_for (manual override >
-    median 8-K clock over acceptances <= now > table calendar flag > the row's AMC/BMO class),
+    median 8-K clock over acceptances <= now > the issuer's release clock from
+    configs/release_clock_overrides.yaml > table calendar flag > the row's AMC/BMO class),
     unless the row came from the upcoming calendar, whose expected_t0 already went through the
     same chain with the Nasdaq flag."""
     offset = DECISION_TIMES[decision]
@@ -250,8 +257,10 @@ def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, dec
     else:
         timing = event.get(E.timing)
         timing = str(timing) if isinstance(timing, str) and timing else Timing.amc.value
-        expected_t0, detail = events_mod.expected_t0_for(events, str(event[E.underlying]), day.date(), None,
-                                                         before=now, timing=timing)
+        underlying = str(event[E.underlying])
+        expected_t0, detail = events_mod.expected_t0_for(events, underlying, day.date(), None,
+                                                         before=now, timing=timing,
+                                                         issuer_clock=events_mod.release_clock_for(settings, underlying))
         expected_t0 = to_utc(expected_t0, assume_tz=UTC)
     source = expected_t0_source_key(detail)
     hhmm = to_ny(expected_t0).strftime("%H:%M")

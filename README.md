@@ -26,7 +26,8 @@ sample size and a minimum detectable improvement.
   perp history accumulates from now on.
 * Release times come from SEC 8-K item 2.02 acceptance timestamps, which trail the newswire by
   25–134 s on the filings measured, so the reference price backs off three minutes. Foreign
-  issuers' 6-K timestamps are not usable and fall back to detection from 1-minute bars.
+  issuers' 6-K timestamps are not usable and fall back to the issuer's documented release
+  clock (`configs/release_clock_overrides.yaml`), else detection from 1-minute bars.
 * Consensus estimates from vendors are their *final* values, not the consensus as of the
   release. Historical surprise features are therefore labelled non-point-in-time; from now on the
   archiver snapshots the calendar daily so future events have real point-in-time consensus.
@@ -81,7 +82,13 @@ When a vendor calendar has the wrong day (Oracle's Q1 FY2027 date was two days o
 four in Finnhub), put the correction in `configs/report_date_overrides.yaml` as
 `ORCL:2026-09-08: 2026-09-10` (vendor date to issuer-confirmed date). It applies before the 8-K
 search, the Nasdaq lookup and the `upcoming` schedule. `configs/t0_overrides.yaml` still pins an
-exact release instant when the time, not the day, is wrong.
+exact release instant when the time, not the day, is wrong. An issuer that releases at the same
+local clock every quarter (ASML at 07:00 Amsterdam, TSMC at 14:00 Taipei) goes in
+`configs/release_clock_overrides.yaml` as `ASML: "07:00 Europe/Amsterdam"`: every past and
+upcoming event of that issuer then gets `t0` at that clock (`t0_source = issuer_clock`,
+confidence 0.7, below an 8-K acceptance and above a bar detection). Such releases fall outside
+the FMP proxy's 04:00–20:00 ET bars, so their pre-listing rows keep `p0` but carry no labels
+(`label_reason = p0_stale`) until a perp path exists.
 
 Each `predict` prints a card first: `CALL: LONG | SHORT | NO TRADE` (NO TRADE unless `p_up` is at
 least `no_trade_band` = 0.10 away from 0.5), the expected 24 h move with its 10/90 % band, and the

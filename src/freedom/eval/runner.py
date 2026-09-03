@@ -834,6 +834,12 @@ def evaluate(settings: Settings, dataset: pd.DataFrame, *, model_names: list[str
                      "n_target_missing": int(sub["target_missing"].sum())}
         if T.continuation in sub.columns and T.r("24h") in sub.columns:
             extras[d]["continuation_dead_band_n"] = int((sub[T.r("24h")].notna() & sub[T.continuation].isna()).sum())
+        if T.label_reason in sub.columns:
+            # why the headline label is missing (targets.LABEL_REASONS): a stale P0 on the FMP
+            # proxy for an overnight release is a different gap from a missing path
+            missing = sub.loc[sub["target_missing"].astype(bool), T.label_reason]
+            reasons = missing.where(missing.notna(), "unknown").astype(str).value_counts()
+            extras[d]["target_missing_reasons"] = {str(k): int(v) for k, v in reasons.items()}
         # design §5/§6: the inputs that were not knowable at t0, and how many trainable events
         # carry a vendor-final consensus rather than a point-in-time snapshot
         extras[d]["non_point_in_time_groups"] = sorted(non_point_in_time_in_scope(feats, d))
