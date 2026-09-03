@@ -13,6 +13,8 @@ name: freedom-data
 # repository; the data lives only in the `freedom-data` artifact. NOTE: on a public repository
 # any logged-in GitHub user can download workflow artifacts; make the repository private if
 # that matters. Older artifacts are deleted after each upload so storage stays at ~2 copies.
+# The freedom-cards job (cards.yml) reads this artifact and adds its live rows to the
+# `freedom-live` artifact, which this job restores on top so the rows end up in freedom-data.
 on:
   schedule:
     - cron: "17 */12 * * *"
@@ -42,6 +44,12 @@ jobs:
         # actions/download-artifact only sees the current run; gh fetches the newest artifact
         # of that name from any earlier run, which is how the data accumulates.
         run: gh run download -n freedom-data -D data -R "${{ github.repository }}" || echo "no previous data (first run)"
+      - name: Restore live rows and cards from the newest freedom-live artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # on top: the freedom-cards job's data/live_predictions.parquet (and reports/cards) travel
+        # into the data artifact, where `freedom evaluate --live` and the next restore find them
+        run: gh run download -n freedom-live -D . -R "${{ github.repository }}" || echo "no live artifact yet"
       - name: Universe
         run: uv run freedom universe
       - name: Archive candles, funding, context, consensus
@@ -60,6 +68,17 @@ jobs:
       - name: Evaluate (walk-forward on whatever is built so far; the report is the deliverable)
         continue-on-error: true
         run: uv run freedom evaluate --decision-times pre_10m,post_30m
+      # The card models the freedom-cards job loads (data/models/<decision>/lightgbm); each step
+      # is allowed to fail while the dataset is still too small to fit one.
+      - name: Train the pre_10m card model
+        continue-on-error: true
+        run: uv run freedom train --decision-time pre_10m --model lightgbm
+      - name: Train the post_15m card model
+        continue-on-error: true
+        run: uv run freedom train --decision-time post_15m --model lightgbm
+      - name: Train the post_30m card model
+        continue-on-error: true
+        run: uv run freedom train --decision-time post_30m --model lightgbm
       - uses: actions/upload-artifact@v4
         if: always()
         with:

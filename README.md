@@ -75,6 +75,7 @@ freedom train --model lightgbm --decision-time post_30m
 freedom upcoming --days 14
 freedom predict --event NVDA:2026-10 --decision pre_10m   # card 1, ten minutes before
 freedom predict --event NVDA:2026-10 --decision post_30m  # card 2, thirty minutes after
+freedom cards --horizon-minutes 45                        # every card due in the next 45 min, unattended
 ```
 
 When a vendor calendar has the wrong day (Oracle's Q1 FY2027 date was two days off in FMP and
@@ -91,6 +92,37 @@ unsigned, and the card says so. Off-schedule and replay rows print `NOT TRADEABL
 
 ```
 ```
+
+## Cards
+
+`freedom cards` produces the cards without anyone typing. It lists the upcoming events, works
+out every decision instant (`expected_t0` − 10 min for `pre_10m`, + 15 / + 30 min for
+`post_15m` / `post_30m`) and, for each instant in the next `--horizon-minutes` (45), sleeps until
+it, runs the same prediction as `freedom predict`, prints the card, appends the row to
+`data/live_predictions.parquet` and writes `reports/cards/<event>__<decision>.md` (a compact
+card), the same `.json`, and a line in `reports/cards/index.md`. A post-release card whose
+release the detector has not seen yet is retried every 60 s for 15 minutes and then recorded
+as a "no release detected" note; a release that came late is re-run at its real `as_of`; a pair
+already predicted live is skipped, so overlapping runs never duplicate a card.
+
+The `freedom-cards` GitHub Actions job (`.github/workflows/cards.yml`) runs it every 15 minutes
+around the clock (Hyperliquid trades 24/7; ASML and TSMC release overnight for New York) on top
+of the newest `freedom-data` artifact, whose job now also trains the `pre_10m`, `post_15m` and
+`post_30m` LightGBM models, and keeps the rows and cards in a `freedom-live` artifact that the
+data job folds back into `freedom-data`. One-time setup, after the data job's secrets:
+
+1. Create an issue titled "Cards".
+2. Add a repository variable `CARDS_ISSUE` (Settings → Secrets and variables → Actions →
+   Variables) holding that issue's number.
+3. Subscribe to the issue in the GitHub mobile app: every card the job produces is posted as a
+   comment, and the app's notification delivers it to the phone.
+
+Caveat: GitHub's cron can start minutes late, and a run that is waiting for an instant blocks
+the next scheduled run until it finishes. A card computed after its window (more than 5 minutes
+after the instant for a post-release decision, after the expected release for a pre-release one)
+still comes out but prints `NOT TRADEABLE` with the reason, and an instant missed by more than
+5 minutes produces no card at all. `freedom cards --now <UTC ISO>` replays a window on the
+command line without sleeping; its rows are marked replay and its cards `NOT TRADEABLE`.
 
 The ten-name/2024 example yields fewer than the default 120 trainable events per walk-forward
 fold, so `evaluate` and `optimize` need `FREEDOM_MIN_TRAIN_EVENTS=12` (what the first-run
@@ -141,6 +173,8 @@ src/freedom/features   feature groups with as_of discipline, dataset builder
 src/freedom/models     baselines, linear, lightgbm, ensemble
 src/freedom/eval       walk-forward folds, metrics, trading simulation, bootstrap, reports
 src/freedom/optimize   Optuna study per decision time
+src/freedom/live.py    one live prediction (freedom predict); src/freedom/card.py its card
+src/freedom/cards.py   every card due in a window, unattended (freedom cards; the freedom-cards job)
 src/freedom/cli.py     the `freedom` command
 ```
 

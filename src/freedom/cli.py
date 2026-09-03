@@ -6,12 +6,13 @@ the command to run or the knob to change first; 3 nothing to predict yet (no rel
 on the live bars); 4 `freedom archive --strict` finished but at least one item errored or lost
 bars past the server horizon (see the error column). Anything else (a KeyError from a dataset
 without target columns, an unknown model name, ...) is a bug or a data-shape problem and
-propagates with its traceback instead of a misleading "run X first" hint.
+propagates with its traceback instead of a misleading "run X first" hint. `freedom cards` (the
+scheduled job) exits 0 once it ran: a card that could not be produced is a note in its
+output directory, not a failed run.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -49,21 +50,16 @@ def _csv(arg: str) -> list[str]:
 
 
 def _blank(v: object) -> bool:
-    import pandas as pd
+    from .cards import blank  # lazy: the CLI imports pandas only inside commands
 
-    return v is None or v is pd.NaT or v is pd.NA or (isinstance(v, float) and math.isnan(v))
+    return blank(v)
 
 
 def _cell(v: object) -> str:
-    import pandas as pd
+    """A table cell (cards.fmt_value: timestamps to the minute, missing values blank)."""
+    from .cards import fmt_value
 
-    if _blank(v):
-        return ""
-    if isinstance(v, pd.Timestamp):
-        return v.strftime("%Y-%m-%d %H:%M")
-    if isinstance(v, float):
-        return f"{v:.4g}" if abs(v) < 1e-3 or abs(v) >= 1e6 else f"{v:.4f}".rstrip("0").rstrip(".")
-    return str(v)
+    return fmt_value(v)
 
 
 def _print_frame(df, title: str) -> None:
@@ -409,42 +405,12 @@ def train(model: str = typer.Option("lightgbm"), decision_time: str = typer.Opti
 
 
 # ---- predict ------------------------------------------------------------------------------------------
-def _pct(v: object) -> str:
-    """A return as a signed percentage ('' when missing)."""
-    return "" if _blank(v) else f"{float(v) * 100:+.2f} %"  # type: ignore[arg-type]
-
-
-def _print_card(card: dict) -> None:
-    """The operator's card: the call, its size, and the reasons, before the row's details."""
-    style = {"LONG": "bold green", "SHORT": "bold red"}.get(card["call"], "bold yellow")
-    console.print(f"\nCARD {card['decision']}  {card['event_id']}  ({card['market'] or 'no perp market'})",
-                  style="bold", markup=False)
-    console.print(f"CALL: {card['call']}", style=style, markup=False)
-    console.print(f"  p_up {_cell(card['p_up'])}   edge {card['edge']:+.3f} vs band ±{card['band']:.2f}   "
-                  f"expected 24h move {_pct(card['expected_r_24h'])}   typical size "
-                  f"{_pct(card['magnitude_hat']).lstrip('+-')}"
-                  f"   10/90 % band {_pct(card['r_lo'])} .. {_pct(card['r_hi'])}", markup=False)
-    for why in card["not_tradeable_because"]:
-        console.print(f"  NOT TRADEABLE: {why}", style="yellow", markup=False)
-    if card["reasons"]:
-        table = Table(title=f"why: {card['reason_basis']}")
-        for col in ("push", "feature", "value", "what it measures"):
-            table.add_column(col)
-        for r in card["reasons"]:
-            push = "" if _blank(r["push"]) else f"{r['push']:+.3f} ({r['direction']})"
-            table.add_row(push, r["feature"], _cell(r["value"]), r["what"])
-        console.print(table)
-    else:
-        console.print("  no reasons: the direction head is untrained (base rate) and the model exposes no "
-                      "feature importance; the call above is the base rate, not a read of this event",
-                      style="yellow", markup=False)
-
-
 def _print_prediction(res: dict) -> None:
+    from .cards import print_card  # the card renderer `freedom cards` shares
     from .schemas import E
 
     row, sched = res["row"], res["schedule"]
-    _print_card(res["card"])
+    print_card(res["card"], console)
     head = {"event": row[E.event_id], "market": row[E.market], "decision": row["decision_time"],
             "as_of": row["as_of"], "t0 used": row["t0_used"], "t0 source": row["t0_source_live"],
             "off_schedule": row["off_schedule"], "schedule": sched["note"],
@@ -491,6 +457,29 @@ def predict(event: str = typer.Option(..., "--event", help="event_id, e.g. NVDA:
     _print_prediction(res)
     if not no_append:
         console.print(f"appended to {live.live_predictions_path(s)}", markup=False)
+
+
+# ---- cards --------------------------------------------------------------------------------------------
+@app.command()
+def cards(horizon_minutes: int = typer.Option(45, "--horizon-minutes", help="Predict every card whose decision "
+                                                                              "instant falls within this many minutes"),
+          decisions: str = typer.Option("pre_10m,post_15m,post_30m", "--decisions", help="Comma-separated decision times"),
+          now: str | None = typer.Option(None, "--now", help="Override the current instant (UTC ISO): a replay that "
+                                                            "never sleeps and records replay rows"),
+          no_wait: bool = typer.Option(False, "--no-wait", help="Predict every due card immediately instead of "
+                                                                "sleeping until its instant (and never retry)"),
+          out: str | None = typer.Option(None, "--out", help="Card directory (default: <reports_dir>/cards)")) -> None:
+    """Predict, print and write every card due in the next N minutes (the scheduled freedom-cards job)."""
+    from . import cards as cards_mod
+
+    s = get_settings()
+    dts = _decision_times(decisions)
+    with _guard():
+        run = cards_mod.run_cards(s, horizon_minutes=horizon_minutes, decisions=dts, now=now, wait=not no_wait,
+                                  out_dir=Path(out) if out else None, console=console)
+    if run.due:
+        console.print(f"freedom cards: {len(run.cards)} card(s) and {len(run.notes)} note(s) -> {run.out_dir} "
+                      f"(index: {run.out_dir / cards_mod.INDEX_FILE})", markup=False)
 
 
 # ---- upcoming -----------------------------------------------------------------------------------------
