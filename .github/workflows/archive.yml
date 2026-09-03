@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 120
     env:
       FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+      ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}  # optional: report-date cross-check for foreign issuers
       FREEDOM_SEC_USER_AGENT: "freedom-harness ${{ github.repository_owner }}@users.noreply.github.com"
     steps:
       - uses: actions/checkout@v4
