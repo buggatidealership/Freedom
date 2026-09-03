@@ -9,15 +9,20 @@ name: freedom-data
 # resume from the on-disk cache on the next run, so the first full build completes over a few
 # days without anyone watching it. The 00:17 UTC run lands just after the quota resets.
 #
-# Setup: add FMP_API_KEY as a repository secret and enable Actions. Nothing vendor-derived is
-# committed to the repository; the data lives only in the private `freedom-data` artifact.
+# Setup: add FMP_API_KEY as a repository secret. Nothing vendor-derived is committed to the
+# repository; the data lives only in the `freedom-data` artifact. NOTE: on a public repository
+# any logged-in GitHub user can download workflow artifacts; make the repository private if
+# that matters. Older artifacts are deleted after each upload so storage stays at ~2 copies.
 on:
   schedule:
     - cron: "17 */12 * * *"
   workflow_dispatch:
 permissions:
-  actions: read
+  actions: write  # delete superseded artifacts
   contents: read
+concurrency:
+  group: freedom-data
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -51,10 +56,28 @@ jobs:
         run: uv run freedom dataset --decision-times pre_10m,pre_5m,post_15m,post_30m
       - name: Status
         run: uv run freedom status
+      - name: Evaluate (walk-forward on whatever is built so far; the report is the deliverable)
+        continue-on-error: true
+        run: uv run freedom evaluate --decision-times pre_10m,post_30m
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: freedom-data
           path: data
-          retention-days: 90
+          retention-days: 7
           include-hidden-files: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: freedom-reports
+          path: reports
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Delete superseded data artifacts (keep the newest 2)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=freedom-data&per_page=100" \
+            --jq '.artifacts | sort_by(.created_at) | reverse | .[2:] | .[].id' \
+            | while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "deleted $id"; done
