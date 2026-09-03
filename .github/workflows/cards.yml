@@ -1,0 +1,102 @@
+name: freedom-cards
+# Every 15 minutes, around the clock (Hyperliquid perps trade 24/7 and some issuers release
+# overnight for New York): restore the newest data artifact (universe, events, archive, the
+# trained models) and the newest live artifact on top (rows and cards from earlier runs, so a
+# card is never produced twice), then `freedom cards --horizon-minutes 45`: every card whose
+# decision instant falls in the next 45 minutes is predicted at that instant (the run sleeps
+# until it), printed, written to reports/cards and appended to data/live_predictions.parquet.
+# The cards written by this run are posted as comments on the issue named by the CARDS_ISSUE
+# repository variable; GitHub's app notifications deliver them to a phone.
+#
+# Setup: the FMP_API_KEY secret (as for freedom-data), an issue titled "Cards", and a
+# repository variable CARDS_ISSUE holding that issue's number (Settings -> Secrets and
+# variables -> Actions -> Variables). Without the variable the cards stay in the freedom-live
+# artifact. The freedom-data job restores freedom-live too, so the live rows travel into the
+# data artifact, and it trains the pre_10m / post_15m / post_30m models this job loads.
+#
+# GitHub's cron can start minutes late, and a run that waits for an instant blocks the next
+# scheduled run until it finishes (the concurrency group never cancels a running job). An
+# instant at most 5 minutes past is still produced; an off-schedule row prints NOT TRADEABLE.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  actions: write  # delete superseded artifacts
+  contents: read
+  issues: write  # post the cards on the Cards issue
+concurrency:
+  group: freedom-cards
+  cancel-in-progress: false
+jobs:
+  cards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80  # the 45-minute horizon, 15 minutes of retries, a late-release re-run and setup
+    env:
+      FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+      ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}  # optional: report-date cross-check for foreign issuers
+      FREEDOM_SEC_USER_AGENT: "freedom-harness ${{ github.repository_owner }}@users.noreply.github.com"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.11
+      - run: uv venv && uv pip install -e .
+      - name: Restore data from the newest freedom-data artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # actions/download-artifact only sees the current run; gh fetches the newest artifact
+        # of that name from any earlier run (the freedom-data workflow builds it).
+        run: gh run download -n freedom-data -D data -R "${{ github.repository }}" || echo "no data artifact yet (run the freedom-data workflow first)"
+      - name: Restore live rows and earlier cards from the newest freedom-live artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # on top of the data artifact: data/live_predictions.parquet (the dedupe source) and reports/cards
+        run: gh run download -n freedom-live -D . -R "${{ github.repository }}" || echo "no live artifact yet (first run)"
+      - name: Mark the start of this run's cards
+        # everything restored above is older than this marker; only files newer than it are posted
+        run: touch "$RUNNER_TEMP/cards_started"
+      - name: Cards due in the next 45 minutes
+        run: uv run freedom cards --horizon-minutes 45
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: freedom-live
+          path: |
+            data/live_predictions.parquet
+            reports/cards
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Delete superseded live artifacts (keep the newest 2)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?name=freedom-live&per_page=100" \
+            --jq '.artifacts | sort_by(.created_at) | reverse | .[2:] | .[].id' \
+            | while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "deleted $id"; done
+      - name: Post this run's cards on the Cards issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CARDS_ISSUE: ${{ vars.CARDS_ISSUE }}
+        run: |
+          if [ -z "$CARDS_ISSUE" ]; then
+            echo "CARDS_ISSUE repository variable is not set: the cards stay in the freedom-live artifact (see README, Cards)"
+            exit 0
+          fi
+          if [ ! -d reports/cards ] || [ ! -f "$RUNNER_TEMP/cards_started" ]; then
+            echo "no cards directory: nothing to post"
+            exit 0
+          fi
+          n=0
+          failed=0
+          while IFS= read -r f; do
+            if gh issue comment "$CARDS_ISSUE" -R "${{ github.repository }}" --body-file "$f"; then
+              n=$((n + 1))
+            else
+              echo "::error::could not post $f on issue #$CARDS_ISSUE"
+              failed=1
+            fi
+          done < <(find reports/cards -name '*.md' ! -name index.md -newer "$RUNNER_TEMP/cards_started" | sort)
+          echo "posted $n card(s) on issue #$CARDS_ISSUE"
+          exit $failed
