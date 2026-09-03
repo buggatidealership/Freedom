@@ -100,9 +100,11 @@ def test_due_instants_window_and_order(world):
     assert [(d.decision, d.instant) for d in due] == [("pre_10m", T0 - 10 * MIN), ("post_15m", T0 + 15 * MIN),
                                                       ("post_30m", T0 + 30 * MIN)]
     assert due[0].event_id == EVENT and due[0].market == "xyz:NVDA" and due[0].expected_t0 == T0
-    # an instant up to 5 minutes past is still due (cron starts late); further past or beyond the horizon is not
-    assert len(cards.due_instants(s, now=T0 - 5 * MIN, horizon=horizon, decisions=["pre_10m"])[0]) == 1
-    assert cards.due_instants(s, now=T0 - 4 * MIN, horizon=horizon, decisions=["pre_10m"])[0] == []
+    # an instant up to DUE_LOOKBACK (20 min) past is still due: cron starts late and a run that slept
+    # until its last instant blocks the next one; further past or beyond the horizon is not
+    assert cards.DUE_LOOKBACK == 20 * MIN
+    assert len(cards.due_instants(s, now=T0 + 10 * MIN, horizon=horizon, decisions=["pre_10m"])[0]) == 1
+    assert cards.due_instants(s, now=T0 + 11 * MIN, horizon=horizon, decisions=["pre_10m"])[0] == []
     assert cards.due_instants(s, now=T0 - 56 * MIN, horizon=horizon, decisions=["pre_10m"])[0] == []
     assert len(cards.due_instants(s, now=T0 - 55 * MIN, horizon=horizon, decisions=["pre_10m"])[0]) == 1
 
