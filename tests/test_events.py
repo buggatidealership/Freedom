@@ -827,7 +827,9 @@ def test_upcoming_expected_t0_fallbacks(settings, fake):
     build_events(settings, underlyings=["TSM"], since=pd.Timestamp("2026-09-01"))
     up = upcoming_events(settings, days=14).set_index(E.underlying)
     assert up.loc["TSM", "expected_t0"] == pd.Timestamp("2026-09-11 12:30", tz="UTC")
-    assert up.loc["TSM", "expected_t0_source"] == "events table: manual"
+    # the yaml is read directly by upcoming_events (same instant, and no rebuild would be needed)
+    assert up.loc["TSM", "expected_t0_source"] == "manual override (configs/t0_overrides.yaml)"
+    assert load_events(settings).set_index(E.underlying).loc["TSM", E.t0_source] == "manual"
 
 
 def _sec_8k_row(event_id: str, day: str, acceptance_utc: str, **over) -> dict:
