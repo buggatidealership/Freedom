@@ -468,7 +468,9 @@ def cards(horizon_minutes: int = typer.Option(45, "--horizon-minutes", help="Pre
                                                             "never sleeps and records replay rows"),
           no_wait: bool = typer.Option(False, "--no-wait", help="Predict every due card immediately instead of "
                                                                 "sleeping until its instant (and never retry)"),
-          out: str | None = typer.Option(None, "--out", help="Card directory (default: <reports_dir>/cards)")) -> None:
+          out: str | None = typer.Option(None, "--out", help="Card directory (default: <reports_dir>/cards)"),
+          model: str | None = typer.Option(None, "--model", help="Trained model name under data/models/<decision>/ "
+                                                                "(default: the only one there)")) -> None:
     """Predict, print and write every card due in the next N minutes (the scheduled freedom-cards job)."""
     from . import cards as cards_mod
 
@@ -476,7 +478,7 @@ def cards(horizon_minutes: int = typer.Option(45, "--horizon-minutes", help="Pre
     dts = _decision_times(decisions)
     with _guard():
         run = cards_mod.run_cards(s, horizon_minutes=horizon_minutes, decisions=dts, now=now, wait=not no_wait,
-                                  out_dir=Path(out) if out else None, console=console)
+                                  out_dir=Path(out) if out else None, console=console, model_name=model)
     if run.due:
         console.print(f"freedom cards: {len(run.cards)} card(s) and {len(run.notes)} note(s) -> {run.out_dir} "
                       f"(index: {run.out_dir / cards_mod.INDEX_FILE})", markup=False)

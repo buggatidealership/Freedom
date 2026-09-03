@@ -52,7 +52,10 @@ log = logging.getLogger(__name__)
 DEFAULT_DECISIONS = "pre_10m,post_15m,post_30m"
 DEFAULT_HORIZON_MINUTES = 45
 LOOKAHEAD_DAYS = 2  # calendar days of upcoming events to consider
-DUE_LOOKBACK = pd.Timedelta(minutes=5)  # an instant this recently past is still due (cron starts late)
+# An instant this recently past is still due: GitHub cron starts late and a run that slept until its
+# last instant blocks the next one. A late pre card comes out off schedule (NOT TRADEABLE), which is
+# a better record than no card at all.
+DUE_LOOKBACK = pd.Timedelta(minutes=20)
 RETRY_EVERY_S = 60.0  # post decisions: poll for the release this often ...
 RETRY_FOR = pd.Timedelta(minutes=15)  # ... until this long after the instant
 SLEEP_STEP_S = 30.0  # waiting for an instant sleeps in increments of at most this
@@ -324,7 +327,7 @@ def _off_schedule_early(res: dict, now: pd.Timestamp) -> pd.Timestamp | None:
 
 
 def _predict_due(settings: Settings, due: Due, *, now_override: pd.Timestamp | str | None,
-                 wait: bool, console: Console) -> tuple[dict | None, str | None]:
+                 wait: bool, console: Console, model_name: str | None = None) -> tuple[dict | None, str | None]:
     """(result, message) — the prediction, or None with the reason no card was produced.
     Post decisions retry an undetected release every RETRY_EVERY_S until instant + RETRY_FOR
     (only when waiting is allowed) and re-run a too-early row at its as_of."""
@@ -334,7 +337,7 @@ def _predict_due(settings: Settings, due: Due, *, now_override: pd.Timestamp | s
     while True:
         try:
             res = live.predict_event(settings, event_id=due.event_id, decision=due.decision,
-                                     now=now_override, append=True)
+                                     model_name=model_name, now=now_override, append=True)
         except live.ReleaseNotDetected as exc:
             message = str(exc)
             now = utcnow()
@@ -357,8 +360,10 @@ def _predict_due(settings: Settings, due: Due, *, now_override: pd.Timestamp | s
 
 def run_cards(settings: Settings, *, horizon_minutes: int = DEFAULT_HORIZON_MINUTES,
               decisions: list[str] | None = None, now: pd.Timestamp | str | None = None,
-              wait: bool = True, out_dir: Path | None = None, console: Console | None = None) -> CardsRun:
-    """Predict, print and write every card due in the next `horizon_minutes` minutes."""
+              wait: bool = True, out_dir: Path | None = None, console: Console | None = None,
+              model_name: str | None = None) -> CardsRun:
+    """Predict, print and write every card due in the next `horizon_minutes` minutes. `model_name`
+    picks the trained model under data/models/<decision>/ (None: the only one there)."""
     console = console or Console()
     decisions = list(decisions) if decisions else DEFAULT_DECISIONS.split(",")
     for d in decisions:
@@ -391,7 +396,8 @@ def run_cards(settings: Settings, *, horizon_minutes: int = DEFAULT_HORIZON_MINU
                           f"at {fmt_value(due.instant)} UTC", markup=False)
             _sleep_until(due.instant)
         try:
-            res, message = _predict_due(settings, due, now_override=now, wait=wait, console=console)
+            res, message = _predict_due(settings, due, now_override=now, wait=wait, console=console,
+                                        model_name=model_name)
         except Exception as exc:  # one failed card must not stop the others
             log.exception("%s failed", due.label)
             res, message = None, f"{type(exc).__name__}: {exc}"
