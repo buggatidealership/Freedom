@@ -211,7 +211,7 @@ def target_columns(targets: pd.DataFrame | None) -> list[str]:
               T.price_market, T.horizon_actual_h, T.h24_in_closure]
     for cp in CHECKPOINTS:
         wanted += [T.r(cp), T.ar(cp), T.p(cp), T.t(cp), T.s(cp)]
-    wanted += [T.direction, T.magnitude, T.continuation_15m, T.continuation_30m]
+    wanted += [T.direction, T.magnitude, T.continuation_15m, T.continuation_30m, T.label_reason]
     if targets is None:
         return []
     return [c for c in wanted if c in targets.columns]

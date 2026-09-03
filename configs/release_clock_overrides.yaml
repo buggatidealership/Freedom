@@ -1,0 +1,21 @@
+# An issuer's habitual release clock: UNDERLYING -> "HH:MM <IANA zone>". The events builder
+# sets t0 = the report date at that local clock, converted to UTC through the zone (so DST
+# follows the issuer's calendar, not a fixed offset), with t0_source = issuer_clock and
+# confidence 0.7. It ranks below a manual override (configs/t0_overrides.yaml) and an 8-K item
+# 2.02 acceptance, and above a detection from 1-minute bars and the AMC/BMO calendar defaults:
+# the FMP proxy has no bars between 20:00 and 04:00 ET, so for an overnight release the
+# detector fires on the first bar of the next session (an artefact) and the calendar default
+# (07:00 ET for a BMO flag) lands hours after the release, inside the reaction. `freedom
+# upcoming` and `freedom predict` read this file directly (no table rebuild needed).
+#
+# Add an entry only for an issuer whose release clock is documented and stable over years;
+# one quarter's wire time is a t0 override, not a clock. Remove it when the issuer changes habit.
+
+# ASML publishes quarterly results at 07:00 Central European time, every quarter for years
+# (asml.com/en/investors/financial-calendar; Q2 2026 hit the wire at 01:00 ET). 07:00 CET/CEST
+# is 06:00 UTC in winter, 05:00 UTC in summer.
+ASML: "07:00 Europe/Amsterdam"
+# TSMC holds its quarterly earnings conference at 14:00 Taipei (UTC+8, no DST) and posts the
+# results at the same time (investor.tsmc.com, quarterly earnings conferences); 14:00 Taipei is
+# 06:00 UTC, 02:00 ET.
+TSM: "14:00 Asia/Taipei"

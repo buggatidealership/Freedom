@@ -335,6 +335,26 @@ def test_pre_schedule_clock_ignores_the_event_itself_and_later_acceptances(world
     assert live.pre_schedule(s, bmo.iloc[0], bmo, "pre_5m", now).t0 == to_utc("2026-08-26 11:00", assume_tz="UTC")
 
 
+def test_pre_schedule_uses_the_issuer_release_clock_after_the_median(world, monkeypatch):
+    s = world["settings"]
+    s.configs_dir = s.data_dir / "configs"
+    s.configs_dir.mkdir()
+    (s.configs_dir / "release_clock_overrides.yaml").write_text('NVDA: "14:00 Asia/Taipei"\n')
+    events = world["events"]
+    now = to_utc("2026-08-26 05:30", assume_tz="UTC")
+    # the fixture's median acceptance clock (16:05 New York) still outranks the issuer clock
+    sched = live.pre_schedule(s, events.iloc[0], events, "pre_5m", now)
+    assert sched.t0_source == "expected_sec_8k" and sched.t0 == to_utc("2026-08-26 20:05", assume_tz="UTC")
+    # without one the issuer's clock sets the schedule under its own stratum key
+    monkeypatch.setattr(events_mod, "expected_release_clock", lambda ev, u, before=None: None)
+    sched = live.pre_schedule(s, events.iloc[0], events, "pre_5m", now)
+    assert sched.t0 == to_utc("2026-08-26 06:00", assume_tz="UTC")
+    assert sched.as_of == to_utc("2026-08-26 05:55", assume_tz="UTC") and sched.off_schedule is False
+    assert sched.t0_source == "expected_issuer_clock"
+    assert "issuer release clock 14:00 Asia/Taipei (configs/release_clock_overrides.yaml)" in sched.note
+    assert live.expected_t0_source_key("events table: issuer_clock") == "expected_issuer_clock"
+
+
 def test_pre_5m_manual_override_on_the_table_row_wins(world):
     s = world["settings"]
     ev = world["events"].assign(**{E.t0: to_utc("2026-08-26 19:30", assume_tz="UTC"), E.t0_source: "manual"})

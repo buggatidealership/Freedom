@@ -754,6 +754,21 @@ def test_dataset_sha256_of_the_parquet_file_is_used_when_it_exists(settings, dat
     assert explicit["dataset_sha256"] == hashlib.sha256(other.read_bytes()).hexdigest()
 
 
+def test_cohorts_count_the_reasons_for_missing_labels(settings, dataset):
+    """targets.label_reason (schema 4) travels with the dataset and the per-decision cohort
+    counts it over the target_missing rows; a dataset without the column reports nothing."""
+    ds = dataset.copy()
+    missing = ds["target_missing"].astype(bool)
+    ds[T.label_reason] = np.where(missing, "p0_stale", None)
+    summary = ev.evaluate(settings, ds, model_names=["zero"], decision_times=["post_30m"], paths=make_paths(ds), n_boot=10)
+    cohort = summary["cohorts"]["post_30m"]
+    n_missing = cohort["n_target_missing"]
+    assert cohort["target_missing_reasons"] == ({"p0_stale": n_missing} if n_missing else {})
+    summary2 = ev.evaluate(settings, dataset, model_names=["zero"], decision_times=["post_30m"],
+                           paths=make_paths(dataset), n_boot=10)
+    assert "target_missing_reasons" not in summary2["cohorts"]["post_30m"]
+
+
 # ---- final: holdout scoring ----------------------------------------------------------------------------
 def _unobservable_24h(dataset: pd.DataFrame, event_id: str) -> pd.DataFrame:
     """`dataset` with the event's +24h label blanked the way targets.compute_targets does when

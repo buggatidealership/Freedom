@@ -11,6 +11,14 @@ and its staleness (t0+h minus bar end) is within max(2 x interval, 5 min). Only 
 resolve prices; 1h or coarser candles are never used for p0, checkpoints or fills. One price
 source per event, never mixed inside the window.
 
+The same staleness limit applies to p0 itself: when the p0 bar ended more than
+max_staleness(interval) before t0 - buffer, the row keeps p0, p0_time and p0_staleness_min but
+computes no checkpoint or label at all (`label_reason = p0_stale`). This is the FMP proxy on a
+release outside its 04:00-20:00 ET bars: ASML publishes at 07:00 Amsterdam (01:00 ET) and TSMC
+at 14:00 Taipei (02:00 ET), so the "last pre-release bar" is the previous evening's close, hours
+stale, and a label built on it would measure overnight drift plus the reaction. Every row says
+why its headline label is NaN in `label_reason` (LABEL_REASONS), None when it exists.
+
 Corporate actions (docs/design.md §2): when the event carries a split ex-date
 (schemas.E.ca_ex_date, set by the events builder from the FMP splits calendar) inside
 [p0_time, t0 + horizon], the headline +24h checkpoint and the labels derived from it are NaN.
@@ -50,6 +58,17 @@ P0_BUFFER_MINUTES_SEC_8K = 3.0  # default of Settings.p0_buffer_minutes_sec_8k; 
 P0_BUFFER_SOURCES = ("sec_8k",)  # t0 sources whose P0 backs off by the buffer
 PERP_SOURCES = (PriceSource.hl_archive.value, PriceSource.hl_live.value)  # unadjusted across splits
 MIN_STALENESS = pd.Timedelta(minutes=5)
+
+# T.label_reason values: why the headline label (r_24h) of a targets row is NaN
+LABEL_NO_T0 = "no_t0"  # pending row: no release instant
+LABEL_NO_PATH = "no_path"  # no 1m/5m path covers [t0 - 1h, t0 + horizon]
+LABEL_COARSE_BARS = "coarse_bars"  # only 1h or coarser candles were available
+LABEL_NO_P0 = "no_p0"  # no bar ends at or before t0 - buffer
+LABEL_P0_STALE = "p0_stale"  # the p0 bar ended more than max_staleness(interval) before t0 - buffer
+LABEL_CORPORATE_ACTION = "corporate_action"  # a split ex-date inside [p0_time, t0 + horizon]
+LABEL_NO_24H_BAR = "no_24h_bar"  # no valid bar at t0 + horizon (proxy closed, path too short)
+LABEL_REASONS = (LABEL_NO_T0, LABEL_NO_PATH, LABEL_COARSE_BARS, LABEL_NO_P0, LABEL_P0_STALE,
+                 LABEL_CORPORATE_ACTION, LABEL_NO_24H_BAR)
 
 
 def max_staleness(interval: str) -> pd.Timedelta:
@@ -174,8 +193,11 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
     continuation_k = sign(r_k) * sign(r_24h - r_k) for k in {15m, 30m} (NaN inside the dead band).
     Every checkpoint records the bar end used (t_<cp>) and staleness in minutes (s_<cp>);
     invalid checkpoints stay NaN. An event without t0 (a pending row) yields the all-NaN row.
-    A split ex-date (E.ca_ex_date) inside [p0_time, t0 + horizon] NaNs the headline checkpoint
-    and its labels; on a perp path every checkpoint from the ex-date on (module docstring)."""
+    A p0 bar older than max_staleness(interval) is recorded but yields no checkpoint or label
+    (`label_reason = p0_stale`, module docstring). A split ex-date (E.ca_ex_date) inside
+    [p0_time, t0 + horizon] NaNs the headline checkpoint and its labels; on a perp path every
+    checkpoint from the ex-date on. `label_reason` names the reason the headline label is NaN
+    (LABEL_REASONS) and is None when r_24h exists."""
     if p0_buffer is None:
         p0_buffer = p0_buffer_for(event)
     t0_raw = event.get(E.t0) if hasattr(event, "get") else event[E.t0]
@@ -195,12 +217,18 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
     out[T.magnitude] = np.nan
     out[T.continuation_15m] = np.nan
     out[T.continuation_30m] = np.nan
-    if t0 is None or path is None or len(path) == 0:
+    out[T.label_reason] = None
+    if t0 is None:
+        out[T.label_reason] = LABEL_NO_T0
+        return pd.Series(out)
+    if path is None or len(path) == 0:
+        out[T.label_reason] = LABEL_NO_PATH
         return pd.Series(out)
 
     interval = _interval_of(path)
     if interval not in FINE_INTERVALS:
         log.warning("%s: path interval %s is too coarse for targets", event[E.event_id], interval)
+        out[T.label_reason] = LABEL_COARSE_BARS
         return pd.Series(out)
     out[T.price_interval] = interval
     out[T.price_source] = str(path[C.source].dropna().iloc[0]) if path[C.source].notna().any() else None
@@ -208,16 +236,27 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
     stale = max_staleness(interval)
 
     ref = price_at(path, t0 - p0_buffer)
-    if ref is None:
+    if ref is None or not (ref[0] > 0):
+        out[T.label_reason] = LABEL_NO_P0
         return pd.Series(out)
     p0, p0_time = ref
-    if not (p0 > 0):
-        return pd.Series(out)
     out[T.p0], out[T.p0_time] = p0, p0_time
-    out[T.p0_staleness_min] = ((t0 - p0_buffer) - p0_time) / pd.Timedelta(minutes=1)
+    p0_lag = (t0 - p0_buffer) - p0_time
+    out[T.p0_staleness_min] = p0_lag / pd.Timedelta(minutes=1)
+    if p0_lag > stale:
+        # the last pre-release bar is older than any checkpoint bar may be: on the FMP proxy
+        # (no bars 20:00-04:00 ET) an overnight release anchors to the previous evening's close,
+        # and a return measured from it is overnight drift plus the reaction. p0, p0_time and
+        # the staleness stay on the row; every checkpoint and label is NaN.
+        out[T.label_reason] = LABEL_P0_STALE
+        log.info("%s: p0 bar ended %s before t0 - buffer (limit %s); no labels computed",
+                 event[E.event_id], p0_lag, stale)
+        return pd.Series(out)
 
     mref = price_at(market_path, t0 - p0_buffer) if market_path is not None and len(market_path) else None
     m_stale = max_staleness(_interval_of(market_path)) if mref is not None else stale
+    if mref is not None and (t0 - p0_buffer) - mref[1] > m_stale:
+        mref = None  # a benchmark anchor as stale as that gives no abnormal return either
     cps = checkpoint_times(t0, horizon_hours)
     for cp, when in cps.items():
         hit = price_at(path, when)
@@ -242,6 +281,7 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
                      and not pd.isna(out[T.t(cp)]) and out[T.t(cp)] >= ex]
         for cp in void:
             out[T.r(cp)], out[T.ar(cp)], out[T.p(cp)], out[T.t(cp)], out[T.s(cp)] = np.nan, np.nan, np.nan, pd.NaT, np.nan
+        out[T.label_reason] = LABEL_CORPORATE_ACTION
         log.info("%s: split ex-date %s inside the target window; %s left NaN",
                  event[E.event_id], ex.tz_convert(NY).date(), ", ".join(void))
     r24 = out[T.r("24h")]
@@ -253,6 +293,8 @@ def compute_targets(event: pd.Series, path: pd.DataFrame, market_path: pd.DataFr
             rk = out[T.r(k)]
             if isinstance(rk, float) and not math.isnan(rk) and abs(rk) >= CONTINUATION_DEAD_BAND:
                 out[col] = float(np.sign(rk) * np.sign(r24 - rk))
+    elif out[T.label_reason] is None:
+        out[T.label_reason] = LABEL_NO_24H_BAR
     return pd.Series(out)
 
 

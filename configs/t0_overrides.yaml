@@ -2,6 +2,10 @@
 # UNDERLYING:<report date in New York> ("ASML:2026-10-14"). Wins over every other source, so use
 # it only when the vendor timing class is wrong (a foreign issuer releasing overnight) and keep
 # the value at the issuer's habitual wire time.
+# An issuer whose clock is the same every quarter belongs in configs/release_clock_overrides.yaml
+# instead (t0_source = issuer_clock, applied to every past and upcoming event of the issuer).
+# ASML and TSM are there now, so the two entries below only pin what the clock already gives;
+# they still win as `manual` and can be removed after Oct 15 2026.
 # ASML publishes quarterly results at 07:00 Central European time (Q2 2026 hit the wire at
 # 01:00 ET); Oct 14 2026 is CEST (UTC+2), so 07:00 CEST = 05:00 UTC = 01:00 ET. Date confirmed by
 # asml.com/en/investors/financial-calendar and the FY2025 20-F financial calendar. Without this

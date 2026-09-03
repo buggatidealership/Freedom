@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from freedom.schemas import CONTINUATION_DEAD_BAND, C, E, T
+from freedom.schemas import CHECKPOINTS, CONTINUATION_DEAD_BAND, C, E, T
 from freedom.targets import (
     build_price_path,
     build_targets,
@@ -111,6 +111,63 @@ def test_coarse_bars_never_resolve_targets():
     coarse = _hl_bars("candles_xyzNVDA_1h_20260824_29.json", "1h")
     tg = compute_targets(_event(), coarse, None)
     assert np.isnan(tg[T.p0]) and tg[T.price_interval] is None
+    assert tg[T.label_reason] == "coarse_bars"
+
+
+def _flat_1m_bars(start: str, end: str, price: float, source: str = "fmp_intraday") -> pd.DataFrame:
+    t = pd.date_range(start, end, freq="1min", tz="UTC", inclusive="left")
+    return pd.DataFrame({C.market: "ASML", C.interval: "1m", C.t: t, C.t_end: t + pd.Timedelta(minutes=1),
+                         C.open: price, C.high: price, C.low: price, C.close: price, C.volume: 1000.0,
+                         C.n_trades: pd.array([pd.NA] * len(t), dtype="Int64"), C.source: source})
+
+
+def test_stale_p0_keeps_the_anchor_but_yields_no_labels():
+    """An overnight release on the FMP proxy (no bars 20:00-04:00 ET): the last pre-release bar
+    is hours old, so p0 is recorded and every checkpoint and label stays NaN."""
+    t0 = to_utc("2026-10-15 05:00", assume_tz="UTC")  # ASML: 07:00 CEST, no P0 buffer for this source
+    ev = pd.Series({E.event_id: "ASML:2026-09", E.underlying: "ASML", E.market: "xyz:ASML", E.t0: t0,
+                    E.t0_source: "issuer_clock"})
+    evening = _flat_1m_bars("2026-10-14 20:00", "2026-10-15 00:00", 100.0)  # last bar ends 00:00 UTC
+    after = _flat_1m_bars("2026-10-15 05:00", "2026-10-16 06:00", 110.0)  # the reaction
+    path = pd.concat([evening, after], ignore_index=True)
+    flat = {C.open: 100.0, C.high: 100.0, C.low: 100.0, C.close: 100.0}
+    tg = compute_targets(ev, path, path.assign(**flat))
+    assert tg[T.p0] == pytest.approx(100.0) and tg[T.p0_time] == to_utc("2026-10-15 00:00", assume_tz="UTC")
+    assert tg[T.p0_staleness_min] == pytest.approx(300.0)
+    assert tg[T.label_reason] == "p0_stale"
+    assert tg[T.price_source] == "fmp_intraday" and tg[T.price_interval] == "1m"
+    for cp in CHECKPOINTS:
+        assert np.isnan(tg[T.r(cp)]) and np.isnan(tg[T.ar(cp)]) and np.isnan(tg[T.p(cp)]), cp
+        assert pd.isna(tg[T.t(cp)]) and np.isnan(tg[T.s(cp)]), cp
+    for col in (T.direction, T.magnitude, T.continuation_15m, T.continuation_30m, T.horizon_actual_h):
+        assert np.isnan(tg[col]), col
+    # a bar ending two minutes before the release is inside the limit: the same event has labels
+    fresh = pd.concat([evening, _flat_1m_bars("2026-10-15 00:00", "2026-10-15 04:58", 100.0), after],
+                      ignore_index=True)
+    tg2 = compute_targets(ev, fresh, fresh.assign(**flat))
+    assert tg2[T.p0_time] == to_utc("2026-10-15 04:58", assume_tz="UTC")
+    assert tg2[T.p0_staleness_min] == pytest.approx(2.0) and tg2[T.label_reason] is None
+    assert tg2[T.r("5m")] == pytest.approx(math.log(1.1)) and tg2[T.r("24h")] == pytest.approx(math.log(1.1))
+    assert tg2[T.ar("24h")] == pytest.approx(math.log(1.1)) and tg2[T.direction] == 1.0
+    assert not np.isnan(tg2[T.r("next_open")]) and not np.isnan(tg2[T.r("next_close")])
+    # the 8-K buffer counts against the limit: three minutes more and the 04:58 bar is stale again
+    ev8k = ev.copy()
+    ev8k[E.t0_source] = "sec_8k"
+    tg3 = compute_targets(ev8k, fresh, None)
+    assert tg3[T.p0_time] == to_utc("2026-10-15 04:57", assume_tz="UTC") and tg3[T.label_reason] is None
+    tg4 = compute_targets(ev8k, fresh, None, p0_buffer=pd.Timedelta(minutes=8))
+    assert tg4[T.p0_time] == to_utc("2026-10-15 04:52", assume_tz="UTC")
+    assert tg4[T.p0_staleness_min] == pytest.approx(0.0)
+    assert tg4[T.label_reason] is None and not np.isnan(tg4[T.r("24h")])
+    # a stale benchmark anchor gives no abnormal return, the plain returns stand
+    stale_market = pd.concat([evening, after], ignore_index=True).assign(**flat)
+    tg5 = compute_targets(ev, fresh, stale_market)
+    assert tg5[T.r("24h")] == pytest.approx(math.log(1.1)) and np.isnan(tg5[T.ar("24h")])
+    # the other empty rows say why
+    assert compute_targets(ev, pd.DataFrame(), None)[T.label_reason] == "no_path"
+    assert compute_targets(ev, after, None)[T.label_reason] == "no_p0"
+    short = fresh[fresh[C.t_end] <= t0 + pd.Timedelta(hours=3)]
+    assert compute_targets(ev, short, None)[T.label_reason] == "no_24h_bar"
 
 
 def test_continuation_label_follows_the_early_reaction_sign():
@@ -284,7 +341,7 @@ def test_pending_rows_get_nan_targets_without_a_provider_request(settings, monke
     # the empty row can be built without a t0 (this is what the failure handler falls back to)
     row = compute_targets(pending, pd.DataFrame(), None)
     assert row[T.event_id] == "NVDA:2026-04" and np.isnan(row[T.p0]) and np.isnan(row[T.r("24h")])
-    assert pd.isna(row[T.h24_in_closure]) and pd.isna(row[T.p0_time])
+    assert pd.isna(row[T.h24_in_closure]) and pd.isna(row[T.p0_time]) and row[T.label_reason] == "no_t0"
     # ... and the resolved row with a NaN pending column is still resolved
     resolved[E.pending] = np.nan
     assert not np.isnan(build_targets(settings, _resolved_events(resolved), write=False)[T.r("24h")].iloc[0])
@@ -318,6 +375,7 @@ def test_split_ex_date_inside_the_window_voids_the_headline_label():
         assert np.isnan(tg[T.direction]) and np.isnan(tg[T.magnitude])
         assert np.isnan(tg[T.continuation_15m]) and np.isnan(tg[T.continuation_30m])
         assert np.isnan(tg[T.horizon_actual_h]) and tg[T.p0] == pytest.approx(clean[T.p0])
+        assert tg[T.label_reason] == "corporate_action" and clean[T.label_reason] is None
     # the FMP proxy is split-adjusted: only the headline label goes, the intermediate checkpoints stay
     proxy = bars.copy()
     proxy[C.source] = "fmp_intraday"
