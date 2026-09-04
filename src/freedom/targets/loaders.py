@@ -7,6 +7,7 @@ import logging
 import pandas as pd
 
 from ..config import Settings
+from ..data.base import ProviderUnavailable
 from ..schemas import C, E, PriceSource
 from ..timeutil import to_utc
 from . import build_price_path
@@ -67,7 +68,13 @@ def load_event_bars(settings: Settings, event: pd.Series, *, hl, fmp, benchmark_
         return pd.DataFrame(columns=cols), None
     market = event.get(E.market)
     perp = _perp_bars(settings, hl, market, lo, hi) if isinstance(market, str) and market else None
-    equity = _equity_bars(fmp, event[E.underlying], lo, hi)
+    try:
+        equity = _equity_bars(fmp, event[E.underlying], lo, hi)
+    except ProviderUnavailable as exc:
+        if perp is None or len(perp) == 0:
+            raise  # nothing else can label this event: the caller's budget checkpoint applies
+        log.warning("%s: underlying bars unavailable (%s); the perp path stands", event.get(E.event_id), exc)
+        equity = None
     path = build_price_path(settings, event, market_bars=perp, equity_bars=equity)
     if len(path) == 0:
         return path, None
@@ -75,7 +82,15 @@ def load_event_bars(settings: Settings, event: pd.Series, *, hl, fmp, benchmark_
     if src in (PriceSource.hl_archive.value, PriceSource.hl_live.value):
         mpath = _perp_bars(settings, hl, benchmark_market, lo, hi)
     else:
-        mpath = _equity_bars(fmp, benchmark_equity, lo, hi)
+        try:
+            mpath = _equity_bars(fmp, benchmark_equity, lo, hi)
+        except ProviderUnavailable as exc:
+            # The benchmark is secondary: the event keeps its path and labels, only the abnormal
+            # returns stay NaN. Before this guard an exhausted budget on the SPY request (one per
+            # event window, never fetched by the release resolver) voided the whole event.
+            log.warning("%s: benchmark %s bars unavailable (%s); abnormal returns left NaN",
+                        event.get(E.event_id), benchmark_equity, exc)
+            mpath = None
     if mpath is not None and len(mpath):
         mpath = build_price_path(settings, event, market_bars=mpath if src != PriceSource.fmp_intraday.value else None,
                                  equity_bars=mpath if src == PriceSource.fmp_intraday.value else None)

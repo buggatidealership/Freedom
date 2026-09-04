@@ -394,3 +394,66 @@ def test_split_ex_date_inside_the_window_voids_the_headline_label():
     ev[E.ca_ex_date] = pd.NaT
     pd.testing.assert_series_equal(compute_targets(ev, bars, None), clean)
     assert corporate_action_ex(ev) is None and corporate_action_ex(_event()) is None
+
+
+def _minute_bars(market: str, lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame:
+    t = pd.date_range(lo.floor("min"), hi.ceil("min"), freq="1min", tz="UTC")
+    return pd.DataFrame({C.market: market, C.interval: "1m", C.t: t, C.t_end: t + pd.Timedelta(minutes=1),
+                         C.open: 100.0, C.high: 101.0, C.low: 99.0, C.close: 100.5, C.volume: 10.0, C.n_trades: 5,
+                         C.source: None})
+
+
+class _BudgetFMP:
+    """FMP stand-in: 1-minute bars for any symbol except those whose budget is 'exhausted'."""
+
+    def __init__(self, exhausted: tuple[str, ...] = ()) -> None:
+        self.exhausted, self.calls = set(exhausted), []
+
+    def intraday(self, symbol, interval, start_day, end_day, *, extended=True):
+        from freedom.data.base import BudgetExhausted
+
+        self.calls.append(symbol)
+        if symbol in self.exhausted:
+            raise BudgetExhausted(f"fmp: daily budget exhausted ({symbol})")
+        def ny(day):  # the loader passes tz-aware New York midnights, the resolver naive dates
+            ts = pd.Timestamp(day)
+            return (ts.tz_localize("America/New_York") if ts.tzinfo is None else ts.tz_convert("America/New_York")).tz_convert("UTC")
+
+        lo, hi = ny(start_day), ny(end_day) + pd.Timedelta(days=1)
+        return _minute_bars(symbol, lo, hi)
+
+
+class _LiveHL:
+    def candles(self, market, interval, lo, hi):
+        return _minute_bars(market, lo - pd.Timedelta(hours=2), hi + pd.Timedelta(hours=2)) if interval == "1m" else None
+
+
+def test_an_exhausted_benchmark_request_does_not_void_the_event(settings):
+    """The SPY bars are one request per event window that the release resolver never made; when
+    the budget is gone the event keeps its own path and labels (abnormal returns stay NaN)."""
+    from freedom.data.base import BudgetExhausted
+    from freedom.targets.loaders import load_event_bars
+
+    t0 = to_utc("2026-07-29 20:05", assume_tz="UTC")
+    ev = pd.Series({E.event_id: "HOOD:2026-06", E.underlying: "HOOD", E.market: None, E.t0: t0, E.t0_source: "sec_8k"})
+    fmp = _BudgetFMP(exhausted=("SPY",))
+    path, mkt = load_event_bars(settings, ev, hl=None, fmp=fmp, benchmark_market="xyz:SP500", benchmark_equity="SPY",
+                                now=to_utc("2026-09-04 06:00", assume_tz="UTC"))
+    assert len(path) > 0 and path[C.source].iloc[0] == "fmp_intraday" and mkt is None
+    assert fmp.calls == ["HOOD", "SPY"]
+    # the event's own bars gone with no perp path: the budget checkpoint still reaches the caller
+    with pytest.raises(BudgetExhausted):
+        load_event_bars(settings, ev, hl=None, fmp=_BudgetFMP(exhausted=("HOOD",)), benchmark_market="xyz:SP500",
+                        benchmark_equity="SPY", now=to_utc("2026-09-04 06:00", assume_tz="UTC"))
+
+
+def test_the_perp_path_survives_an_exhausted_underlying_request(settings):
+    from freedom.targets.loaders import load_event_bars
+
+    t0 = pd.Timestamp.now(tz="UTC").floor("min") - pd.Timedelta(days=2)  # inside the live 1m window
+    ev = pd.Series({E.event_id: "NVDA:2026-07", E.underlying: "NVDA", E.market: "xyz:NVDA", E.t0: t0,
+                    E.t0_source: "sec_8k"})
+    path, mkt = load_event_bars(settings, ev, hl=_LiveHL(), fmp=_BudgetFMP(exhausted=("NVDA", "SPY")),
+                                benchmark_market="xyz:SP500", benchmark_equity="SPY")
+    assert len(path) > 0 and path[C.source].iloc[0] == "hl_live"
+    assert mkt is not None and mkt[C.source].iloc[0] == "hl_live"  # the perp benchmark needs no FMP request
