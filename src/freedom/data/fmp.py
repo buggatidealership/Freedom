@@ -46,6 +46,7 @@ MAX_INTRADAY_DAYS_PER_REQUEST = 5
 # Measured 2026-09-02: a 1-minute request covering five sessions returned only the latest three
 # (2880 bars); 5-minute requests returned all five. Chunk 1-minute windows at three calendar
 # days so no session is silently dropped.
+MAX_CALENDAR_DAYS_PER_REQUEST = 30  # stable/earnings-calendar truncates long windows (see earnings_calendar)
 MAX_INTRADAY_DAYS_BY_INTERVAL = {"1min": 3}
 DAILY_SOURCE = "fmp_daily"  # daily bars are not intraday; PriceSource only names path sources
 IMMUTABLE_TTL_SECONDS = 10 * 365 * 24 * 3600  # completed sessions never change
@@ -405,10 +406,17 @@ class FMPClient:
         first, last = _as_ny_date(start), _as_ny_date(end)
         if last < first:
             raise ValueError(f"end {last} is before start {first}")
-        params = {"from": first.isoformat(), "to": last.isoformat()}
-        payload = self._get("stable/earnings-calendar", params,
-                            cache_ttl=self.settings.cache_ttl_seconds)
-        return _earnings_frame(self._records(payload, "stable/earnings-calendar"))
+        # Measured 2026-09-05: a 100-day window answered with the last month only (the
+        # September and October events were missing), so the range is asked in windows of at
+        # most MAX_CALENDAR_DAYS_PER_REQUEST days, one request each, anchored at `first`.
+        frames = []
+        for a, b in _day_chunks(first, last, MAX_CALENDAR_DAYS_PER_REQUEST):
+            params = {"from": a.isoformat(), "to": b.isoformat()}
+            payload = self._get("stable/earnings-calendar", params,
+                                cache_ttl=self.settings.cache_ttl_seconds)
+            frames.append(_earnings_frame(self._records(payload, "stable/earnings-calendar")))
+        out = pd.concat(frames, ignore_index=True) if frames else _earnings_frame([])
+        return out.drop_duplicates().reset_index(drop=True)
 
     # ---- prices ------------------------------------------------------------------------------
     def intraday(self, symbol: str, interval: str, start_day: pd.Timestamp, end_day: pd.Timestamp,

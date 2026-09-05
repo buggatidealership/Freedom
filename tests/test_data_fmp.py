@@ -552,3 +552,29 @@ def test_epoch_to_utc_accepts_seconds_and_milliseconds():
     assert fmp_mod._epoch_to_utc(1788343608000) == utc("2026-09-02 10:06:48")
     assert fmp_mod._epoch_to_utc(1788343608) == utc("2026-09-02 10:06:48")
     assert fmp_mod._epoch_to_utc(None) is None
+
+
+def test_earnings_calendar_asks_in_thirty_day_windows(settings, monkeypatch):
+    """Measured 2026-09-05: one request for a 100-day window came back with the last month
+    only, so the range is split into windows of at most 30 days, one request each."""
+    from freedom.data.fmp import MAX_CALENDAR_DAYS_PER_REQUEST, FMPClient
+
+    client = FMPClient(settings)
+    calls = []
+
+    def fake_get(path, params, *, cache_ttl):
+        calls.append((path, params["from"], params["to"]))
+        return [{"symbol": "X", "date": params["from"], "epsActual": None, "epsEstimated": 1.0,
+                 "revenueActual": None, "revenueEstimated": 2.0, "lastUpdated": "2026-09-05"}]
+
+    monkeypatch.setattr(client, "_get", fake_get)
+    df = client.earnings_calendar(pd.Timestamp("2026-09-05"), pd.Timestamp("2026-12-13"))
+    assert MAX_CALENDAR_DAYS_PER_REQUEST == 30
+    assert calls == [("stable/earnings-calendar", "2026-09-05", "2026-10-04"),
+                     ("stable/earnings-calendar", "2026-10-05", "2026-11-03"),
+                     ("stable/earnings-calendar", "2026-11-04", "2026-12-03"),
+                     ("stable/earnings-calendar", "2026-12-04", "2026-12-13")]
+    assert len(df) == 4 and df["symbol"].tolist() == ["X"] * 4
+    calls.clear()
+    assert len(client.earnings_calendar(pd.Timestamp("2026-09-05"), pd.Timestamp("2026-09-19"))) == 1
+    assert calls == [("stable/earnings-calendar", "2026-09-05", "2026-09-19")]  # a short window is one request
