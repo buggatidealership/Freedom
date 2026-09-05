@@ -112,7 +112,7 @@ release the detector has not seen yet is retried every 60 s for 15 minutes and t
 as a "no release detected" note; a release that came late is re-run at its real `as_of`; a pair
 already predicted live is skipped, so overlapping runs never duplicate a card.
 
-The `freedom-cards` GitHub Actions job (`.github/workflows/cards.yml`) runs it every 15 minutes
+The `freedom-cards` GitHub Actions job (`.github/workflows/cards.yml`) runs it in a continuous chain of runs (a cron every three hours, each run lingering about six hours)
 around the clock (Hyperliquid trades 24/7; ASML and TSMC release overnight for New York) on top
 of the newest `freedom-data` artifact, whose job now also trains the `pre_10m`, `post_15m` and
 `post_30m` LightGBM models, and keeps the rows and cards in a `freedom-live` artifact that the

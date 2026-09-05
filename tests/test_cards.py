@@ -267,3 +267,55 @@ def test_slug_and_markdown_helpers():
     res["card"]["reasons"], res["card"]["tradeable"], res["card"]["not_tradeable_because"] = [], True, []
     text = cards.card_markdown(res)
     assert "no reasons: the direction head is untrained" in text and "tradeable: **yes**" in text
+
+
+def test_linger_rescans_and_picks_up_instants_entering_the_horizon(world):
+    """A lingering run keeps scanning: an instant beyond the first horizon is found on a later
+    scan, each pair is handled once, and the run ends when the linger window is over."""
+    world["clock"]["now"] = T0 - 60 * MIN  # pre_10m (T0 - 10) is 50 min away: outside a 45-min horizon
+    result = runner.invoke(app, ["cards", "--horizon-minutes", "45", "--linger-minutes", "120"])
+    assert result.exit_code == 0, result.output
+    assert "no cards due in the next 45 minutes" in result.output and "lingering until" in result.output
+    assert [(c["event_id"], c["decision"]) for c in world["calls"]] == [
+        (EVENT, "pre_10m"), (EVENT, "post_15m"), (EVENT, "post_30m")]
+    assert "linger window over" in result.output and "3 card(s)" in result.output
+    assert world["clock"]["now"] >= T0 + 60 * MIN  # slept through the whole window
+    # a replay never lingers and a plain run scans once
+    world["calls"].clear()
+    result = runner.invoke(app, ["cards", "--now", "2026-08-26T18:30:00Z", "--linger-minutes", "120"])
+    assert result.exit_code == 0 and world["calls"] == [] and "lingering" not in result.output
+
+
+def test_cards_are_posted_on_the_issue_as_soon_as_they_are_written(world, monkeypatch, tmp_path):
+    import subprocess
+
+    from freedom import cards as cards_mod
+
+    _, reports = world["dirs"]
+    posted = []
+
+    def fake_run(cmd, **kw):
+        posted.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/o/r/issues/1#issuecomment-9\n", stderr="")
+
+    monkeypatch.setattr(cards_mod.subprocess, "run", fake_run)
+    # without the job environment nothing is posted
+    monkeypatch.delenv("CARDS_ISSUE", raising=False)
+    result = runner.invoke(app, ["cards", "--now", "2026-08-26T19:55:00Z", "--decisions", "pre_10m"])
+    assert result.exit_code == 0 and posted == []
+    md = reports / "cards" / "NVDA_2026-06__pre_10m.md"
+    assert md.exists() and not md.with_name(md.name + ".posted").exists()
+    # with it, the card is posted right after it is written and marked so the catch-up step skips it
+    monkeypatch.setenv("CARDS_ISSUE", "1")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    result = runner.invoke(app, ["cards", "--now", "2026-08-26T19:55:00Z", "--decisions", "pre_10m",
+                                 "--out", str(tmp_path / "cards")])
+    assert result.exit_code == 0, result.output
+    assert len(posted) == 1 and posted[0][:6] == ["gh", "issue", "comment", "1", "-R", "o/r"]
+    assert posted[0][-1].endswith("NVDA_2026-06__pre_10m.md")
+    marker = tmp_path / "cards" / "NVDA_2026-06__pre_10m.md.posted"
+    assert marker.exists() and "issuecomment-9" in marker.read_text()
+    assert "posted NVDA_2026-06__pre_10m.md on issue #1" in result.output
+    # a second run over the same file does not post again
+    assert cards_mod.post_to_issue(tmp_path / "cards" / "NVDA_2026-06__pre_10m.md", cards_mod.Console()) is True
+    assert len(posted) == 1

@@ -1,6 +1,6 @@
 """`freedom cards`: every prediction card due in the next N minutes, without anyone typing.
 
-The scheduled job (.github/workflows/cards.yml) runs this every 15 minutes. One run:
+The scheduled job (.github/workflows/cards.yml) runs this as a chain of lingering runs. One scan:
 
 1. lists the universe's upcoming events (events.upcoming_events, two days ahead, with the ids
    `freedom upcoming` prints) and, for each event and each requested decision time, the
@@ -31,7 +31,9 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,6 +60,8 @@ LOOKAHEAD_DAYS = 2  # calendar days of upcoming events to consider
 DUE_LOOKBACK = pd.Timedelta(minutes=20)
 RETRY_EVERY_S = 60.0  # post decisions: poll for the release this often ...
 RETRY_FOR = pd.Timedelta(minutes=15)  # ... until this long after the instant
+RESCAN_EVERY_S = 600.0  # linger mode: look for newly due instants this often
+POSTED_SUFFIX = ".posted"  # marker next to a card/note the run itself posted on the Cards issue
 SLEEP_STEP_S = 30.0  # waiting for an instant sleeps in increments of at most this
 CARDS_SUBDIR = "cards"
 INDEX_FILE = "index.md"
@@ -358,12 +362,82 @@ def _predict_due(settings: Settings, due: Due, *, now_override: pd.Timestamp | s
         return res, None
 
 
+def post_to_issue(md: Path, console: Console) -> bool:
+    """Post a card or note as a comment on the Cards issue when the job environment names one
+    (CARDS_ISSUE and GITHUB_REPOSITORY; the gh CLI is authenticated by GH_TOKEN), right after it
+    is written rather than at the end of a run that may linger for hours. A marker file
+    <name>.posted records success so the workflow's catch-up step never posts it twice."""
+    issue = os.environ.get("CARDS_ISSUE", "").strip()
+    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if not issue or not repo:
+        return False
+    marker = md.with_name(md.name + POSTED_SUFFIX)
+    if marker.exists():
+        return True
+    try:
+        proc = subprocess.run(["gh", "issue", "comment", issue, "-R", repo, "--body-file", str(md)],
+                              capture_output=True, text=True, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        console.print(f"  could not post {md.name}: {exc}", style="yellow", markup=False)
+        return False
+    if proc.returncode != 0:
+        console.print(f"  could not post {md.name}: {proc.stderr.strip()[:200]}", style="yellow", markup=False)
+        return False
+    marker.write_text(proc.stdout.strip() + "\n", encoding="utf-8")
+    console.print(f"  posted {md.name} on issue #{issue}", markup=False)
+    return True
+
+
+def _handle_due(settings: Settings, due: Due, run: CardsRun, *, now: pd.Timestamp | str | None, wait: bool,
+                console: Console, model_name: str | None) -> None:
+    """Wait for one instant, predict it, write the card or the note, post it."""
+    if wait and due.instant > utcnow():
+        console.print(f"waiting {(due.instant - utcnow()).total_seconds() / 60:.1f} min for {due.label} "
+                      f"at {fmt_value(due.instant)} UTC", markup=False)
+        _sleep_until(due.instant)
+    try:
+        res, message = _predict_due(settings, due, now_override=now, wait=wait, console=console,
+                                    model_name=model_name)
+    except Exception as exc:  # one failed card must not stop the others
+        log.exception("%s failed", due.label)
+        res, message = None, f"{type(exc).__name__}: {exc}"
+        kind = NOTE_FAILED
+    else:
+        kind = NOTE_NO_RELEASE
+    when = utcnow()
+    if res is None:
+        md = write_note(run.out_dir, due, kind=kind, message=message or "", when=when)
+        run.notes.append({"due": due, "kind": kind, "message": message, "md": md})
+        console.print(f"NOTE {due.label}: {kind}: {message}", style="yellow", markup=False)
+        post_to_issue(md, console)
+        return
+    print_card(res["card"], console)
+    paths = write_card(run.out_dir, due, res, when=when)
+    run.cards.append({"due": due, "card": res["card"], **paths})
+    console.print(f"wrote {paths['md']}", markup=False)
+    post_to_issue(Path(paths["md"]), console)
+
+
+def _print_due(due: list[Due], *, horizon_minutes: int, now: pd.Timestamp, replay: bool, console: Console) -> None:
+    table = Table(title=f"freedom cards: {len(due)} due in the next {horizon_minutes} minutes "
+                        f"(now {fmt_value(now)} UTC{', REPLAY' if replay else ''})")
+    for col in ("instant (UTC)", "event", "decision", "market", "expected t0 (UTC)"):
+        table.add_column(col)
+    for d in due:
+        table.add_row(fmt_value(d.instant), d.event_id, d.decision, d.market or "", fmt_value(d.expected_t0))
+    console.print(table)
+
+
 def run_cards(settings: Settings, *, horizon_minutes: int = DEFAULT_HORIZON_MINUTES,
               decisions: list[str] | None = None, now: pd.Timestamp | str | None = None,
               wait: bool = True, out_dir: Path | None = None, console: Console | None = None,
-              model_name: str | None = None) -> CardsRun:
+              model_name: str | None = None, linger_minutes: int = 0) -> CardsRun:
     """Predict, print and write every card due in the next `horizon_minutes` minutes. `model_name`
-    picks the trained model under data/models/<decision>/ (None: the only one there)."""
+    picks the trained model under data/models/<decision>/ (None: the only one there).
+    `linger_minutes` > 0 keeps the run alive that long, rescanning every RESCAN_EVERY_S for
+    instants that enter the horizon, so a chain of long runs covers the clock even though
+    GitHub's cron fires hours apart (measured 2026-09-05: two to five hours between firings of a
+    15-minute schedule). Replays and --no-wait never linger."""
     console = console or Console()
     decisions = list(decisions) if decisions else DEFAULT_DECISIONS.split(",")
     for d in decisions:
@@ -375,46 +449,40 @@ def run_cards(settings: Settings, *, horizon_minutes: int = DEFAULT_HORIZON_MINU
     horizon = pd.Timedelta(minutes=int(horizon_minutes))
     out = Path(out_dir) if out_dir is not None else settings.reports_dir / CARDS_SUBDIR
     run = CardsRun(now=now_ts, horizon=horizon, out_dir=out, replay=replay)
-    run.due, run.skipped = due_instants(settings, now=now_ts, horizon=horizon, decisions=decisions)
-    if run.skipped:
-        console.print(f"already predicted live (skipped): {', '.join(d.label for d in run.skipped)}",
-                      markup=False)
-    if not run.due:
-        console.print(f"no cards due in the next {horizon_minutes} minutes (now {fmt_value(now_ts)} UTC)",
-                      markup=False)
-        return run
-    table = Table(title=f"freedom cards: {len(run.due)} due in the next {horizon_minutes} minutes "
-                        f"(now {fmt_value(now_ts)} UTC{', REPLAY' if replay else ''})")
-    for col in ("instant (UTC)", "event", "decision", "market", "expected t0 (UTC)"):
-        table.add_column(col)
-    for d in run.due:
-        table.add_row(fmt_value(d.instant), d.event_id, d.decision, d.market or "", fmt_value(d.expected_t0))
-    console.print(table)
-    for due in run.due:
-        if wait and due.instant > utcnow():
-            console.print(f"waiting {(due.instant - utcnow()).total_seconds() / 60:.1f} min for {due.label} "
-                          f"at {fmt_value(due.instant)} UTC", markup=False)
-            _sleep_until(due.instant)
-        try:
-            res, message = _predict_due(settings, due, now_override=now, wait=wait, console=console,
-                                        model_name=model_name)
-        except Exception as exc:  # one failed card must not stop the others
-            log.exception("%s failed", due.label)
-            res, message = None, f"{type(exc).__name__}: {exc}"
-            kind = NOTE_FAILED
+    linger = pd.Timedelta(minutes=int(linger_minutes)) if wait and linger_minutes > 0 else pd.Timedelta(0)
+    watch_until = now_ts + linger
+    done: set[tuple[str, str]] = set()
+    first = True
+    while True:
+        scan_now = now_ts if first else utcnow()
+        due, skipped = due_instants(settings, now=scan_now, horizon=horizon, decisions=decisions)
+        due = [d for d in due if (d.event_id, d.decision) not in done]
+        if first:
+            run.due, run.skipped = list(due), skipped
+            if skipped:
+                console.print(f"already predicted live (skipped): {', '.join(d.label for d in skipped)}",
+                              markup=False)
+            if not due:
+                console.print(f"no cards due in the next {horizon_minutes} minutes (now {fmt_value(scan_now)} UTC)",
+                              markup=False)
         else:
-            kind = NOTE_NO_RELEASE
-        when = utcnow()
-        if res is None:
-            md = write_note(out, due, kind=kind, message=message or "", when=when)
-            run.notes.append({"due": due, "kind": kind, "message": message, "md": md})
-            console.print(f"NOTE {due.label}: {kind}: {message}", style="yellow", markup=False)
-            continue
-        print_card(res["card"], console)
-        paths = write_card(out, due, res, when=when)
-        run.cards.append({"due": due, "card": res["card"], **paths})
-        console.print(f"wrote {paths['md']}", markup=False)
-    return run
+            run.due.extend(due)
+        if due:
+            _print_due(due, horizon_minutes=horizon_minutes, now=scan_now, replay=replay, console=console)
+        for d in due:
+            _handle_due(settings, d, run, now=now, wait=wait, console=console, model_name=model_name)
+            done.add((d.event_id, d.decision))
+        first = False
+        if linger == pd.Timedelta(0):
+            return run
+        remaining = (watch_until - utcnow()).total_seconds()
+        if remaining <= 0:
+            console.print(f"linger window over (until {fmt_value(watch_until)} UTC): {len(run.cards)} card(s), "
+                          f"{len(run.notes)} note(s)", markup=False)
+            return run
+        nap = min(RESCAN_EVERY_S, remaining)
+        console.print(f"lingering until {fmt_value(watch_until)} UTC; next scan in {nap / 60:.0f} min", markup=False)
+        time.sleep(nap)
 
 
 __all__ = ["CardsRun", "Due", "card_markdown", "due_instants", "fmt_pct", "fmt_value", "live_pairs",

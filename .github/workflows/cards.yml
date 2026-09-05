@@ -1,5 +1,5 @@
 name: freedom-cards
-# Every 15 minutes, around the clock (Hyperliquid perps trade 24/7 and some issuers release
+# A continuous chain of runs around the clock (Hyperliquid perps trade 24/7 and some issuers release
 # overnight for New York): restore the newest data artifact (universe, events, archive, the
 # trained models) and the newest live artifact on top (rows and cards from earlier runs, so a
 # card is never produced twice), then `freedom cards --horizon-minutes 45`: every card whose
@@ -19,7 +19,7 @@ name: freedom-cards
 # instant at most 5 minutes past is still produced; an off-schedule row prints NOT TRADEABLE.
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "0 */3 * * *"  # each run lingers ~5.7 h and the concurrency group queues the next: a continuous chain
   workflow_dispatch:
 permissions:
   actions: write  # delete superseded artifacts
@@ -31,7 +31,7 @@ concurrency:
 jobs:
   cards:
     runs-on: ubuntu-latest
-    timeout-minutes: 80  # the 45-minute horizon, 15 minutes of retries, a late-release re-run and setup
+    timeout-minutes: 355  # 340 minutes of linger plus the last card's retries and setup (GitHub caps a job at 6 h)
     env:
       FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
       ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}  # optional: report-date cross-check for foreign issuers
@@ -56,7 +56,10 @@ jobs:
         # everything restored above is older than this marker; only files newer than it are posted
         run: touch "$RUNNER_TEMP/cards_started"
       - name: Cards due in the next 45 minutes
-        run: uv run freedom cards --horizon-minutes 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CARDS_ISSUE: ${{ vars.CARDS_ISSUE }}  # cards are posted the moment they are written
+        run: uv run freedom cards --horizon-minutes 45 --linger-minutes 340
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -97,6 +100,6 @@ jobs:
               echo "::error::could not post $f on issue #$CARDS_ISSUE"
               failed=1
             fi
-          done < <(find reports/cards -name '*.md' ! -name index.md -newer "$RUNNER_TEMP/cards_started" | sort)
+          done < <(find reports/cards -name '*.md' ! -name index.md -newer "$RUNNER_TEMP/cards_started" | sort | while read -r f; do [ -f "$f.posted" ] || echo "$f"; done)
           echo "posted $n card(s) on issue #$CARDS_ISSUE"
           exit $failed
