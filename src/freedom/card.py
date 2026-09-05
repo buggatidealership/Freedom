@@ -57,6 +57,15 @@ def call_for(p_up: float | None, band: float) -> str:
     return CALL_NO_TRADE
 
 
+def forced_call_for(p_up: float | None) -> str:
+    """The forced pick, graded on every event: LONG when p_up >= 0.5, else SHORT ('' when the
+    probability is missing). A coin flip scores 50 % here; the banded call is the money rule."""
+    p = _float(p_up)
+    if math.isnan(p):
+        return ""
+    return CALL_LONG if p >= 0.5 else CALL_SHORT
+
+
 def describe(column: str) -> str:
     """Plain-language description of a feature column (f_<key> or f_<key>__missing); an unknown
     key describes itself."""
@@ -104,7 +113,8 @@ def build_card(row: dict, *, model, X: pd.DataFrame, band: float, fallback: list
     return {
         "event_id": row.get(E.event_id), "market": row.get(E.market),
         "decision": row.get(D.decision_time), "as_of": row.get(D.as_of),
-        "call": call_for(p_up, band), "p_up": p_up, "edge": p_up - 0.5, "band": float(band),
+        "call": call_for(p_up, band), "forced_call": forced_call_for(p_up),
+        "p_up": p_up, "edge": p_up - 0.5, "band": float(band),
         "expected_r_24h": _float(row.get("r_hat")), "r_lo": _float(row.get("r_lo")),
         "r_hi": _float(row.get("r_hi")), "magnitude_hat": _float(row.get("magnitude_hat")),
         "reasons": reasons, "reason_basis": basis,
@@ -113,4 +123,4 @@ def build_card(row: dict, *, model, X: pd.DataFrame, band: float, fallback: list
 
 
 __all__ = ["CALL_LONG", "CALL_NO_TRADE", "CALL_SHORT", "N_REASONS", "build_card", "call_for",
-           "describe", "signed_reasons"]
+           "describe", "forced_call_for", "signed_reasons"]

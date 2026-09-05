@@ -79,6 +79,12 @@ freedom predict --event NVDA:2026-10 --decision post_30m  # card 2, thirty minut
 freedom cards --horizon-minutes 45                        # every card due in the next 45 min, unattended
 ```
 
+Every live card is a falsifiable call: the row records `p_up`, the banded call and a forced pick
+(LONG when `p_up` is at least 0.5, else SHORT) before the outcome exists. `freedom score` grades
+them against the realised 24 h return once the daily build has measured it, forced pick on every
+call and banded call on the traded ones, with Wilson 90 % intervals, and writes
+`reports/scorecard.md`; the data job posts it on the Cards issue whenever new outcomes were graded.
+
 When a vendor calendar has the wrong day (Oracle's Q1 FY2027 date was two days off in FMP and
 four in Finnhub), put the correction in `configs/report_date_overrides.yaml` as
 `ORCL:2026-09-08: 2026-09-10` (vendor date to issuer-confirmed date). It applies before the 8-K

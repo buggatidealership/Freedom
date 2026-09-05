@@ -102,6 +102,8 @@ def print_card(card: dict, console: Console | None = None) -> None:
     console.print(f"\nCARD {card['decision']}  {card['event_id']}  ({card['market'] or 'no perp market'})",
                   style="bold", markup=False)
     console.print(f"CALL: {card['call']}", style=style, markup=False)
+    if card.get("forced_call"):
+        console.print(f"  forced pick (graded on every event): {card['forced_call']}", markup=False)
     console.print(f"  p_up {fmt_value(card['p_up'])}   edge {card['edge']:+.3f} vs band ±{card['band']:.2f}   "
                   f"expected 24h move {fmt_pct(card['expected_r_24h'])}   typical size "
                   f"{fmt_pct(card['magnitude_hat']).lstrip('+-')}"

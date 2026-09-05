@@ -488,6 +488,26 @@ def cards(horizon_minutes: int = typer.Option(45, "--horizon-minutes", help="Pre
                       f"(index: {run.out_dir / cards_mod.INDEX_FILE})", markup=False)
 
 
+# ---- score --------------------------------------------------------------------------------------------
+@app.command()
+def score() -> None:
+    """Grade every live card against the realised 24 h outcome: the forward scorecard."""
+    from . import scorecard as sc_mod
+
+    s = get_settings()
+    with _guard():
+        sc = sc_mod.build_scorecard(s)
+    md, js = sc_mod.write_scorecard(s, sc)
+    rows = [{"decision": d, **{k: v for k, v in c.items() if not isinstance(v, list)}} for d, c in sc["by_decision"].items()]
+    if rows:
+        _print_rows(rows, title=f"freedom score: {sc['scored_total']} scored, {sc['pending_total']} pending, "
+                                f"{sc['unlabelled_total']} unlabelled")
+    else:
+        console.print("freedom score: no counted live cards yet (replays and off-schedule rows are never graded)",
+                      markup=False)
+    console.print(f"wrote {md} and {js}", markup=False)
+
+
 # ---- upcoming -----------------------------------------------------------------------------------------
 @app.command()
 def upcoming(days: int = typer.Option(14)) -> None:

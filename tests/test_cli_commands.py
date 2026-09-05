@@ -339,7 +339,7 @@ def _prediction(replay: bool = False) -> dict:
            "input_lag_s_hyperliquid": 75.0, "input_lag_s_fmp": np.nan, "input_lag_s_sec": np.nan,
            "n_features": 12, "n_features_missing": 2}
     card = {"event_id": "NVDA:2026-07", "market": "xyz:NVDA", "decision": "pre_5m", "as_of": as_of,
-            "call": "LONG", "p_up": 0.62, "edge": 0.12, "band": 0.10, "expected_r_24h": 0.011, "r_lo": -0.04,
+            "call": "LONG", "forced_call": "LONG", "p_up": 0.62, "edge": 0.12, "band": 0.10, "expected_r_24h": 0.011, "r_lo": -0.04,
             "r_hi": 0.07, "magnitude_hat": 0.011,
             "reasons": [{"feature": "f_ret_5d", "what": "the stock's return over the last 5 sessions",
                          "value": 0.032, "push": 0.21, "direction": "up"}],

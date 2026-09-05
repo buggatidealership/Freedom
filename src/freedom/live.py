@@ -597,6 +597,7 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
     contribs = top_contributions(model, X)
     card = build_card(row, model=model, X=X, band=float(settings.no_trade_band), fallback=contribs)
     row["call"], row["no_trade_band"] = card["call"], card["band"]  # the call as recorded
+    row["forced_call"] = card["forced_call"]  # graded on every event by `freedom score`
     if append:
         append_live_prediction(settings, row)
     return {"row": row, "features": feats, "contributions": contribs, "card": card,

@@ -22,6 +22,7 @@ on:
 permissions:
   actions: write  # delete superseded artifacts
   contents: read
+  issues: write  # the forward scorecard is posted on the Cards issue when it changes
 concurrency:
   group: freedom-data
   cancel-in-progress: false
@@ -63,6 +64,28 @@ jobs:
       - name: Targets and features (exit 2 = daily quota reached, resumes tomorrow)
         continue-on-error: true
         run: uv run freedom dataset --decision-times pre_10m,pre_5m,post_15m,post_30m
+      - name: Forward scorecard (every live card graded against its realised 24 h outcome)
+        continue-on-error: true
+        run: |
+          prev=0
+          [ -f data/scorecard.json ] && prev=$(python3 -c "import json;print(json.load(open('data/scorecard.json')).get('scored_total',0))")
+          echo "$prev" > "$RUNNER_TEMP/scored_before"
+          uv run freedom score
+      - name: Post the scorecard on the Cards issue when new outcomes were graded
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CARDS_ISSUE: ${{ vars.CARDS_ISSUE }}
+        run: |
+          [ -n "$CARDS_ISSUE" ] || { echo "CARDS_ISSUE not set: scorecard stays in the reports artifact"; exit 0; }
+          [ -f data/scorecard.json ] && [ -f reports/scorecard.md ] || { echo "no scorecard this run"; exit 0; }
+          now=$(python3 -c "import json;print(json.load(open('data/scorecard.json')).get('scored_total',0))")
+          before=$(cat "$RUNNER_TEMP/scored_before" 2>/dev/null || echo 0)
+          if [ "$now" != "$before" ]; then
+            gh issue comment "$CARDS_ISSUE" -R "${{ github.repository }}" --body-file reports/scorecard.md && echo "posted scorecard ($before -> $now scored)"
+          else
+            echo "scorecard unchanged ($now scored): not posted"
+          fi
       - name: Status
         run: uv run freedom status
       - name: Evaluate (walk-forward on whatever is built so far; the report is the deliverable)
