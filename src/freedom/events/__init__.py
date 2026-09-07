@@ -276,6 +276,35 @@ def _to_utc_ns(values: Any) -> pd.Series:
 
 
 # ---- release-time resolver ---------------------------------------------------------------------
+PRE_ANNOUNCE_WINDOW_DAYS = 30
+
+
+def find_prior_results_8k(sec_filings: pd.DataFrame | None, report_date_ny: Any, *,
+                          days: int = PRE_ANNOUNCE_WINDOW_DAYS) -> tuple[pd.Timestamp, str] | None:
+    """The latest 8-K item 2.02 accepted between `days` and two days before the report date: a
+    preliminary-results filing that already disclosed part of the quarter (GameStop filed one
+    on 2026-08-31, eight days before its 2026-09-08 report). The event is then flagged
+    ``pre_announced``: the reaction on the report date is to what remained undisclosed, and
+    such events are graded separately. Returns (accepted UTC, accession) or None."""
+    if sec_filings is None or len(sec_filings) == 0 or "accepted" not in sec_filings.columns:
+        return None
+    d = _as_date(report_date_ny)
+    f = sec_filings
+    form = f["form"].astype(str).str.strip() if "form" in f.columns else pd.Series("8-K", index=f.index)
+    items = f["items"] if "items" in f.columns else pd.Series("2.02", index=f.index)
+    f = f[(form == "8-K") & items.map(lambda s: "2.02" in split_items(s)) & f["accepted"].notna()]
+    if len(f) == 0:
+        return None
+    accepted = pd.to_datetime(f["accepted"], utc=True)
+    days_ny = accepted.dt.tz_convert(NY).dt.date
+    ok = (days_ny >= d - timedelta(days=days)) & (days_ny <= d - timedelta(days=2))
+    if not ok.any():
+        return None
+    idx = accepted[ok].idxmax()
+    accession = str(f.loc[idx, "accession"]) if "accession" in f.columns else ""
+    return accepted.loc[idx], accession
+
+
 def find_8k_acceptance(sec_filings: pd.DataFrame | None, report_date_ny: Any) -> tuple[pd.Timestamp, str] | None:
     """Earliest 8-K item 2.02 acceptance (UTC, accession) attributable to the report date:
     accepted on that New York date, on the next calendar day before 04:00 NY (late
@@ -976,6 +1005,8 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
         if d_eff != d_fmp:
             flags.append("report_date_from_8k")
     row[E.report_date_ny] = d_eff
+    if find_prior_results_8k(sec.filings, d_eff) is not None:
+        flags.append("pre_announced")
 
     av_rows = providers.av_rows(name.underlying) if name.kind == Kind.equity_fpi.value else None
     fp, fp_src, derived = fiscal_period_for(d_eff, sec_eps_facts=sec.facts, av_rows=av_rows)

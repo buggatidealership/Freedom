@@ -1196,3 +1196,32 @@ def test_upcoming_schedule_comes_from_the_events_table_without_a_provider(settin
     assert upcoming_events(settings, days=14, source="table")[E.underlying].tolist() == ["TSM"]
     with pytest.raises(ValueError):
         upcoming_events(settings, days=14, source="nasdaq")
+
+
+def test_a_results_8k_within_thirty_days_flags_the_event_as_pre_announced(settings, fake):
+    """GameStop filed preliminary results eight days before its report date: the event is
+    flagged pre_announced, while the report-date 8-K still gives the release minute."""
+    from freedom.events import find_prior_results_8k
+
+    write_universe(settings)
+
+    def cal_row(sym: str, day: str) -> dict:
+        return {"symbol": sym, "date": day, "epsActual": 1.1, "epsEstimated": 1.0,
+                "revenueActual": 9.1e10, "revenueEstimated": 9.0e10, "lastUpdated": "2026-08-30"}
+
+    fake.earnings["AAPL"] = [cal_row("AAPL", "2026-08-27"), cal_row("AAPL", "2026-05-01")]
+    fake.submissions[AAPL_CIK] = {"filings": {"recent": submissions_page(
+        [("8-K", "2026-08-27T20:31:00.000Z", "2.02,9.01"),   # the report itself
+         ("8-K", "2026-08-19T20:10:00.000Z", "2.02,9.01"),   # preliminary results eight days earlier
+         ("8-K", "2026-05-01T20:30:00.000Z", "2.02,9.01")]   # the previous quarter: outside the window
+    ), "files": []}}
+    df = build_events(settings, underlyings=["AAPL"], since=pd.Timestamp("2026-04-01")).set_index(E.event_id)
+    aug = df[df[E.report_date_ny] == date(2026, 8, 27)].iloc[0]
+    assert "pre_announced" in aug[E.flags].split(";") and aug[E.t0_source] == "sec_8k"
+    assert aug[E.t0] == pd.Timestamp("2026-08-27 20:31", tz="UTC")  # the flag never moves the release minute
+    may = df[df[E.report_date_ny] == date(2026, 5, 1)].iloc[0]
+    assert "pre_announced" not in may[E.flags].split(";")
+    filings = pd.DataFrame({"form": ["8-K", "8-K"], "items": ["2.02", "2.02"], "accession": ["a", "b"],
+                            "accepted": [pd.Timestamp("2026-08-26 20:10", tz="UTC"), pd.Timestamp("2026-08-19 20:10", tz="UTC")]})
+    hit = find_prior_results_8k(filings, date(2026, 8, 27))
+    assert hit is not None and hit[1] == "b"  # the day-before filing belongs to the report itself, not the window

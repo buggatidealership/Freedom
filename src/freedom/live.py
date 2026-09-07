@@ -505,6 +505,17 @@ def feature_context(settings: Settings, event: pd.Series, schedule: Schedule, *,
         extra=extra)
 
 
+def event_flag(events: pd.DataFrame | None, event_id: str, flag: str) -> bool:
+    """Whether the events table row of `event_id` carries `flag` in its flags column."""
+    if events is None or len(events) == 0 or E.flags not in events.columns or E.event_id not in events.columns:
+        return False
+    hit = events[events[E.event_id].astype(str) == str(event_id)]
+    if len(hit) == 0:
+        return False
+    raw = hit.iloc[0][E.flags]
+    return flag in str(raw).split(";") if isinstance(raw, str) else False
+
+
 def top_contributions(model: models_mod.BaseModel, X: pd.DataFrame, n: int = TOP_CONTRIBUTIONS) -> list[dict]:
     """Highest-importance features with their current values (importance-ranked, not SHAP)."""
     imp = model.feature_importance()
@@ -595,7 +606,11 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
     }
     row.update({k: feats.get(k, float("nan")) for k in names})
     contribs = top_contributions(model, X)
-    card = build_card(row, model=model, X=X, band=float(settings.no_trade_band), fallback=contribs)
+    pre_announced = event_flag(events, event_id, "pre_announced")
+    row["pre_announced"] = pre_announced
+    notes = ["pre-announced quarter: a results 8-K was filed in the 30 days before this report, so this card "
+             "predicts the reaction to what remained undisclosed; graded separately"] if pre_announced else []
+    card = build_card(row, model=model, X=X, band=float(settings.no_trade_band), fallback=contribs, notes=notes)
     row["call"], row["no_trade_band"] = card["call"], card["band"]  # the call as recorded
     row["forced_call"] = card["forced_call"]  # graded on every event by `freedom score`
     if append:

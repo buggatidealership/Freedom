@@ -110,6 +110,8 @@ def print_card(card: dict, console: Console | None = None) -> None:
                   f"   10/90 % band {fmt_pct(card['r_lo'])} .. {fmt_pct(card['r_hi'])}", markup=False)
     for why in card["not_tradeable_because"]:
         console.print(f"  NOT TRADEABLE: {why}", style="yellow", markup=False)
+    for note in card.get("notes") or []:
+        console.print(f"  NOTE: {note}", style="yellow", markup=False)
     if card["reasons"]:
         table = Table(title=f"why: {card['reason_basis']}")
         for col in ("push", "feature", "value", "what it measures"):
@@ -240,6 +242,8 @@ def card_markdown(res: dict) -> str:
         lines.append("tradeable: **yes**")
     else:
         lines.append("**NOT TRADEABLE**: " + ", ".join(card.get("not_tradeable_because") or ["unknown"]))
+    for note in card.get("notes") or []:
+        lines.append(f"NOTE: {note}")
     lines.append("")
     if card.get("reasons"):
         lines.append(f"why ({card.get('reason_basis', '')}):")

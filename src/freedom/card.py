@@ -99,9 +99,11 @@ def _reason(name: str, X: pd.DataFrame, *, push: float) -> dict:
             "direction": direction}
 
 
-def build_card(row: dict, *, model, X: pd.DataFrame, band: float, fallback: list[dict]) -> dict:
+def build_card(row: dict, *, model, X: pd.DataFrame, band: float, fallback: list[dict],
+               notes: list[str] | None = None) -> dict:
     """The card for one scored row. `fallback` is the importance-ranked list
-    (live.top_contributions) used when signed contributions are unavailable."""
+    (live.top_contributions) used when signed contributions are unavailable; `notes` are
+    caveats printed under the call (a pre-announced quarter, for one)."""
     p_up = _float(row.get("p_up"))
     reasons = signed_reasons(model, X)
     basis = BASIS_SIGNED
@@ -118,7 +120,7 @@ def build_card(row: dict, *, model, X: pd.DataFrame, band: float, fallback: list
         "expected_r_24h": _float(row.get("r_hat")), "r_lo": _float(row.get("r_lo")),
         "r_hi": _float(row.get("r_hi")), "magnitude_hat": _float(row.get("magnitude_hat")),
         "reasons": reasons, "reason_basis": basis,
-        "tradeable": not blockers, "not_tradeable_because": blockers,
+        "tradeable": not blockers, "not_tradeable_because": blockers, "notes": list(notes or []),
     }
 
 

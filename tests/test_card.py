@@ -73,7 +73,9 @@ def test_signed_reasons_follow_the_direction_head():
     assert c["forced_call"] == card.CALL_LONG and card.forced_call_for(0.49) == card.CALL_SHORT
     assert card.forced_call_for(0.5) == card.CALL_LONG and card.forced_call_for(float("nan")) == ""
     assert c["edge"] == pytest.approx(p_up - 0.5) and c["expected_r_24h"] == 0.012
-    assert c["decision"] == "pre_10m" and c["event_id"] == "NVDA:2026-07"
+    assert c["decision"] == "pre_10m" and c["event_id"] == "NVDA:2026-07" and c["notes"] == []
+    c = card.build_card(_row(p_up), model=model, X=probe, band=BAND, fallback=[], notes=["pre-announced quarter"])
+    assert c["notes"] == ["pre-announced quarter"]
 
 
 def test_card_falls_back_to_importance_when_the_direction_head_is_untrained():
