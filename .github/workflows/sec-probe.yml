@@ -1,0 +1,20 @@
+name: sec-probe
+# Diagnostic: can a GitHub-hosted runner reach SEC EDGAR? (The data job's events table carried
+# no SEC-sourced release minutes; this prints the HTTP status EDGAR returns from the runner.)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: EDGAR submissions and companyfacts from this runner
+        env:
+          UA: "freedom-harness ${{ github.repository_owner }}@users.noreply.github.com"
+        run: |
+          for url in https://data.sec.gov/submissions/CIK0001045810.json https://data.sec.gov/api/xbrl/companyfacts/CIK0001045810.json https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany; do
+            code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 30 -A "$UA" -H "Accept-Encoding: gzip, deflate" "$url" || echo "curl-failed")
+            echo "$code  $url"; head -c 300 /tmp/body | tr '\n' ' '; echo
+          done
