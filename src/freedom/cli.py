@@ -488,6 +488,23 @@ def cards(horizon_minutes: int = typer.Option(45, "--horizon-minutes", help="Pre
                       f"(index: {run.out_dir / cards_mod.INDEX_FILE})", markup=False)
 
 
+# ---- sec-bundle ---------------------------------------------------------------------------------------
+@app.command("sec-bundle")
+def sec_bundle() -> None:
+    """Fetch EDGAR filings and EPS facts for every universe CIK into configs/sec_*.parquet (public-domain
+    data the events build falls back to where EDGAR is unreachable, e.g. GitHub-hosted runners)."""
+    from . import events as events_mod
+    from .universe import event_universe, load_universe
+
+    s = get_settings()
+    with _guard():
+        u = event_universe(load_universe(s))
+        ciks = sorted({int(c) for c in u["cik"].dropna().tolist()})
+        fp, xp, nf, nx = events_mod.build_sec_bundle(s, ciks)
+    _print_kv({"ciks": len(ciks), "filings rows": nf, "facts rows": nx, "filings": fp, "facts": xp},
+              title="freedom sec-bundle")
+
+
 # ---- score --------------------------------------------------------------------------------------------
 @app.command()
 def score() -> None:

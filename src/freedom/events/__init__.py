@@ -756,6 +756,54 @@ def _names_without_universe(settings: Settings, underlyings: list[str]) -> list[
 class _SecData:
     filings: pd.DataFrame | None = None
     facts: pd.DataFrame | None = None
+    from_bundle: bool = False  # served from configs/sec_*.parquet because EDGAR gave nothing
+
+
+SEC_FILINGS_BUNDLE = "sec_filings.parquet"
+SEC_FACTS_BUNDLE = "sec_eps_facts.parquet"
+_BUNDLE_CACHE: dict[Path, pd.DataFrame | None] = {}
+
+
+def sec_bundle_rows(settings: Settings, name: str, cik: int) -> pd.DataFrame | None:
+    """Rows of the committed SEC bundle for one CIK (the bundle is public-domain EDGAR data,
+    written by `freedom sec-bundle`); None when the file is absent."""
+    path = settings.configs_dir / name
+    if path not in _BUNDLE_CACHE:
+        _BUNDLE_CACHE[path] = pd.read_parquet(path) if path.exists() else None
+    df = _BUNDLE_CACHE[path]
+    if df is None or "cik" not in df.columns:
+        return None
+    rows = df[pd.to_numeric(df["cik"], errors="coerce") == int(cik)].drop(columns=["cik"])
+    return rows.reset_index(drop=True)
+
+
+def build_sec_bundle(settings: Settings, ciks: list[int]) -> tuple[Path, Path, int, int]:
+    """Fetch EDGAR filings and EPS facts for `ciks` and write the two bundle parquets.
+    Run where EDGAR is reachable; the events build falls back to them elsewhere."""
+    from ..data.sec import SECClient
+
+    sec = SECClient(settings)
+    filings, facts = [], []
+    for cik in ciks:
+        try:
+            f = sec.earnings_filings(cik)
+            filings.append(f.assign(cik=int(cik)))
+        except (ProviderUnavailable, httpx.HTTPError, ValueError, KeyError) as exc:
+            log.warning("sec-bundle: filings failed for CIK %s: %s", cik, exc)
+        try:
+            x = sec.company_facts_eps(cik)
+            facts.append(x.assign(cik=int(cik)))
+        except (ProviderUnavailable, httpx.HTTPError, ValueError, KeyError) as exc:
+            log.warning("sec-bundle: companyfacts failed for CIK %s: %s", cik, exc)
+    settings.configs_dir.mkdir(parents=True, exist_ok=True)
+    fp, xp = settings.configs_dir / SEC_FILINGS_BUNDLE, settings.configs_dir / SEC_FACTS_BUNDLE
+    fdf = pd.concat(filings, ignore_index=True) if filings else pd.DataFrame(columns=["cik"])
+    xdf = pd.concat(facts, ignore_index=True) if facts else pd.DataFrame(columns=["cik"])
+    fdf.to_parquet(fp, index=False)
+    xdf.to_parquet(xp, index=False)
+    _BUNDLE_CACHE.pop(fp, None)
+    _BUNDLE_CACHE.pop(xp, None)
+    return fp, xp, len(fdf), len(xdf)
 
 
 class _Providers:
@@ -796,18 +844,31 @@ class _Providers:
         return self._splits[symbol]
 
     def sec_data(self, cik: int | None) -> _SecData:
+        """EDGAR filings and EPS facts for a CIK; when EDGAR is unreachable or answers with
+        nothing (measured 2026-09-07: no GitHub-hosted run ever carried a SEC-sourced release
+        minute), the committed bundle configs/sec_filings.parquet / sec_eps_facts.parquet
+        (`freedom sec-bundle`, refreshed where EDGAR is reachable) stands in; such rows are
+        flagged sec_bundle."""
         if cik is None:
             return _SecData()
         if cik not in self._sec:
             data = _SecData()
             try:
                 data.filings = self.sec.earnings_filings(cik)
-            except (httpx.HTTPError, ValueError, KeyError) as exc:
+            except (ProviderUnavailable, httpx.HTTPError, ValueError, KeyError) as exc:
                 log.warning("SEC filings unavailable for CIK %s: %s", cik, exc)
             try:
                 data.facts = self.sec.company_facts_eps(cik)
-            except (httpx.HTTPError, ValueError, KeyError) as exc:
+            except (ProviderUnavailable, httpx.HTTPError, ValueError, KeyError) as exc:
                 log.warning("SEC companyfacts unavailable for CIK %s: %s", cik, exc)
+            if data.filings is None or len(data.filings) == 0:
+                bundled = sec_bundle_rows(self.settings, SEC_FILINGS_BUNDLE, cik)
+                if bundled is not None and len(bundled):
+                    data.filings, data.from_bundle = bundled, True
+            if data.facts is None or len(data.facts) == 0:
+                bundled = sec_bundle_rows(self.settings, SEC_FACTS_BUNDLE, cik)
+                if bundled is not None and len(bundled):
+                    data.facts, data.from_bundle = bundled, True
             self._sec[cik] = data
         return self._sec[cik]
 
@@ -998,6 +1059,8 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
     sec = providers.sec_data(name.cik)
     if sec.filings is not None and len(sec.filings):
         sources.append("sec")
+    if sec.from_bundle:
+        flags.append("sec_bundle")
     acc = find_8k_acceptance(sec.filings, d_fmp)
     d_eff = d_fmp
     if acc is not None:

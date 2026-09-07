@@ -1225,3 +1225,36 @@ def test_a_results_8k_within_thirty_days_flags_the_event_as_pre_announced(settin
                             "accepted": [pd.Timestamp("2026-08-26 20:10", tz="UTC"), pd.Timestamp("2026-08-19 20:10", tz="UTC")]})
     hit = find_prior_results_8k(filings, date(2026, 8, 27))
     assert hit is not None and hit[1] == "b"  # the day-before filing belongs to the report itself, not the window
+
+
+def test_events_fall_back_to_the_committed_sec_bundle_when_edgar_gives_nothing(settings, fake, monkeypatch):
+    """GitHub-hosted runs never carried a SEC-sourced release minute: when EDGAR answers with
+    nothing, the filings and EPS facts come from configs/sec_filings.parquet / sec_eps_facts.parquet
+    and the row is flagged sec_bundle; the release minute then comes from the 8-K as usual."""
+    import freedom.events as ev_mod
+    from freedom.data.sec import SECClient
+
+    write_universe(settings)
+    settings.configs_dir = settings.data_dir / "configs"
+    settings.configs_dir.mkdir()
+    acc = pd.Timestamp("2026-08-27 20:31", tz="UTC")
+    pd.DataFrame({"cik": [AAPL_CIK], "accession": ["0000320193-26-000099"], "form": ["8-K"],
+                  "filing_date": [pd.Timestamp("2026-08-27", tz="UTC")], "accepted": [acc], "items": ["2.02,9.01"],
+                  "primary_doc": ["x.htm"], "description": ["results"]}).to_parquet(settings.configs_dir / "sec_filings.parquet", index=False)
+    pd.DataFrame({"cik": [], "period_end": [], "value": [], "fp": [], "form": [], "filed": []}).to_parquet(
+        settings.configs_dir / "sec_eps_facts.parquet", index=False)
+    ev_mod._BUNDLE_CACHE.clear()
+
+    def nothing(self, cik):
+        return pd.DataFrame(columns=["accession", "form", "filing_date", "accepted", "items", "primary_doc", "description"])
+
+    monkeypatch.setattr(SECClient, "earnings_filings", nothing)
+    fake.earnings["AAPL"] = [{"symbol": "AAPL", "date": "2026-08-27", "epsActual": 1.1, "epsEstimated": 1.0,
+                              "revenueActual": 9.1e10, "revenueEstimated": 9.0e10, "lastUpdated": "2026-08-30"}]
+    df = build_events(settings, underlyings=["AAPL"], since=pd.Timestamp("2026-08-01"))
+    row = df[df[E.underlying] == "AAPL"].iloc[0]
+    assert row[E.t0_source] == "sec_8k" and row[E.t0] == acc
+    assert "sec_bundle" in row[E.flags].split(";") and "sec" in str(row["sources_used"])
+    assert ev_mod.sec_bundle_rows(settings, "sec_filings.parquet", 999) is not None  # empty frame, not None
+    assert len(ev_mod.sec_bundle_rows(settings, "sec_filings.parquet", 999)) == 0
+    ev_mod._BUNDLE_CACHE.clear()

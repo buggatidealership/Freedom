@@ -85,6 +85,13 @@ them against the realised 24 h return once the daily build has measured it, forc
 call and banded call on the traded ones, with Wilson 90 % intervals, and writes
 `reports/scorecard.md`; the data job posts it on the Cards issue whenever new outcomes were graded.
 
+SEC EDGAR answers GitHub-hosted runners with HTTP 403 (measured 2026-09-07), so the data job
+would never see an 8-K acceptance time. `freedom sec-bundle`, run where EDGAR is reachable, writes
+the universe's 8-K/6-K filings and EPS facts to `configs/sec_filings.parquet` and
+`configs/sec_eps_facts.parquet` (public-domain data, a few hundred KB); the events build uses EDGAR
+when it answers and the bundle otherwise, flagging such rows `sec_bundle`. The weekly date check
+refreshes the bundle.
+
 When a vendor calendar has the wrong day (Oracle's Q1 FY2027 date was two days off in FMP and
 four in Finnhub), put the correction in `configs/report_date_overrides.yaml` as
 `ORCL:2026-09-08: 2026-09-10` (vendor date to issuer-confirmed date). It applies before the 8-K
