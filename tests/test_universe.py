@@ -110,3 +110,65 @@ def test_verification_report_lists_uncertain_rows(settings):
     rep = verification_report(u)
     assert "xyz:SPCX" in set(rep[U.market])
     assert "xyz:NVDA" not in set(rep[U.market])
+
+
+def _write_cik_yaml(path: Path, tickers: dict) -> None:
+    import yaml
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump({"tickers": tickers}), encoding="utf-8")
+
+
+def test_cik_map_loads_merges_and_round_trips(settings, tmp_path):
+    settings.configs_dir = tmp_path / "cfg2"  # not the fixture's copy of the repo configs
+    assert len(universe_mod.load_cik_map(settings)) == 0  # absent file: empty, not an error
+    _write_cik_yaml(settings.cik_map_path, {"nvda": {"cik": 1045810, "title": "NVIDIA CORP"},
+                                            "AAPL": 320193, "BAD": None, "ZM": {"title": "no cik"}})
+    m = universe_mod.load_cik_map(settings)
+    assert sorted(m["ticker"]) == ["AAPL", "NVDA"] and dict(zip(m["ticker"], m["cik"], strict=True)) == {"NVDA": 1045810, "AAPL": 320193}
+    assert m.set_index("ticker").loc["AAPL", "title"] == "AAPL"  # bare integer: the ticker names it
+    # live rows win, bundled rows fill the gaps
+    live = pd.DataFrame({"ticker": ["NVDA"], "cik": [1], "title": ["live"]})
+    merged = universe_mod.merge_ticker_maps(live, m).set_index("ticker")
+    assert int(merged.loc["NVDA", "cik"]) == 1 and int(merged.loc["AAPL", "cik"]) == 320193
+    assert len(universe_mod.merge_ticker_maps(None, None)) == 0
+    # write from a universe frame and read back: symbol and a different underlying both map
+    u = pd.DataFrame({U.market: ["xyz:NVDA", "para:NVDA", "xyz:FOO", "xyz:GOLD"], U.symbol: ["NVDA", "NVDA", "FOO", "GOLD"],
+                      U.kind: ["equity_us", "equity_us", "equity_fpi", "commodity"],
+                      U.underlying: ["NVDA", "NVDA", "FOOX", None], U.cik: [1045810, 1045810, 77, 5],
+                      U.name: ["NVIDIA CORP", "NVIDIA CORP", None, "Gold.com"]})
+    u[U.cik] = u[U.cik].astype("Int64")
+    path, n = universe_mod.write_cik_map(settings, u)
+    assert path == settings.cik_map_path and n == 3
+    back = universe_mod.load_cik_map(settings).set_index("ticker")
+    assert back.index.tolist() == ["FOO", "FOOX", "NVDA"] and int(back.loc["FOOX", "cik"]) == 77
+    assert back.loc["FOO", "title"] == "FOO" and "GOLD" not in back.index  # non-event kinds stay out
+    assert path.read_text(encoding="utf-8").startswith(universe_mod.CIK_MAP_HEADER)
+
+
+def test_build_universe_takes_ciks_from_the_committed_map_when_sec_is_blocked(settings, monkeypatch):
+    """The data job's universe had no CIK at all (2026-09-07: sec.gov 403 from the runner), so the
+    events build never consulted the SEC bundle. With configs/cik_map.yaml every event-universe
+    row carries its CIK even when the live ticker file is unreachable."""
+    FakeHyperliquidInfo().install(monkeypatch)  # HttpClient.get_json raises: the SEC map is unavailable
+    monkeypatch.setattr(universe_mod, "_listing_and_volume", lambda hl, market, now: (None, float("nan")))
+    u = universe_mod.build_universe(settings, write=False)
+    ev = u[u[U.in_event_universe]]
+    assert len(ev) and ev[U.cik].notna().all()
+    assert int(u.set_index(U.market).loc["xyz:NVDA", U.cik]) == 1045810
+    assert u.set_index(U.market).loc["xyz:NVDA", U.name] == "NVIDIA CORP"
+    # the map holds only event names: nothing outside the curated universe gets a CIK from it
+    assert u.loc[~u[U.kind].isin(["equity_us", "equity_fpi"]), U.cik].isna().all()
+
+
+def test_build_universe_without_a_cik_map_still_builds(settings, monkeypatch, tmp_path):
+    import shutil
+
+    configs = tmp_path / "cfg2"  # only the overrides: no cik_map.yaml
+    configs.mkdir()
+    shutil.copy(settings.universe_overrides_path, configs / "universe_overrides.yaml")
+    settings.configs_dir = configs
+    FakeHyperliquidInfo().install(monkeypatch)
+    monkeypatch.setattr(universe_mod, "_listing_and_volume", lambda hl, market, now: (None, float("nan")))
+    u = universe_mod.build_universe(settings, write=False)
+    assert bool(u[U.in_event_universe].any()) and u[U.cik].isna().all()

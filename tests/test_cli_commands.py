@@ -459,3 +459,24 @@ def test_status_reports_keys_budgets_artifacts_and_archive(dirs):
     assert "48" in result.output and "xyz_NVDA" in result.output and "2026-08-21 23:00" in result.output
     assert "universe" in result.output and "ok" in result.output
     assert "holdout scorings so far" in result.output
+
+
+def test_sec_bundle_writes_the_bundle_and_the_cik_map(dirs, monkeypatch, tmp_path):
+    data, _ = dirs
+    configs = tmp_path / "configs"
+    monkeypatch.setenv("FREEDOM_CONFIGS_DIR", str(configs))
+    u = _universe()
+    u[U.cik] = pd.array([1045810, None, None], dtype="Int64")
+    monkeypatch.setattr(universe_mod, "load_universe", lambda s: u)
+    seen = {}
+
+    def bundle(s, ciks):
+        seen["ciks"] = ciks
+        return s.configs_dir / "sec_filings.parquet", s.configs_dir / "sec_eps_facts.parquet", 5, 7
+
+    monkeypatch.setattr(events_mod, "build_sec_bundle", bundle)
+    result = runner.invoke(app, ["sec-bundle"])
+    assert result.exit_code == 0, result.output
+    assert seen["ciks"] == [1045810]
+    assert (configs / "cik_map.yaml").exists() and "NVDA" in (configs / "cik_map.yaml").read_text()
+    assert "cik map tickers" in result.output and "1" in result.output

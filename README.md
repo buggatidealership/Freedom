@@ -89,8 +89,11 @@ SEC EDGAR answers GitHub-hosted runners with HTTP 403 (measured 2026-09-07), so 
 would never see an 8-K acceptance time. `freedom sec-bundle`, run where EDGAR is reachable, writes
 the universe's 8-K/6-K filings and EPS facts to `configs/sec_filings.parquet` and
 `configs/sec_eps_facts.parquet` (public-domain data, a few hundred KB); the events build uses EDGAR
-when it answers and the bundle otherwise, flagging such rows `sec_bundle`. The weekly date check
-refreshes the bundle.
+when it answers and the bundle otherwise, flagging such rows `sec_bundle`. The SEC ticker file is
+refused too, and a universe without CIKs never looks a filing up (the first bundled run resolved
+nothing from it for that reason), so the same command writes the universe's ticker to CIK map to
+`configs/cik_map.yaml`, which `freedom universe` uses for every ticker the live file does not
+answer for. The weekly date check refreshes both.
 
 When a vendor calendar has the wrong day (Oracle's Q1 FY2027 date was two days off in FMP and
 four in Finnhub), put the correction in `configs/report_date_overrides.yaml` as

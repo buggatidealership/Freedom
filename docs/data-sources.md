@@ -52,7 +52,10 @@ Every statement here was verified by a live request from the build environment o
 * `https://www.sec.gov/files/company_tickers.json`: 10 391 tickers → CIK. Matching Hyperliquid
   symbols against it yields 87 hits with **known false positives** (`xyz:GOLD` → Gold.com,
   `xyz:CL` → Colgate, `hyna:BTC` → an ETF). The universe module therefore layers a curated
-  override file on top of the automatic match.
+  override file on top of the automatic match. GitHub-hosted runners get HTTP 403 for this file
+  as for the rest of sec.gov (measured 2026-09-07), so `configs/cik_map.yaml`, written by
+  `freedom sec-bundle`, carries the event universe's ticker → CIK snapshot and fills whatever the
+  live file does not answer for.
 * `https://data.sec.gov/submissions/CIK##########.json`: recent filings with
   `acceptanceDateTime`. For US filers the earnings 8-K carries item `2.02` and its acceptance
   time is within about a minute of the press release: NVDA 2026-08-26 20:21:19 Z, AAPL

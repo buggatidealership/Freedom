@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     def universe_overrides_path(self) -> Path:
         return self.configs_dir / "universe_overrides.yaml"
 
+    @property
+    def cik_map_path(self) -> Path:
+        return self.configs_dir / "cik_map.yaml"
+
     def ensure_dirs(self) -> None:
         for p in (self.data_dir, self.cache_dir, self.archive_dir, self.models_dir, self.reports_dir):
             p.mkdir(parents=True, exist_ok=True)

@@ -3,11 +3,18 @@
 `build_universe` = live markets (HyperliquidClient.all_markets) + automatic SEC ticker match
 + configs/universe_overrides.yaml (authoritative) + listing_start and 30-day median notional.
 Output frame uses schemas.U columns and is written to settings.universe_path.
+
+The SEC ticker file (company_tickers.json) is refused with HTTP 403 from GitHub-hosted runners
+(measured 2026-09-07: the data job's universe carried no CIK at all, so the events build never
+looked a filing up and the committed SEC bundle was never consulted). configs/cik_map.yaml, a
+committed snapshot of that file for the event universe written by `freedom sec-bundle`, fills
+every ticker the live map does not answer for.
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -20,6 +27,14 @@ log = logging.getLogger(__name__)
 
 BENCHMARK_MARKETS = ("xyz:SP500", "xyz:VIX")  # context markets that also get listing/volume info
 DEFAULT_DEX_PRIORITY = ["xyz", "para", "io", "mkts", "hyna"]
+TICKER_MAP_COLUMNS = ["ticker", "cik", "title"]
+CIK_MAP_HEADER = """\
+# Ticker -> CIK for the event universe: a committed snapshot of SEC company_tickers.json
+# (public-domain data) written by `freedom sec-bundle`. `freedom universe` uses it for every
+# ticker the live SEC file does not answer for; sec.gov refuses GitHub-hosted runners with
+# HTTP 403, so without this file the data job's universe has no CIK, no filing is ever looked
+# up and the SEC bundle in this directory is never consulted. Refresh where sec.gov answers.
+"""
 
 
 def load_overrides(settings: Settings) -> dict:
@@ -39,6 +54,62 @@ def load_overrides(settings: Settings) -> dict:
         if "kind" in markets[k]:
             Kind(markets[k]["kind"])  # validate
     return {"defaults": raw.get("defaults") or {}, "markets": markets}
+
+
+def load_cik_map(settings: Settings) -> pd.DataFrame:
+    """configs/cik_map.yaml as a ticker-map frame (ticker, cik, title); empty when the file is
+    absent. Entries are `TICKER: {cik: int, title: str}` (a bare integer is accepted as the CIK)."""
+    empty = pd.DataFrame(columns=TICKER_MAP_COLUMNS)
+    path = settings.cik_map_path
+    if not path.exists():
+        return empty
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    rows = []
+    for ticker, v in (raw.get("tickers") or {}).items():
+        cik = v.get("cik") if isinstance(v, dict) else v
+        title = v.get("title") if isinstance(v, dict) else None
+        if cik is None:
+            continue
+        t = str(ticker).strip().upper()
+        rows.append({"ticker": t, "cik": int(cik), "title": str(title or t)})
+    if not rows:
+        return empty
+    df = pd.DataFrame(rows, columns=TICKER_MAP_COLUMNS).drop_duplicates("ticker", keep="first")
+    df["cik"] = df["cik"].astype("int64")
+    return df.reset_index(drop=True)
+
+
+def merge_ticker_maps(live: pd.DataFrame | None, bundled: pd.DataFrame | None) -> pd.DataFrame:
+    """Live SEC rows first; bundled rows only for tickers the live map lacks."""
+    frames = [f for f in (live, bundled) if f is not None and len(f)]
+    if not frames:
+        return pd.DataFrame(columns=TICKER_MAP_COLUMNS)
+    out = pd.concat(frames, ignore_index=True)[TICKER_MAP_COLUMNS].drop_duplicates("ticker", keep="first")
+    return out.reset_index(drop=True)
+
+
+def write_cik_map(settings: Settings, universe: pd.DataFrame) -> tuple[Path, int]:
+    """Write configs/cik_map.yaml from the universe's event-kind rows that carry a CIK, keyed by
+    the market symbol (what `classify` looks up) and, when different, the underlying ticker.
+    Returns the path and the number of tickers written."""
+    ev = universe[universe[U.kind].isin([k.value for k in EVENT_KINDS]) & universe[U.cik].notna()]
+    entries: dict[str, dict[str, int | str]] = {}
+    for _, r in ev.iterrows():
+        keys = [str(r[U.symbol])]
+        if r.get(U.underlying) is not None and not pd.isna(r.get(U.underlying)):
+            keys.append(str(r[U.underlying]))
+        name = r.get(U.name)
+        for key in keys:
+            key = key.strip().upper()
+            title = str(name) if name is not None and not pd.isna(name) else key
+            entries.setdefault(key, {"cik": int(r[U.cik]), "title": title})
+    path = settings.cik_map_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = yaml.safe_dump({"tickers": dict(sorted(entries.items()))}, sort_keys=False, allow_unicode=True,
+                          default_flow_style=None, width=120)
+    path.write_text(CIK_MAP_HEADER + body, encoding="utf-8")
+    return path, len(entries)
 
 
 def classify(markets: pd.DataFrame, sec_tickers: pd.DataFrame, overrides: dict) -> pd.DataFrame:
@@ -127,10 +198,15 @@ def build_universe(settings: Settings, *, write: bool = True) -> pd.DataFrame:
     hl = HyperliquidClient(settings)
     markets = hl.all_markets()
     try:
-        sec_tickers = SECClient(settings).ticker_map()
+        live = SECClient(settings).ticker_map()
     except Exception as exc:  # network or parsing trouble must not block the universe
-        log.warning("SEC ticker map unavailable (%s); relying on overrides only", exc)
-        sec_tickers = pd.DataFrame(columns=["ticker", "cik", "title"])
+        log.warning("SEC ticker map unavailable (%s); using %s and the overrides", exc, settings.cik_map_path)
+        live = pd.DataFrame(columns=TICKER_MAP_COLUMNS)
+    bundled = load_cik_map(settings)
+    if len(bundled) == 0:
+        log.warning("no committed CIK map at %s (run `freedom sec-bundle` where sec.gov answers)",
+                    settings.cik_map_path)
+    sec_tickers = merge_ticker_maps(live, bundled)
     overrides = load_overrides(settings)
     u = classify(markets, sec_tickers, overrides)
 

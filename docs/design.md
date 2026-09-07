@@ -120,7 +120,9 @@ behind them. Whether anything is predictable is an output of the harness, not an
 `freedom universe` → `data/universe.parquet`
 
 1. Pull `perpDexs`, then `meta` for every dex; keep `isDelisted == false`.
-2. Auto-classify each market by matching `SYMBOL` to SEC `company_tickers.json`.
+2. Auto-classify each market by matching `SYMBOL` to SEC `company_tickers.json`, with the
+   committed `configs/cik_map.yaml` (written by `freedom sec-bundle`) filling every ticker the
+   live file does not answer for (sec.gov refuses GitHub-hosted runners).
 3. Apply `configs/universe_overrides.yaml` (checked into git, reviewed by a human): kind ∈
    `{equity_us, equity_fpi, etf, index, commodity, fx, crypto, preipo, rate, other}`,
    `underlying_ticker`, `cik`, `exclude_reason`. Only `equity_us` and `equity_fpi` enter the

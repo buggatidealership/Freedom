@@ -1,0 +1,79 @@
+# Ticker -> CIK for the event universe: a committed snapshot of SEC company_tickers.json
+# (public-domain data) written by `freedom sec-bundle`. `freedom universe` uses it for every
+# ticker the live SEC file does not answer for; sec.gov refuses GitHub-hosted runners with
+# HTTP 403, so without this file the data job's universe has no CIK, no filing is ever looked
+# up and the SEC bundle in this directory is never consulted. Refresh where sec.gov answers.
+tickers:
+  AAOI: {cik: 1158114, title: 'APPLIED OPTOELECTRONICS, INC.'}
+  AAPL: {cik: 320193, title: Apple Inc.}
+  AMAT: {cik: 6951, title: APPLIED MATERIALS INC /DE}
+  AMD: {cik: 2488, title: ADVANCED MICRO DEVICES INC}
+  AMZN: {cik: 1018724, title: AMAZON COM INC}
+  ARM: {cik: 1973239, title: ARM HOLDINGS PLC /UK}
+  ASML: {cik: 937966, title: ASML HOLDING NV}
+  AVGO: {cik: 1730168, title: Broadcom Inc.}
+  BABA: {cik: 1577552, title: Alibaba Group Holding Ltd}
+  BB: {cik: 1070235, title: BLACKBERRY Ltd}
+  BE: {cik: 1664703, title: Bloom Energy Corp}
+  BIRD: {cik: 1653909, title: 'Smartbird, Inc.'}
+  BMNR: {cik: 1829311, title: 'BITMINE IMMERSION TECHNOLOGIES, INC.'}
+  BX: {cik: 1393818, title: Blackstone Inc.}
+  CBRS: {cik: 2021728, title: Cerebras Systems Inc.}
+  CIEN: {cik: 936395, title: CIENA CORP}
+  COHR: {cik: 820318, title: COHERENT CORP.}
+  COIN: {cik: 1679788, title: 'Coinbase Global, Inc.'}
+  COST: {cik: 909832, title: COSTCO WHOLESALE CORP /NEW}
+  CRCL: {cik: 1876042, title: 'Circle Internet Group, Inc.'}
+  CRDO: {cik: 1807794, title: Credo Technology Group Holding Ltd}
+  CRWD: {cik: 1535527, title: 'CrowdStrike Holdings, Inc.'}
+  CRWV: {cik: 1769628, title: 'CoreWeave, Inc.'}
+  DELL: {cik: 1571996, title: Dell Technologies Inc.}
+  DKNG: {cik: 1883685, title: DraftKings Inc.}
+  EBAY: {cik: 1065088, title: EBAY INC}
+  GEV: {cik: 1996810, title: GE Vernova Inc.}
+  GLW: {cik: 24741, title: CORNING INC /NY}
+  GME: {cik: 1326380, title: GameStop Corp.}
+  GOOGL: {cik: 1652044, title: Alphabet Inc.}
+  GPRO: {cik: 1500435, title: 'GoPro, Inc.'}
+  HIMS: {cik: 1773751, title: 'Hims & Hers Health, Inc.'}
+  HOOD: {cik: 1783879, title: 'Robinhood Markets, Inc.'}
+  IBM: {cik: 51143, title: INTERNATIONAL BUSINESS MACHINES CORP}
+  INTC: {cik: 50863, title: INTEL CORP}
+  IREN: {cik: 1878848, title: IREN Ltd}
+  LITE: {cik: 1633978, title: Lumentum Holdings Inc.}
+  LLY: {cik: 59478, title: ELI LILLY & Co}
+  LRCX: {cik: 707549, title: LAM RESEARCH CORP}
+  MELI: {cik: 1099590, title: MERCADOLIBRE INC}
+  META: {cik: 1326801, title: 'Meta Platforms, Inc.'}
+  MRNA: {cik: 1682852, title: 'Moderna, Inc.'}
+  MRVL: {cik: 1835632, title: 'Marvell Technology, Inc.'}
+  MSFT: {cik: 789019, title: MICROSOFT CORP}
+  MSTR: {cik: 1050446, title: Strategy Inc}
+  MU: {cik: 723125, title: MICRON TECHNOLOGY INC}
+  NBIS: {cik: 1513845, title: Nebius Group N.V.}
+  NET: {cik: 1477333, title: 'Cloudflare, Inc.'}
+  NFLX: {cik: 1065280, title: NETFLIX INC}
+  NOK: {cik: 924613, title: NOKIA CORP}
+  NOW: {cik: 1373715, title: 'ServiceNow, Inc.'}
+  NVDA: {cik: 1045810, title: NVIDIA CORP}
+  ORCL: {cik: 1341439, title: ORACLE CORP}
+  PLTR: {cik: 1321655, title: Palantir Technologies Inc.}
+  QCOM: {cik: 804328, title: QUALCOMM INC/DE}
+  QNT: {cik: 2110105, title: Quantinuum Inc.}
+  RDDT: {cik: 1713445, title: 'Reddit, Inc.'}
+  RIVN: {cik: 1874178, title: 'Rivian Automotive, Inc. / DE'}
+  RKLB: {cik: 1819994, title: Rocket Lab Corp}
+  SHAZ: {cik: 2068385, title: SharonAI Holdings Inc.}
+  SKHY: {cik: 2120882, title: SK hynix Inc.}
+  SMCI: {cik: 1375365, title: 'Super Micro Computer, Inc.'}
+  SNDK: {cik: 2023554, title: Sandisk Corp}
+  SOFI: {cik: 1818874, title: 'SoFi Technologies, Inc.'}
+  STX: {cik: 1137789, title: Seagate Technology Holdings plc}
+  TER: {cik: 97210, title: 'TERADYNE, INC'}
+  TSLA: {cik: 1318605, title: 'Tesla, Inc.'}
+  TSM: {cik: 1046179, title: TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD}
+  TTWO: {cik: 946581, title: TAKE TWO INTERACTIVE SOFTWARE INC}
+  USAR: {cik: 1970622, title: 'USA Rare Earth, Inc.'}
+  VST: {cik: 1692819, title: Vistra Corp.}
+  WDC: {cik: 106040, title: WESTERN DIGITAL CORP}
+  ZM: {cik: 1585521, title: 'Zoom Communications, Inc.'}

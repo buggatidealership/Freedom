@@ -491,18 +491,21 @@ def cards(horizon_minutes: int = typer.Option(45, "--horizon-minutes", help="Pre
 # ---- sec-bundle ---------------------------------------------------------------------------------------
 @app.command("sec-bundle")
 def sec_bundle() -> None:
-    """Fetch EDGAR filings and EPS facts for every universe CIK into configs/sec_*.parquet (public-domain
-    data the events build falls back to where EDGAR is unreachable, e.g. GitHub-hosted runners)."""
+    """Fetch EDGAR filings and EPS facts for every universe CIK into configs/sec_*.parquet and write the
+    ticker -> CIK map to configs/cik_map.yaml (public-domain data the universe and events builds fall back
+    to where sec.gov is unreachable, e.g. GitHub-hosted runners)."""
     from . import events as events_mod
-    from .universe import event_universe, load_universe
+    from .universe import event_universe, load_universe, write_cik_map
 
     s = get_settings()
     with _guard():
-        u = event_universe(load_universe(s))
+        u_all = load_universe(s)
+        u = event_universe(u_all)
         ciks = sorted({int(c) for c in u["cik"].dropna().tolist()})
         fp, xp, nf, nx = events_mod.build_sec_bundle(s, ciks)
-    _print_kv({"ciks": len(ciks), "filings rows": nf, "facts rows": nx, "filings": fp, "facts": xp},
-              title="freedom sec-bundle")
+        cp, nt = write_cik_map(s, u_all)  # the ticker map is 403 on runners too: commit it alongside
+    _print_kv({"ciks": len(ciks), "filings rows": nf, "facts rows": nx, "filings": fp, "facts": xp,
+               "cik map tickers": nt, "cik map": cp}, title="freedom sec-bundle")
 
 
 # ---- score --------------------------------------------------------------------------------------------
