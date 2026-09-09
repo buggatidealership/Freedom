@@ -17,3 +17,9 @@ ASML:2026-10-14: 2026-10-14T05:00:00Z
 # investor.tsmc.com on 2026-09-03; 3Q25 was Thu Oct 16 2025). Re-key this entry if TSMC
 # announces another day.
 TSM:2026-10-15: 2026-10-15T06:00:00Z
+# Oracle releases on the wire at 16:05 ET and files the 8-K seven to ten minutes later (past
+# events: detections at 16:05 moved t0 earlier by 422-578 s; acceptances 16:12-16:14). The card
+# scheduler takes the median 8-K acceptance clock (16:13), which would put the pre-release card at
+# 16:03 ET, after the close and inside the wire window. Pin the wire time. Date issuer-confirmed
+# (Oracle investor relations, Q1 FY2027 on Sep 10 after the close). Remove after Sep 11 2026.
+ORCL:2026-09-10: 2026-09-10T20:05:00Z
