@@ -642,6 +642,40 @@ def append_live_prediction(settings: Settings, row: dict) -> Path:
     return path
 
 
+IMPORT_KEY = (E.event_id, D.decision_time, D.as_of, "model_id")
+
+
+def import_live_rows(settings: Settings, path: Path) -> tuple[int, int]:
+    """Append the rows of a recovery file ({"rows": [...]}, ISO timestamps) to
+    data/live_predictions.parquet unless a row with the same (event_id, decision_time, as_of,
+    model_id) is already there. Returns (added, skipped). The file exists for cards whose parquet
+    row was lost (the 2026-09-10 Oracle cards: the artifact chain dropped them, the issue comments
+    kept them); every imported row carries recovered=True and recovered_from."""
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = raw.get("rows") if isinstance(raw, dict) else raw
+    if not rows:
+        return 0, 0
+    new = pd.DataFrame(rows)
+    for col in (D.as_of, "run_at", "posted_at", "t0_used", "expected_t0", "t0_live", "t0_actual"):
+        if col in new.columns:
+            new[col] = pd.to_datetime(new[col], utc=True)
+    new["recovered"] = True
+    old = read_parquet_or_none(live_predictions_path(settings))
+    if old is not None and len(old):
+        old_as_of = pd.to_datetime(old[D.as_of], utc=True) if D.as_of in old.columns else pd.Series(pd.NaT, index=old.index)
+        seen = {(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(old_as_of.iloc[i])), str(r.get("model_id")))
+                for i, (_, r) in enumerate(old.iterrows())}
+        mask = [(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(r[D.as_of])), str(r.get("model_id")))
+                not in seen for _, r in new.iterrows()]
+        new = new[mask]
+    skipped = len(rows) - len(new)
+    if len(new) == 0:
+        return 0, skipped
+    merged = new if old is None or old.empty else pd.concat([old, new], ignore_index=True)
+    write_parquet_atomic(merged, live_predictions_path(settings))
+    return int(len(new)), skipped
+
+
 def load_live_predictions(settings: Settings) -> pd.DataFrame:
     df = read_parquet_or_none(live_predictions_path(settings))
     if df is None:
@@ -650,5 +684,5 @@ def load_live_predictions(settings: Settings) -> pd.DataFrame:
 
 
 __all__ = ["EventNotFound", "ModelNotFound", "ReleaseNotDetected", "Schedule", "append_live_prediction",
-           "closed_bars", "derived_fiscal_period", "find_event", "live_predictions_path",
+           "closed_bars", "derived_fiscal_period", "find_event", "import_live_rows", "live_predictions_path",
            "load_live_predictions", "load_model", "predict_event", "upcoming_event_id", "with_event_ids"]

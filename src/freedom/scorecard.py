@@ -63,6 +63,22 @@ def _bool(v) -> bool:
     return not (v is None or (isinstance(v, float) and math.isnan(v))) and bool(v)
 
 
+def dedupe_live_rows(live: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """One live row per (event, decision): the earliest run wins (run_at, then posted_at, then file
+    order). Two overlapping card runs once produced the same post_30m card twice (ORCL 2026-09-10);
+    the later one is a duplicate of the record, not a second call."""
+    if len(live) == 0 or E.event_id not in live.columns or D.decision_time not in live.columns:
+        return live, 0
+    order = live.copy()
+    order["_i"] = range(len(order))
+    for col in ("run_at", "posted_at"):
+        order["_" + col] = pd.to_datetime(order[col], utc=True, errors="coerce") if col in order.columns else pd.NaT
+    order = order.sort_values(["_run_at", "_posted_at", "_i"], na_position="last", kind="mergesort")
+    keep = ~order.duplicated([E.event_id, D.decision_time], keep="first")
+    kept = order[keep].sort_values("_i").drop(columns=["_i", "_run_at", "_posted_at"])
+    return kept, int((~keep).sum())
+
+
 def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> dict:
     """Grade data/live_predictions.parquet against data/targets.parquet."""
     now_ts = to_utc(now) if now is not None else pd.Timestamp.now(tz=UTC)
@@ -71,10 +87,13 @@ def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> d
     events = read_parquet_or_none(settings.events_path)
     band = float(settings.no_trade_band)
     out: dict = {"generated_at": now_ts.isoformat(), "n_live_rows": 0 if live is None else int(len(live)),
-                 "excluded": {"replay": 0, "off_schedule": 0, "no_probability": 0, "contaminated": 0, "premature": 0},
+                 "excluded": {"replay": 0, "off_schedule": 0, "no_probability": 0, "contaminated": 0, "premature": 0,
+                              "duplicate": 0},
                  "by_decision": {}, "rows": [], "scored_total": 0, "pending_total": 0, "unlabelled_total": 0}
     if live is None or len(live) == 0:
         return out
+    live, n_dup = dedupe_live_rows(live)
+    out["excluded"]["duplicate"] = n_dup
     truth = {}
     if targets is not None and len(targets):
         for _, t in targets.iterrows():
@@ -184,7 +203,8 @@ def scorecard_markdown(sc: dict) -> str:
              f"(excluded: {sc['excluded']['replay']} replays, {sc['excluded']['off_schedule']} off schedule, "
              f"{sc['excluded']['no_probability']} without a probability, "
              f"{sc['excluded'].get('contaminated', 0)} pre cards made after the measured release, "
-             f"{sc['excluded'].get('premature', 0)} post cards made before it).",
+             f"{sc['excluded'].get('premature', 0)} post cards made before it, "
+             f"{sc['excluded'].get('duplicate', 0)} duplicates of an earlier run).",
              "", "Forced pick = LONG when p_up >= 0.5 else SHORT, graded on every scored call (a coin flip scores "
              "50 %). Banded call = the money rule (NO TRADE inside the band). Intervals are Wilson 90 %.", "",
              "| decision | counted | scored | pending | forced hit rate | 90 % interval | banded calls | banded hit rate "

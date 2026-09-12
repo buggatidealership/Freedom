@@ -65,7 +65,8 @@ def test_scorecard_grades_only_live_on_schedule_cards(settings):
     _world(settings)
     sc = scorecard.build_scorecard(settings, now=NOW)
     assert sc["n_live_rows"] == 9
-    assert sc["excluded"] == {"replay": 1, "off_schedule": 1, "no_probability": 0, "contaminated": 1, "premature": 1}
+    assert sc["excluded"] == {"replay": 1, "off_schedule": 1, "no_probability": 0, "contaminated": 1, "premature": 1,
+                              "duplicate": 0}
     order = {(r["event_id"], r["decision"]): r for r in sc["rows"] if r["status"] in ("contaminated", "premature")}
     assert order[("AMD:2026-06", "pre_10m")]["margin_min"] == 8.0 and order[("AMD:2026-06", "post_15m")]["margin_min"] == -12.0
     gme = next(r for r in sc["rows"] if r["event_id"] == "GME:2026-06" and r["decision"] == "pre_10m")
@@ -102,3 +103,49 @@ def test_score_command_writes_the_files(settings, monkeypatch):
     live_predictions_path(settings).unlink()
     result = runner.invoke(app, ["score"])
     assert result.exit_code == 0 and "no counted live cards yet" in result.output
+
+
+def test_duplicate_rows_of_one_card_are_counted_once(settings):
+    """Two overlapping card runs posted ORCL's post_30m card twice on 2026-09-10; the record keeps
+    the earlier run and the scorecard excludes the later one as a duplicate."""
+    _world(settings)
+    live = pd.read_parquet(live_predictions_path(settings))
+    first = {**_live("GME:2026-06", "post_30m", 0.45), D.as_of: pd.Timestamp("2026-09-08 20:35", tz="UTC"),
+             "run_at": pd.Timestamp("2026-09-08 20:35:00", tz="UTC"), "posted_at": pd.Timestamp("2026-09-08 20:35:03", tz="UTC")}
+    dup = {**first, "p_up": 0.80, "call": "LONG", "forced_call": "LONG", "model_id": "post_30m/lightgbm@later",
+           "posted_at": pd.Timestamp("2026-09-08 20:35:45", tz="UTC")}
+    live = live[~((live[E.event_id] == "GME:2026-06") & (live[D.decision_time] == "post_30m"))]
+    pd.concat([live, pd.DataFrame([dup, first])], ignore_index=True).to_parquet(live_predictions_path(settings), index=False)
+    sc = scorecard.build_scorecard(settings, now=NOW)
+    assert sc["excluded"]["duplicate"] == 1
+    rows = [r for r in sc["rows"] if r["event_id"] == "GME:2026-06" and r["decision"] == "post_30m"]
+    assert len(rows) == 1 and rows[0]["p_up"] == 0.45 and rows[0]["forced_call"] == "SHORT"  # the earlier run stands
+    assert sc["by_decision"]["post_30m"]["counted"] == 1
+    assert "1 duplicates of an earlier run" in scorecard.scorecard_markdown(sc)
+
+
+def test_live_import_is_idempotent_and_grades(settings, tmp_path):
+    """Rows recovered from the posted cards join the record once; a second import adds nothing."""
+    from freedom.live import import_live_rows
+
+    _world(settings)
+    rec = tmp_path / "live_recovery.json"
+    rec.write_text(json.dumps({"rows": [
+        {"event_id": "ORCL:2026-06", "decision_time": "post_30m", "as_of": "2026-09-10T20:40:00Z", "run_at": "2026-09-10T20:40:00Z",
+         "posted_at": "2026-09-10T20:40:03Z", "replay": False, "off_schedule": False, "model_id": "post_30m/lightgbm@a",
+         "p_up": 0.7145, "call": "LONG", "forced_call": "LONG", "recovered_from": "issue"},
+        {"event_id": "ORCL:2026-06", "decision_time": "post_30m", "as_of": "2026-09-10T20:40:00Z", "run_at": "2026-09-10T20:40:00Z",
+         "posted_at": "2026-09-10T20:40:45Z", "replay": False, "off_schedule": False, "model_id": "post_30m/lightgbm@b",
+         "p_up": 0.6551, "call": "LONG", "forced_call": "LONG", "recovered_from": "issue"}]}))
+    before = len(pd.read_parquet(live_predictions_path(settings)))
+    assert import_live_rows(settings, rec) == (2, 0)
+    assert import_live_rows(settings, rec) == (0, 2)
+    live = pd.read_parquet(live_predictions_path(settings))
+    assert len(live) == before + 2 and bool(live["recovered"].fillna(False).astype(bool).sum() == 2)
+    sc = scorecard.build_scorecard(settings, now=NOW)
+    row = [r for r in sc["rows"] if r["event_id"] == "ORCL:2026-06" and r["decision"] == "post_30m"]
+    assert len(row) == 1 and row[0]["status"] == "scored" and row[0]["forced_hit"] is False  # r_24h -0.03: LONG wrong
+    assert sc["excluded"]["duplicate"] == 1
+    result = runner.invoke(app, ["live-import", str(rec)], env={"FREEDOM_DATA_DIR": str(settings.data_dir),
+                                                                 "FREEDOM_REPORTS_DIR": str(settings.reports_dir)})
+    assert result.exit_code == 0 and "0 row(s) added, 2 already present" in result.output

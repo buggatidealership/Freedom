@@ -1,0 +1,33 @@
+{
+  "note": "Live rows restored from the harness's own posted cards (issue #1) after the artifact chain lost the parquet rows: the freedom-live restore failed with 'file exists' in every run between 2026-09-08 and 2026-09-12. Values are the card's printed precision. The second post_30m row (20:40:45) was a duplicate posted by an overlapping run; the scorecard keeps the earlier one.",
+  "rows": [
+    {"event_id": "ORCL:2026-08", "underlying": "ORCL", "market": "xyz:ORCL", "report_date_ny": "2026-09-10", "decision_time": "pre_10m",
+     "as_of": "2026-09-10T19:55:00Z", "run_at": "2026-09-10T19:55:00Z", "posted_at": "2026-09-10T19:55:04Z",
+     "replay": false, "off_schedule": false, "t0_used": "2026-09-10T20:05:00Z", "t0_source_live": "expected_manual", "expected_t0": "2026-09-10T20:05:00Z",
+     "schedule_note": "on schedule; expected_t0 16:05 New York from events table: manual",
+     "model_id": "pre_10m/lightgbm@a67ce2c4", "model_name": "lightgbm", "p_up": 0.4536, "r_hat": -0.0063, "r_lo": -0.1205, "r_hi": 0.1523, "magnitude_hat": 0.0063,
+     "call": "NO TRADE", "no_trade_band": 0.10, "forced_call": "SHORT",
+     "recovered_from": "https://github.com/buggatidealership/Freedom/issues/1#issuecomment-5624597929"},
+    {"event_id": "ORCL:2026-08", "underlying": "ORCL", "market": "xyz:ORCL", "report_date_ny": "2026-09-10", "decision_time": "post_15m",
+     "as_of": "2026-09-10T20:25:00Z", "run_at": "2026-09-10T20:25:00Z", "posted_at": "2026-09-10T20:25:03Z",
+     "replay": false, "off_schedule": false, "t0_used": "2026-09-10T20:10:00Z", "t0_source_live": "detected", "t0_live": "2026-09-10T20:10:00Z",
+     "schedule_note": "on schedule",
+     "model_id": "post_15m/lightgbm@a67ce2c4", "model_name": "lightgbm", "p_up": 0.6598, "r_hat": 0.0033, "r_lo": -0.0915, "r_hi": 0.1118, "magnitude_hat": 0.0033,
+     "call": "LONG", "no_trade_band": 0.10, "forced_call": "LONG",
+     "recovered_from": "https://github.com/buggatidealership/Freedom/issues/1#issuecomment-5624959816"},
+    {"event_id": "ORCL:2026-08", "underlying": "ORCL", "market": "xyz:ORCL", "report_date_ny": "2026-09-10", "decision_time": "post_30m",
+     "as_of": "2026-09-10T20:40:00Z", "run_at": "2026-09-10T20:40:00Z", "posted_at": "2026-09-10T20:40:03Z",
+     "replay": false, "off_schedule": false, "t0_used": "2026-09-10T20:10:00Z", "t0_source_live": "detected", "t0_live": "2026-09-10T20:10:00Z",
+     "schedule_note": "on schedule",
+     "model_id": "post_30m/lightgbm@a67ce2c4", "model_name": "lightgbm", "p_up": 0.7145, "r_hat": 0.0164, "r_lo": -0.0693, "r_hi": 0.1287, "magnitude_hat": 0.0164,
+     "call": "LONG", "no_trade_band": 0.10, "forced_call": "LONG",
+     "recovered_from": "https://github.com/buggatidealership/Freedom/issues/1#issuecomment-5625136774"},
+    {"event_id": "ORCL:2026-08", "underlying": "ORCL", "market": "xyz:ORCL", "report_date_ny": "2026-09-10", "decision_time": "post_30m",
+     "as_of": "2026-09-10T20:40:00Z", "run_at": "2026-09-10T20:40:00Z", "posted_at": "2026-09-10T20:40:45Z",
+     "replay": false, "off_schedule": false, "t0_used": "2026-09-10T20:10:00Z", "t0_source_live": "detected", "t0_live": "2026-09-10T20:10:00Z",
+     "schedule_note": "on schedule; duplicate of the 20:40:03 card, posted by an overlapping run",
+     "model_id": "post_30m/lightgbm@4f49d37e", "model_name": "lightgbm", "p_up": 0.6551, "r_hat": 0.0413, "r_lo": -0.0477, "r_hi": 0.1531, "magnitude_hat": 0.0413,
+     "call": "LONG", "no_trade_band": 0.10, "forced_call": "LONG",
+     "recovered_from": "https://github.com/buggatidealership/Freedom/issues/1#issuecomment-5625144646"}
+  ]
+}

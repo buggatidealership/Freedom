@@ -50,7 +50,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # on top: the freedom-cards job's data/live_predictions.parquet (and reports/cards) travel
         # into the data artifact, where `freedom evaluate --live` and the next restore find them
-        run: gh run download -n freedom-live -D . -R "${{ github.repository }}" || echo "no live artifact yet"
+        # into a scratch dir first: gh refuses to extract over an existing file, and the data
+        # artifact already carries an older copy of data/live_predictions.parquet
+        run: |
+          rm -rf "$RUNNER_TEMP/live"
+          if gh run download -n freedom-live -D "$RUNNER_TEMP/live" -R "${{ github.repository }}"; then
+            cp -a "$RUNNER_TEMP/live/." . && echo "restored $(find "$RUNNER_TEMP/live" -type f | wc -l) live file(s)"
+          else
+            echo "no live artifact yet"
+          fi
+      - name: Import recovered live rows (cards whose parquet row was lost; no-op when present)
+        run: uv run freedom live-import configs/live_recovery.json
       - name: Universe
         run: uv run freedom universe
       - name: Archive candles, funding, context, consensus

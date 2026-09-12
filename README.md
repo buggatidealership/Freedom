@@ -84,6 +84,11 @@ Every live card is a falsifiable call: the row records `p_up`, the banded call a
 them against the realised 24 h return once the daily build has measured it, forced pick on every
 call and banded call on the traded ones, with Wilson 90 % intervals, and writes
 `reports/scorecard.md`; the data job posts it on the Cards issue whenever new outcomes were graded.
+One row per event and decision is counted: when two overlapping card runs record the same card, the
+earlier run stands and the later one is reported as a duplicate. A card whose parquet row was lost
+(the Oracle cards of 2026-09-10, dropped by a failed artifact restore) is restored from the posted
+comment through `configs/live_recovery.json`; `freedom live-import` appends such rows once and both
+jobs run it after restoring the live artifact.
 
 SEC EDGAR answers GitHub-hosted runners with HTTP 403 (measured 2026-09-07), so the data job
 would never see an 8-K acceptance time. `freedom sec-bundle`, run where EDGAR is reachable, writes

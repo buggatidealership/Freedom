@@ -508,6 +508,26 @@ def sec_bundle() -> None:
                "cik map tickers": nt, "cik map": cp}, title="freedom sec-bundle")
 
 
+# ---- live-import --------------------------------------------------------------------------------------
+@app.command("live-import")
+def live_import(path: str = typer.Argument("configs/live_recovery.json", help="Recovery file: {\"rows\": [...]}")) -> None:
+    """Append recovered live rows (cards whose parquet row was lost) to data/live_predictions.parquet;
+    rows already present are skipped, so the command is safe to run on every job."""
+    from pathlib import Path as _Path
+
+    from . import live as live_mod
+
+    s = get_settings()
+    src = _Path(path)
+    if not src.exists():
+        console.print(f"live-import: {src} not found; nothing to import", markup=False)
+        return
+    with _guard():
+        added, skipped = live_mod.import_live_rows(s, src)
+    console.print(f"live-import: {added} row(s) added, {skipped} already present -> {live_mod.live_predictions_path(s)}",
+                  markup=False)
+
+
 # ---- score --------------------------------------------------------------------------------------------
 @app.command()
 def score() -> None:
