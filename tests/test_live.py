@@ -244,6 +244,47 @@ def test_forming_candle_never_reaches_detector_features_or_lags(world):
     assert live.closed_bars(_bars("xyz:NVDA", now, n=1), now) is None  # nothing closed yet -> None, not an empty frame
 
 
+def test_post_detector_ignores_bars_before_a_pinned_release(world):
+    """A release pinned by the issuer's clock gates the detector to DETECTION_WINDOW before it; a
+    calendar-flag expectation leaves the whole report day in play."""
+    s = world["settings"]
+    now = T0_LIVE + pd.Timedelta(minutes=31)
+    live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now), sec=FakeSEC(),
+                       append=False)
+    assert "not_before" not in world["detector_calls"][-1][2]  # fixture: median 8-K clock -> no gate
+    ev = world["events"].assign(**{E.t0: to_utc("2026-08-26 20:15", assume_tz="UTC"), E.t0_source: "manual"})
+    ev.to_parquet(s.events_path, index=False)
+    res = live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now),
+                             sec=FakeSEC(), append=False)
+    assert world["detector_calls"][-1][2]["not_before"] == to_utc("2026-08-26 20:00", assume_tz="UTC")
+    assert "bars before 16:00 New York ignored (release pinned at 16:15 by events table: manual" in res["row"]["schedule_note"]
+    assert res["row"]["off_schedule"] is False and res["row"]["t0_live"] == T0_LIVE
+
+
+def test_failed_live_exchange_call_keeps_the_archived_perp_bars(world):
+    """An exchange outage during a retry must not switch a post card to the equity proxy."""
+    from freedom.data.archive import candle_path, write_parquet_atomic
+
+    s = world["settings"]
+    event = world["events"].iloc[0]
+    now = T0_LIVE + pd.Timedelta(minutes=31)
+    archived_end = now - pd.Timedelta(hours=6)
+
+    class RaisingHL:
+        def candles(self, *a, **kw):
+            raise RuntimeError("simulated exchange outage")
+
+    path = candle_path(s, "xyz:NVDA", "1m")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet_atomic(_bars("xyz:NVDA", archived_end), path)
+    fmp = FakeFMP(now)
+    bars, source = live.live_bars(s, event, hl=RaisingHL(), fmp=fmp, start=now - pd.Timedelta(days=15), end=now)
+    assert source == "hyperliquid" and bars[C.t_end].max() == archived_end + pd.Timedelta(minutes=1) and fmp.calls == []
+    path.unlink()  # no archive either: the equity proxy remains the fallback
+    bars, source = live.live_bars(s, event, hl=RaisingHL(), fmp=fmp, start=now - pd.Timedelta(days=15), end=now)
+    assert source == "fmp" and fmp.calls == [("intraday", "NVDA")]
+
+
 def test_post_without_a_detected_release_raises(world, monkeypatch):
     s = world["settings"]
     monkeypatch.setattr(events_mod, "detect_release_live", lambda bars, day, **kw: None)

@@ -241,14 +241,13 @@ def ny_day_start_utc(day: pd.Timestamp) -> pd.Timestamp:
     return to_utc(pd.Timestamp(day).normalize(), assume_tz=NY)
 
 
-def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, decision: str,
-                 now: pd.Timestamp) -> Schedule:
-    """The pre-release schedule: expected_t0 through events.expected_t0_for (manual override >
-    median 8-K clock over acceptances <= now > the issuer's release clock from
-    configs/release_clock_overrides.yaml > table calendar flag > the row's AMC/BMO class),
-    unless the row came from the upcoming calendar, whose expected_t0 already went through the
-    same chain with the Nasdaq flag."""
-    offset = DECISION_TIMES[decision]
+def expected_release(settings: Settings, event: pd.Series, events: pd.DataFrame | None,
+                     now: pd.Timestamp) -> tuple[pd.Timestamp, str, str]:
+    """(expected_t0 UTC, provenance text, live stratum key): the expected release instant through
+    events.expected_t0_for (manual override > median 8-K clock over acceptances <= now > the
+    issuer's release clock from configs/release_clock_overrides.yaml > table calendar flag > the
+    row's AMC/BMO class), unless the row came from the upcoming calendar, whose expected_t0
+    already went through the same chain with the Nasdaq flag."""
     day = report_day(event)
     row_t0 = event.get("expected_t0")
     if row_t0 is not None and not pd.isna(row_t0):
@@ -262,7 +261,14 @@ def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, dec
                                                          before=now, timing=timing,
                                                          issuer_clock=events_mod.release_clock_for(settings, underlying))
         expected_t0 = to_utc(expected_t0, assume_tz=UTC)
-    source = expected_t0_source_key(detail)
+    return expected_t0, detail, expected_t0_source_key(detail)
+
+
+def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, decision: str,
+                 now: pd.Timestamp) -> Schedule:
+    """The pre-release schedule: as_of = expected_t0 + offset (see expected_release)."""
+    offset = DECISION_TIMES[decision]
+    expected_t0, detail, source = expected_release(settings, event, events, now)
     hhmm = to_ny(expected_t0).strftime("%H:%M")
     as_of = expected_t0 + pd.Timedelta(minutes=offset)
     if now > expected_t0:
@@ -275,17 +281,40 @@ def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, dec
     return Schedule(decision, offset, as_of, expected_t0, source, off, note)
 
 
+# Expectation sources verified against the issuer itself: the release instant is known to within
+# minutes, so bars long before it cannot be the release.
+PINNED_T0_SOURCES = frozenset({"expected_manual", "expected_issuer_clock"})
+
+
 def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.Timestamp,
-                  bars: pd.DataFrame | None) -> Schedule:
+                  bars: pd.DataFrame | None, events: pd.DataFrame | None = None) -> Schedule:
+    """The post-release schedule: t0_live from the live detector, as_of = t0_live + k.
+
+    When the expected release is pinned by the issuer's own clock (a manual override or
+    configs/release_clock_overrides.yaml, PINNED_T0_SOURCES), bars starting more than
+    events.DETECTION_WINDOW before it are not candidates: a perp trades around the clock, and one
+    stray >= 1 % print hours before the release would otherwise become t0_live and put every post
+    card of the day permanently off schedule (para:CIEN 2026-09-03 replayed: 03:45 ET for a
+    07:00 ET release). A median 8-K clock or a calendar flag can be hours wrong (GME 2026-09-08),
+    so there the whole report day stays in play and a wrong schedule surfaces as an off-schedule
+    row rather than as a plausible card."""
     k = DECISION_TIMES[decision]
     day = report_day(event)
     if bars is None or len(bars) == 0:
         raise ReleaseNotDetected(f"no 1-minute bars for {event.get(E.market) or event[E.underlying]} on "
                                  f"{day.date()}; cannot detect the release")
-    t0_live = events_mod.detect_release_live(bars, day, now=now)
+    gate: dict = {}
+    gate_note = ""
+    expected_t0, detail, source = expected_release(settings, event, events, now)
+    if source in PINNED_T0_SOURCES:
+        not_before = expected_t0 - events_mod.DETECTION_WINDOW
+        gate = {"not_before": not_before}
+        gate_note = (f"; bars before {to_ny(not_before).strftime('%H:%M')} New York ignored "
+                     f"(release pinned at {to_ny(expected_t0).strftime('%H:%M')} by {detail})")
+    t0_live = events_mod.detect_release_live(bars, day, now=now, **gate)
     if t0_live is None:
         raise ReleaseNotDetected(f"no release detected yet for {event[E.event_id]} on {day.date()} "
-                                 f"(bars up to {bars[C.t_end].max()})")
+                                 f"(bars up to {bars[C.t_end].max()}){gate_note}")
     t0_live = to_utc(t0_live)
     as_of = t0_live + pd.Timedelta(minutes=k)
     elapsed = now - t0_live
@@ -295,7 +324,7 @@ def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.T
         off, note = False, "on schedule"
     else:
         off, note = True, (f"now - t0_live = {elapsed} is outside [{lo}, {hi}]; not tradable at {decision}")
-    return Schedule(decision, k, as_of, t0_live, "detected", off, note)
+    return Schedule(decision, k, as_of, t0_live, "detected", off, note + gate_note)
 
 
 # ---- inputs -------------------------------------------------------------------------------------------
@@ -314,7 +343,17 @@ def perp_bars(settings: Settings, hl, market: str, start: pd.Timestamp, end: pd.
             parts.append(archived)
     except FileNotFoundError:
         pass
-    live = hl.candles(market, interval, start, end) if hl is not None else None
+    try:
+        live = hl.candles(market, interval, start, end) if hl is not None else None
+    except Exception as exc:
+        if not parts:
+            raise
+        # The archive still describes the perp. The equity proxy is another instrument with
+        # another detection regime (BB pre-market: stale >= 1 % prints hours before the release),
+        # so a post card must wait for the perp rather than switch instruments mid-retry.
+        log.warning("live Hyperliquid candles unavailable for %s (%s); using the archived bars to %s",
+                    market, exc, pd.to_datetime(parts[0][C.t_end], utc=True).max())
+        live = None
     if live is not None and len(live):
         parts.append(live)
     return _concat_bars(parts) if parts else None
@@ -340,13 +379,13 @@ def closed_bars(bars: pd.DataFrame | None, now: pd.Timestamp) -> pd.DataFrame | 
 def live_bars(settings: Settings, event: pd.Series, *, hl, fmp, start: pd.Timestamp,
               end: pd.Timestamp) -> tuple[pd.DataFrame | None, str | None]:
     """(1-minute bars for the event's instrument closed at `end`, source) — the perp when the
-    market has candles, else the underlying's FMP extended-hours bars; (None, None) when
-    neither has a closed bar."""
+    market has candles (archived or live; a failed live call falls back to the archive), else the
+    underlying's FMP extended-hours bars; (None, None) when neither has a closed bar."""
     market = event.get(E.market)
     if isinstance(market, str) and market:
         try:
             b = closed_bars(perp_bars(settings, hl, market, start, end), end)
-        except Exception as exc:  # the FMP proxy is the fallback, not a crash
+        except Exception as exc:  # no archive and no live bars: the FMP proxy is the fallback, not a crash
             log.warning("Hyperliquid bars unavailable for %s: %s", market, exc)
             b = None
         if b is not None:
@@ -563,7 +602,7 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
         schedule = pre_schedule(settings, event, events, decision, now_ts)
         t0_actual, sec_lag = None, float("nan")
     else:
-        schedule = post_schedule(settings, event, decision, now_ts, bars)
+        schedule = post_schedule(settings, event, decision, now_ts, bars, events=events)
         sec = sec if sec is not None else _sec_or_none(settings)
         t0_actual, sec_lag = sec_backfill(sec, event, day, now_ts)
         sources["sec"] = not math.isnan(sec_lag)

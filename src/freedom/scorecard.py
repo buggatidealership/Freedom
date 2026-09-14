@@ -63,20 +63,37 @@ def _bool(v) -> bool:
     return not (v is None or (isinstance(v, float) and math.isnan(v))) and bool(v)
 
 
-def dedupe_live_rows(live: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """One live row per (event, decision): the earliest run wins (run_at, then posted_at, then file
-    order). Two overlapping card runs once produced the same post_30m card twice (ORCL 2026-09-10);
-    the later one is a duplicate of the record, not a second call."""
+def dedupe_live_rows(live: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
+    """One live row per (event, decision) -> (kept, n_duplicates, n_superseded).
+
+    An on-schedule row outranks an off-schedule one. When the release is detected after the
+    scheduled instant, `freedom cards` records the first attempt off schedule and re-runs the
+    card at its true as_of (t0_live + k); that re-run is the card (ORCL 2026-09-10: both post
+    cards, the release detected five minutes after the pinned wire time). Keeping the earliest
+    run there would grade nothing: the attempt is excluded as off schedule and the card dropped
+    as its duplicate. A dropped attempt is `superseded` and counts as off schedule.
+    Among rows of the same standing the earliest run wins (run_at, then posted_at, then file
+    order): two overlapping card runs once produced the same post_30m card twice (ORCL
+    2026-09-10); the later one is a duplicate of the record, not a second call."""
     if len(live) == 0 or E.event_id not in live.columns or D.decision_time not in live.columns:
-        return live, 0
+        return live, 0, 0
     order = live.copy()
     order["_i"] = range(len(order))
+    order["_off"] = (order["off_schedule"].map(_bool).astype(bool) if "off_schedule" in order.columns
+                     else pd.Series(False, index=order.index))
     for col in ("run_at", "posted_at"):
         order["_" + col] = pd.to_datetime(order[col], utc=True, errors="coerce") if col in order.columns else pd.NaT
-    order = order.sort_values(["_run_at", "_posted_at", "_i"], na_position="last", kind="mergesort")
-    keep = ~order.duplicated([E.event_id, D.decision_time], keep="first")
-    kept = order[keep].sort_values("_i").drop(columns=["_i", "_run_at", "_posted_at"])
-    return kept, int((~keep).sum())
+    order = order.sort_values(["_off", "_run_at", "_posted_at", "_i"], na_position="last", kind="mergesort")
+    key = [E.event_id, D.decision_time]
+    keep = ~order.duplicated(key, keep="first")
+    kept = order[keep]
+    kept_off = {(str(e), str(d)): bool(o) for e, d, o in zip(kept[E.event_id], kept[D.decision_time], kept["_off"],
+                                                            strict=True)}
+    dropped = order[~keep]
+    n_superseded = sum(bool(o) and not kept_off[(str(e), str(d))]
+                       for e, d, o in zip(dropped[E.event_id], dropped[D.decision_time], dropped["_off"], strict=True))
+    kept = kept.sort_values("_i").drop(columns=["_i", "_off", "_run_at", "_posted_at"])
+    return kept, int(len(dropped) - n_superseded), int(n_superseded)
 
 
 def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> dict:
@@ -92,8 +109,9 @@ def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> d
                  "by_decision": {}, "rows": [], "scored_total": 0, "pending_total": 0, "unlabelled_total": 0}
     if live is None or len(live) == 0:
         return out
-    live, n_dup = dedupe_live_rows(live)
+    live, n_dup, n_superseded = dedupe_live_rows(live)
     out["excluded"]["duplicate"] = n_dup
+    out["excluded"]["off_schedule"] = n_superseded  # attempts replaced by an on-schedule re-run
     truth = {}
     if targets is not None and len(targets):
         for _, t in targets.iterrows():

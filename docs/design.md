@@ -355,7 +355,17 @@ builds features `as_of` a well-defined instant and loads the trained model for `
 * **post_k**: `t0_live` comes from the live detector on 1-minute perp or FMP bars (the same
   code as the historical detector); the 8-K acceptance is back-filled afterwards and the row is
   scored in the `detected` stratum. `predict` marks the row `off_schedule` (and does not trade)
-  when `now − t0_live` is outside `[k − 1 min, k + max_fill_lag]`.
+  when `now − t0_live` is outside `[k − 1 min, k + max_fill_lag]`. When the expected release is
+  pinned by the issuer's own clock (`expected_manual`, `expected_issuer_clock`) the detector
+  ignores bars starting more than 15 minutes before it: a perp trades around the clock, and
+  one stray ≥ 1 % print hours before the release would otherwise become `t0_live` and put every
+  post card of the day off schedule (para:CIEN 2026-09-03 replayed: 03:45 ET for a 07:00 ET
+  release). Under a median 8-K clock or a calendar flag, which can be hours wrong, the whole
+  report day stays in play so that a wrong schedule surfaces as an off-schedule row rather than
+  as a plausible card. The perp's bars are the archived ones plus a live pull; when the live
+  call fails the archived bars are used (never the equity proxy, whose pre-market prints are a
+  different regime), and the FMP extended-hours bars remain the fallback only for an event
+  without any perp bar.
 * Every live row records `model_id`, the data sources used, `input_lag_s` per source (FMP bar
   availability, Hyperliquid candle, SEC submissions), and is appended to
   `data/live_predictions.parquet`; `freedom evaluate --live` later scores those rows against

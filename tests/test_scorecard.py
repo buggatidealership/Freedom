@@ -124,6 +124,27 @@ def test_duplicate_rows_of_one_card_are_counted_once(settings):
     assert "1 duplicates of an earlier run" in scorecard.scorecard_markdown(sc)
 
 
+def test_off_schedule_attempt_is_superseded_by_the_on_schedule_rerun(settings):
+    """A release detected after the scheduled instant: `freedom cards` records the first attempt
+    off schedule and re-runs the card at its true as_of. The re-run is graded; the attempt counts
+    as off schedule, not as a duplicate (ORCL 2026-09-10, both post cards)."""
+    _world(settings)
+    live = pd.read_parquet(live_predictions_path(settings))
+    attempt = {**_live("GME:2026-06", "post_30m", 0.80, off_schedule=True, call="LONG", forced="LONG"),
+               D.as_of: pd.Timestamp("2026-09-08 20:35", tz="UTC"), "run_at": pd.Timestamp("2026-09-08 20:35:01", tz="UTC")}
+    rerun = {**_live("GME:2026-06", "post_30m", 0.45), D.as_of: pd.Timestamp("2026-09-08 20:37", tz="UTC"),
+             "run_at": pd.Timestamp("2026-09-08 20:37:01", tz="UTC")}
+    live = live[~((live[E.event_id] == "GME:2026-06") & (live[D.decision_time] == "post_30m"))]
+    pd.concat([live, pd.DataFrame([attempt, rerun])], ignore_index=True).to_parquet(live_predictions_path(settings), index=False)
+    sc = scorecard.build_scorecard(settings, now=NOW)
+    rows = [r for r in sc["rows"] if r["event_id"] == "GME:2026-06" and r["decision"] == "post_30m"]
+    assert len(rows) == 1 and rows[0]["p_up"] == 0.45 and rows[0]["status"] == "scored"
+    assert sc["excluded"]["duplicate"] == 0 and sc["excluded"]["off_schedule"] == 2  # MU's pre card + the attempt
+    assert sc["by_decision"]["post_30m"]["counted"] == 1
+    kept, n_dup, n_sup = scorecard.dedupe_live_rows(pd.DataFrame([rerun, attempt, {**rerun, "p_up": 0.46}]))
+    assert (n_dup, n_sup) == (1, 1) and kept["p_up"].tolist() == [0.45]
+
+
 def test_live_import_is_idempotent_and_grades(settings, tmp_path):
     """Rows recovered from the posted cards join the record once; a second import adds nothing."""
     from freedom.live import import_live_rows

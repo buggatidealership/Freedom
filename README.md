@@ -85,7 +85,9 @@ them against the realised 24 h return once the daily build has measured it, forc
 call and banded call on the traded ones, with Wilson 90 % intervals, and writes
 `reports/scorecard.md`; the data job posts it on the Cards issue whenever new outcomes were graded.
 One row per event and decision is counted: when two overlapping card runs record the same card, the
-earlier run stands and the later one is reported as a duplicate. A card whose parquet row was lost
+earlier run stands and the later one is reported as a duplicate; when the release was detected after
+the scheduled instant, the first attempt (recorded off schedule) is replaced by the re-run at the
+true `as_of` and counted as off schedule. A card whose parquet row was lost
 (the Oracle cards of 2026-09-10, dropped by a failed artifact restore) is restored from the posted
 comment through `configs/live_recovery.json`; `freedom live-import` appends such rows once and both
 jobs run it after restoring the live artifact.
