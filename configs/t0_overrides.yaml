@@ -21,5 +21,24 @@ TSM:2026-10-15: 2026-10-15T06:00:00Z
 # events: detections at 16:05 moved t0 earlier by 422-578 s; acceptances 16:12-16:14). The card
 # scheduler takes the median 8-K acceptance clock (16:13), which would put the pre-release card at
 # 16:03 ET, after the close and inside the wire window. Pin the wire time. Date issuer-confirmed
-# (Oracle investor relations, Q1 FY2027 on Sep 10 after the close). Remove after Sep 11 2026.
+# (Oracle investor relations, Q1 FY2027 on Sep 10 after the close). Kept after the event: as
+# `manual` it also sets the resolved event's t0, so the scorecard's reference price is the wire
+# time rather than the 8-K acceptance eight minutes into the reaction.
 ORCL:2026-09-10: 2026-09-10T20:05:00Z
+# BlackBerry alternates morning and evening releases (8-K acceptances 2024-2026: 17:10-17:20 ET
+# for six events, 07:10-07:25 ET for four), so the scheduler's median 8-K clock (17:11 ET) is a
+# midpoint of two habits and matches neither. BlackBerry announced fiscal Q2 2027 results for
+# Thursday Sep 24 2026 "at 8:00 a.m. ET" (ACCESS Newswire, Waterloo, Sep 10 2026); its morning
+# results actually hit the wire an hour earlier: the Q1 FY2027 release of Jun 25 2026 was
+# published at 06:58 ET and the 8-K accepted at 07:12 ET, and Sep 25 2025 ("8:00 a.m. ET" too)
+# was accepted at 07:12 ET. Pin the wire time: 06:58 ET = 10:58 UTC (EDT). Without this the
+# pre-release card would have been computed ten hours after the release. Finnhub does not carry
+# BB; FMP has the date right. Remove after Sep 25 2026.
+BB:2026-09-24: 2026-09-24T10:58:00Z
+# Costco publishes every results and monthly-sales release at 16:15 ET (Business Wire, checked
+# Mar-Sep 2026) and files the 8-K one to nine minutes later (acceptances 16:16-16:24 ET), so the
+# median 8-K clock (16:20) would put the pre-release card at 16:10 ET, five minutes before the
+# wire, and the graded reference price a few minutes into the reaction. Date issuer-confirmed:
+# "Q4 2026 Earnings Call, September 24, 2026 02:00 PM PT" (investor.costco.com events). Pin the
+# wire time: 16:15 ET = 20:15 UTC (EDT). Remove after Sep 25 2026.
+COST:2026-09-24: 2026-09-24T20:15:00Z

@@ -10,9 +10,15 @@ from freedom.cli import app
 from freedom.schemas import U
 from tests.fakes import NVDA, FakeHyperliquidInfo
 
+# The archiver requests the server's 5000-bar horizon ending now; the 5m fixture (Aug 26-27 2026)
+# left that horizon on 2026-09-14, so the clock is frozen just after the fixture windows, as in
+# tests/test_data_archive.py.
+NOW = pd.Timestamp("2026-08-29 00:30", tz="UTC")
+
 
 @pytest.fixture
 def fake(monkeypatch) -> FakeHyperliquidInfo:
+    monkeypatch.setattr("freedom.data.archive.utcnow", lambda: NOW)
     return FakeHyperliquidInfo().install(monkeypatch)
 
 
