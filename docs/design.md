@@ -356,7 +356,8 @@ builds features `as_of` a well-defined instant and loads the trained model for `
   code as the historical detector); the 8-K acceptance is back-filled afterwards and the row is
   scored in the `detected` stratum. `predict` marks the row `off_schedule` (and does not trade)
   when `now − t0_live` is outside `[k − 1 min, k + max_fill_lag]`. When the expected release is
-  pinned by the issuer's own clock (`expected_manual`, `expected_issuer_clock`) the detector
+  pinned by the issuer's own clock (`expected_manual`; `expected_issuer_clock` only for an issuer
+  without 8-K history, since the median 8-K clock outranks the release-clock file) the detector
   ignores bars starting more than 15 minutes before it: a perp trades around the clock, and
   one stray ≥ 1 % print hours before the release would otherwise become `t0_live` and put every
   post card of the day off schedule (para:CIEN 2026-09-03 replayed: 03:45 ET for a 07:00 ET
@@ -368,10 +369,10 @@ builds features `as_of` a well-defined instant and loads the trained model for `
   without any perp bar.
 * Every live row records `model_id`, the data sources used, `input_lag_s` per source (FMP bar
   availability, Hyperliquid candle, SEC submissions), and is appended to
-  `data/live_predictions.parquet`; `freedom evaluate --live` later scores those rows against
+  `data/live_predictions.parquet`; `freedom score` later grades those rows against
   realised targets and compares live and backtest decision instants. `run_at` is always the
   wall clock; a run with `--now` (a replay) records the override as `now_override` and sets
-  `replay = True`, and `evaluate --live` keeps replays out of the headline live score as a
+  `replay = True`, and `freedom score` keeps replays out of the headline live score as a
   separate stratum. The features are built from the same loader inputs as the dataset
   (funding, perp candles, leverage, sector and VIX bars, same-day count), so the model never
   scores a live row whose whole loader block is missing. The one-off measurement of input

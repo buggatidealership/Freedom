@@ -65,7 +65,7 @@ def test_scorecard_grades_only_live_on_schedule_cards(settings):
     _world(settings)
     sc = scorecard.build_scorecard(settings, now=NOW)
     assert sc["n_live_rows"] == 9
-    assert sc["excluded"] == {"replay": 1, "off_schedule": 1, "no_probability": 0, "contaminated": 1, "premature": 1,
+    assert sc["excluded"] == {"replay": 1, "off_schedule": 1, "no_probability": 0, "contaminated": 1, "premature": 1, "late": 0,
                               "duplicate": 0}
     order = {(r["event_id"], r["decision"]): r for r in sc["rows"] if r["status"] in ("contaminated", "premature")}
     assert order[("AMD:2026-06", "pre_10m")]["margin_min"] == 8.0 and order[("AMD:2026-06", "post_15m")]["margin_min"] == -12.0
@@ -141,8 +141,51 @@ def test_off_schedule_attempt_is_superseded_by_the_on_schedule_rerun(settings):
     assert len(rows) == 1 and rows[0]["p_up"] == 0.45 and rows[0]["status"] == "scored"
     assert sc["excluded"]["duplicate"] == 0 and sc["excluded"]["off_schedule"] == 2  # MU's pre card + the attempt
     assert sc["by_decision"]["post_30m"]["counted"] == 1
-    kept, n_dup, n_sup = scorecard.dedupe_live_rows(pd.DataFrame([rerun, attempt, {**rerun, "p_up": 0.46}]))
-    assert (n_dup, n_sup) == (1, 1) and kept["p_up"].tolist() == [0.45]
+    kept, dropped = scorecard.dedupe_live_rows(pd.DataFrame([rerun, attempt, {**rerun, "p_up": 0.46}]))
+    assert dropped == {"duplicate": 1, "off_schedule": 1, "replay": 0} and kept["p_up"].tolist() == [0.45]
+
+
+def test_replay_rows_never_displace_live_rows(settings):
+    """A `--now` replay appended to the record (append is the default) ranks below every live row:
+    it neither displaces the live card nor blocks it as a duplicate."""
+    _world(settings)
+    live = pd.read_parquet(live_predictions_path(settings))
+    replay = {**_live("ORCL:2026-06", "pre_10m", 0.90, replay=True, call="LONG", forced="LONG"),
+              "run_at": pd.Timestamp("2026-09-09 12:00", tz="UTC")}  # a dry run the day before
+    pd.concat([pd.DataFrame([replay]), live], ignore_index=True).to_parquet(live_predictions_path(settings), index=False)
+    sc = scorecard.build_scorecard(settings, now=NOW)
+    rows = [r for r in sc["rows"] if r["event_id"] == "ORCL:2026-06" and r["decision"] == "pre_10m"]
+    assert len(rows) == 1 and rows[0]["p_up"] == 0.30 and rows[0]["status"] == "scored"
+    assert sc["excluded"]["replay"] == 2 and sc["excluded"]["duplicate"] == 0
+
+
+def test_late_post_card_is_excluded(settings):
+    """A post card whose as_of is far later than the measured release plus its offset and fill lag
+    was made on a mistimed detection: excluded as late, not graded as a post_k card."""
+    _world(settings)
+    live = pd.read_parquet(live_predictions_path(settings))
+    late = {**_live("AMD:2026-06", "post_30m", 0.70, call="LONG", forced="LONG"),
+            D.as_of: pd.Timestamp("2026-09-09 21:00", tz="UTC")}  # measured t0 20:02: 58 min for a 30-minute card
+    pd.concat([live, pd.DataFrame([late])], ignore_index=True).to_parquet(live_predictions_path(settings), index=False)
+    sc = scorecard.build_scorecard(settings, now=NOW)
+    row = [r for r in sc["rows"] if r["event_id"] == "AMD:2026-06" and r["decision"] == "post_30m"]
+    assert len(row) == 1 and row[0]["status"] == "late" and row[0]["margin_min"] == 58.0
+    assert sc["excluded"]["late"] == 1 and "1 post cards made too long after it" in scorecard.scorecard_markdown(sc)
+
+
+def test_live_import_keeps_an_attempt_and_its_rerun_apart(settings, tmp_path):
+    """An off-schedule attempt and its on-schedule re-run share as_of and model; both import."""
+    from freedom.live import import_live_rows
+
+    _world(settings)
+    rec = tmp_path / "rec.json"
+    base = {"event_id": "BB:2026-08", "decision_time": "post_15m", "as_of": "2026-09-24T11:15:00Z",
+            "model_id": "post_15m/lightgbm@a", "p_up": 0.6, "call": "LONG", "forced_call": "LONG", "replay": False,
+            "recovered_from": "issue"}
+    rec.write_text(json.dumps({"rows": [{**base, "run_at": "2026-09-24T11:13:02Z", "off_schedule": True},
+                                        {**base, "run_at": "2026-09-24T11:15:01Z", "off_schedule": False}]}))
+    assert import_live_rows(settings, rec) == (2, 0)
+    assert import_live_rows(settings, rec) == (0, 2)
 
 
 def test_live_import_is_idempotent_and_grades(settings, tmp_path):

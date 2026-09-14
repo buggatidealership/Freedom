@@ -19,8 +19,8 @@ appends one row to data/live_predictions.parquet:
   archived plus live Hyperliquid perp candles when the market exists, else FMP extended-hours
   bars — and `as_of = t0_live + k`. The row is `off_schedule` (and must not be traded) when
   `now - t0_live` is outside [k - 1 min, k + max_fill_lag_minutes]. When the 8-K is already
-  on EDGAR its acceptance is recorded as `t0_actual` with `t0_lag_s`; otherwise
-  `freedom evaluate --live` back-fills it later.
+  on EDGAR its acceptance is recorded as `t0_actual` with `t0_lag_s`; otherwise the events
+  table carries it once `freedom events` resolves the 8-K.
 * only bars closed at `now` (t_end <= now) are used anywhere: the forming 1-minute candle the
   providers return is dropped before the detector, the features and the input lags see it.
 * the features see the same loader inputs the dataset was built from (features.loaders
@@ -31,7 +31,7 @@ appends one row to data/live_predictions.parquet:
   closed bar / filing each source served) and the feature values, so the live record can be
   scored and compared with the backtest's decision instants. `run_at` is the wall clock; a
   `--now` override is recorded as `now_override` with `replay = True`, and a replay is never a
-  live prediction (`freedom evaluate --live` reports it as its own stratum).
+  live prediction (`freedom score` excludes it).
 * an event is found in data/events.parquet by id, else in the upcoming calendar under the id
   `freedom upcoming` prints — the table's own id when the table has the row, otherwise
   `upcoming_event_id` (<underlying>:<calendar quarter before the report date>) — or under its
@@ -243,12 +243,21 @@ def ny_day_start_utc(day: pd.Timestamp) -> pd.Timestamp:
 
 def expected_release(settings: Settings, event: pd.Series, events: pd.DataFrame | None,
                      now: pd.Timestamp) -> tuple[pd.Timestamp, str, str]:
-    """(expected_t0 UTC, provenance text, live stratum key): the expected release instant through
-    events.expected_t0_for (manual override > median 8-K clock over acceptances <= now > the
-    issuer's release clock from configs/release_clock_overrides.yaml > table calendar flag > the
-    row's AMC/BMO class), unless the row came from the upcoming calendar, whose expected_t0
-    already went through the same chain with the Nasdaq flag."""
+    """(expected_t0 UTC, provenance text, live stratum key): a pin in configs/t0_overrides.yaml
+    (by event id or UNDERLYING:report date), else the expected release instant through
+    events.expected_t0_for (manual override on the table row > median 8-K clock over acceptances
+    <= now > the issuer's release clock from configs/release_clock_overrides.yaml > table calendar
+    flag > the row's AMC/BMO class), unless the row came from the upcoming calendar, whose
+    expected_t0 already went through the same chain with the Nasdaq flag."""
     day = report_day(event)
+    # configs/t0_overrides.yaml first, as `freedom upcoming` does: the pin must not wait for the
+    # daily `freedom events` rebuild to mark the table row manual (BB 2026-09-24: pinned six hours
+    # after the rebuild that the cards job would otherwise have read).
+    manual = events_mod._load_manual_overrides(settings)
+    keys = (str(event.get(E.event_id) or "").upper(), f"{str(event[E.underlying]).upper()}:{day.date().isoformat()}")
+    man = next((manual[k] for k in keys if k in manual), None)
+    if man is not None:
+        return man, events_mod.MANUAL_UPCOMING_SOURCE, "expected_manual"
     row_t0 = event.get("expected_t0")
     if row_t0 is not None and not pd.isna(row_t0):
         expected_t0 = to_utc(pd.Timestamp(row_t0), assume_tz=UTC)
@@ -282,16 +291,24 @@ def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, dec
 
 
 # Expectation sources verified against the issuer itself: the release instant is known to within
-# minutes, so bars long before it cannot be the release.
+# minutes, so bars long before it cannot be the release. (The issuer clock ranks below the median
+# 8-K clock in events.expected_t0_for, so it sets the expectation only for an issuer without 8-K
+# acceptances in the table: ASML, TSM.)
 PINNED_T0_SOURCES = frozenset({"expected_manual", "expected_issuer_clock"})
+
+
+def _clock(ts: pd.Timestamp) -> str:
+    ny = to_ny(ts)
+    return ny.strftime("%H:%M:%S" if ny.second else "%H:%M")
 
 
 def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.Timestamp,
                   bars: pd.DataFrame | None, events: pd.DataFrame | None = None) -> Schedule:
     """The post-release schedule: t0_live from the live detector, as_of = t0_live + k.
 
-    When the expected release is pinned by the issuer's own clock (a manual override or
-    configs/release_clock_overrides.yaml, PINNED_T0_SOURCES), bars starting more than
+    When the expected release is pinned by the issuer's own clock (a manual override, or the
+    issuer's documented release clock for an issuer without 8-K history; PINNED_T0_SOURCES),
+    bars starting more than
     events.DETECTION_WINDOW before it are not candidates: a perp trades around the clock, and one
     stray >= 1 % print hours before the release would otherwise become t0_live and put every post
     card of the day permanently off schedule (para:CIEN 2026-09-03 replayed: 03:45 ET for a
@@ -309,9 +326,14 @@ def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.T
     if source in PINNED_T0_SOURCES:
         not_before = expected_t0 - events_mod.DETECTION_WINDOW
         gate = {"not_before": not_before}
-        gate_note = (f"; bars before {to_ny(not_before).strftime('%H:%M')} New York ignored "
-                     f"(release pinned at {to_ny(expected_t0).strftime('%H:%M')} by {detail})")
+        gate_note = (f"; bars before {_clock(not_before)} New York ignored "
+                     f"(release pinned at {_clock(expected_t0)} by {detail})")
     t0_live = events_mod.detect_release_live(bars, day, now=now, **gate)
+    if gate and t0_live is not None:
+        # name what the gate hid, so a release that really came early is visible on the card
+        earlier = events_mod.detect_release_live(bars, day, now=now)
+        if earlier is not None and to_utc(earlier) < gate["not_before"]:
+            gate_note += f"; an earlier qualifying bar at {_clock(to_utc(earlier))} New York was ignored"
     if t0_live is None:
         raise ReleaseNotDetected(f"no release detected yet for {event[E.event_id]} on {day.date()} "
                                  f"(bars up to {bars[C.t_end].max()}){gate_note}")
@@ -334,8 +356,11 @@ def _concat_bars(parts: list[pd.DataFrame]) -> pd.DataFrame:
 
 
 def perp_bars(settings: Settings, hl, market: str, start: pd.Timestamp, end: pd.Timestamp,
-              interval: str = "1m") -> pd.DataFrame | None:
-    """Archived plus live candles for [start, end); None when neither has any."""
+              interval: str = "1m", *, archive_on_failure: bool = True) -> pd.DataFrame | None:
+    """Archived plus live candles for [start, end); None when neither has any. A failed live
+    call falls back to the archived bars when `archive_on_failure` (post cards: the detector
+    must stay on the perp) and raises otherwise (pre cards: the caller's fresh proxy beats bars
+    that may be half a day old)."""
     parts = []
     try:
         archived = load_archive(settings, market, interval, start, end)
@@ -346,7 +371,7 @@ def perp_bars(settings: Settings, hl, market: str, start: pd.Timestamp, end: pd.
     try:
         live = hl.candles(market, interval, start, end) if hl is not None else None
     except Exception as exc:
-        if not parts:
+        if not parts or not archive_on_failure:
             raise
         # The archive still describes the perp. The equity proxy is another instrument with
         # another detection regime (BB pre-market: stale >= 1 % prints hours before the release),
@@ -377,14 +402,15 @@ def closed_bars(bars: pd.DataFrame | None, now: pd.Timestamp) -> pd.DataFrame | 
 
 
 def live_bars(settings: Settings, event: pd.Series, *, hl, fmp, start: pd.Timestamp,
-              end: pd.Timestamp) -> tuple[pd.DataFrame | None, str | None]:
+              end: pd.Timestamp, archive_on_failure: bool = True) -> tuple[pd.DataFrame | None, str | None]:
     """(1-minute bars for the event's instrument closed at `end`, source) — the perp when the
-    market has candles (archived or live; a failed live call falls back to the archive), else the
-    underlying's FMP extended-hours bars; (None, None) when neither has a closed bar."""
+    market has candles (archived or live; a failed live call falls back to the archive when
+    `archive_on_failure`), else the underlying's FMP extended-hours bars; (None, None) when
+    neither has a closed bar."""
     market = event.get(E.market)
     if isinstance(market, str) and market:
         try:
-            b = closed_bars(perp_bars(settings, hl, market, start, end), end)
+            b = closed_bars(perp_bars(settings, hl, market, start, end, archive_on_failure=archive_on_failure), end)
         except Exception as exc:  # no archive and no live bars: the FMP proxy is the fallback, not a crash
             log.warning("Hyperliquid bars unavailable for %s: %s", market, exc)
             b = None
@@ -596,7 +622,8 @@ def predict_event(settings: Settings, *, event_id: str, decision: str, model_nam
     fmp = fmp if fmp is not None else fmp_client(settings)
     day = report_day(event)
     start = ny_day_start_utc(day - pd.Timedelta(days=BAR_LOOKBACK_DAYS))
-    bars, bar_source = live_bars(settings, event, hl=hl, fmp=fmp, start=start, end=now_ts)
+    bars, bar_source = live_bars(settings, event, hl=hl, fmp=fmp, start=start, end=now_ts,
+                                 archive_on_failure=DECISION_TIMES[decision] >= 0)
     sources = {"hyperliquid": bar_source == "hyperliquid", "fmp": bar_source == "fmp", "sec": False}
     if DECISION_TIMES[decision] < 0:
         schedule = pre_schedule(settings, event, events, decision, now_ts)
@@ -681,13 +708,21 @@ def append_live_prediction(settings: Settings, row: dict) -> Path:
     return path
 
 
-IMPORT_KEY = (E.event_id, D.decision_time, D.as_of, "model_id")
+IMPORT_KEY = (E.event_id, D.decision_time, D.as_of, "model_id", "off_schedule")
+
+
+def _flag(v) -> bool:
+    """A recorded boolean flag; missing/NaN/NA read as False."""
+    if v is None or v is pd.NA or (isinstance(v, float) and math.isnan(v)):
+        return False
+    return bool(v)
 
 
 def import_live_rows(settings: Settings, path: Path) -> tuple[int, int]:
     """Append the rows of a recovery file ({"rows": [...]}, ISO timestamps) to
     data/live_predictions.parquet unless a row with the same (event_id, decision_time, as_of,
-    model_id) is already there. Returns (added, skipped). The file exists for cards whose parquet
+    model_id, off_schedule) is already there (an off-schedule attempt and its on-schedule re-run
+    share as_of = t0_live + k). Returns (added, skipped). The file exists for cards whose parquet
     row was lost (the 2026-09-10 Oracle cards: the artifact chain dropped them, the issue comments
     kept them); every imported row carries recovered=True and recovered_from."""
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -702,9 +737,11 @@ def import_live_rows(settings: Settings, path: Path) -> tuple[int, int]:
     old = read_parquet_or_none(live_predictions_path(settings))
     if old is not None and len(old):
         old_as_of = pd.to_datetime(old[D.as_of], utc=True) if D.as_of in old.columns else pd.Series(pd.NaT, index=old.index)
-        seen = {(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(old_as_of.iloc[i])), str(r.get("model_id")))
+        seen = {(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(old_as_of.iloc[i])), str(r.get("model_id")),
+                 _flag(r.get("off_schedule")))
                 for i, (_, r) in enumerate(old.iterrows())}
-        mask = [(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(r[D.as_of])), str(r.get("model_id")))
+        mask = [(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(r[D.as_of])), str(r.get("model_id")),
+                 _flag(r.get("off_schedule")))
                 not in seen for _, r in new.iterrows()]
         new = new[mask]
     skipped = len(rows) - len(new)

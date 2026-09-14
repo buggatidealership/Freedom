@@ -256,7 +256,8 @@ def test_post_detector_ignores_bars_before_a_pinned_release(world):
     ev.to_parquet(s.events_path, index=False)
     res = live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now),
                              sec=FakeSEC(), append=False)
-    assert world["detector_calls"][-1][2]["not_before"] == to_utc("2026-08-26 20:00", assume_tz="UTC")
+    gated = [c for c in world["detector_calls"] if "not_before" in c[2]]  # the gate also runs an ungated check
+    assert gated[-1][2]["not_before"] == to_utc("2026-08-26 20:00", assume_tz="UTC")
     assert "bars before 16:00 New York ignored (release pinned at 16:15 by events table: manual" in res["row"]["schedule_note"]
     assert res["row"]["off_schedule"] is False and res["row"]["t0_live"] == T0_LIVE
 
@@ -280,9 +281,31 @@ def test_failed_live_exchange_call_keeps_the_archived_perp_bars(world):
     fmp = FakeFMP(now)
     bars, source = live.live_bars(s, event, hl=RaisingHL(), fmp=fmp, start=now - pd.Timedelta(days=15), end=now)
     assert source == "hyperliquid" and bars[C.t_end].max() == archived_end + pd.Timedelta(minutes=1) and fmp.calls == []
+    # a pre card takes the fresh proxy over archived bars that may be half a day old
+    bars, source = live.live_bars(s, event, hl=RaisingHL(), fmp=fmp, start=now - pd.Timedelta(days=15), end=now,
+                                  archive_on_failure=False)
+    assert source == "fmp" and fmp.calls == [("intraday", "NVDA")]
     path.unlink()  # no archive either: the equity proxy remains the fallback
     bars, source = live.live_bars(s, event, hl=RaisingHL(), fmp=fmp, start=now - pd.Timedelta(days=15), end=now)
-    assert source == "fmp" and fmp.calls == [("intraday", "NVDA")]
+    assert source == "fmp" and fmp.calls == [("intraday", "NVDA")] * 2
+
+
+def test_schedules_read_the_override_file_before_the_table(world):
+    """A pin in configs/t0_overrides.yaml sets the pre card's instant and the post gate even while
+    the table row is still a calendar flag (the daily rebuild has not marked it manual yet)."""
+    s = world["settings"]
+    (s.configs_dir / "t0_overrides.yaml").write_text("NVDA:2026-08-26: 2026-08-26T19:30:00Z\n")
+    now = to_utc("2026-08-26 19:00", assume_tz="UTC")
+    res = live.predict_event(s, event_id=EVENT, decision="pre_5m", now=now, hl=FakeHL(now), fmp=FakeFMP(now), append=False)
+    row = res["row"]
+    assert row["t0_used"] == to_utc("2026-08-26 19:30", assume_tz="UTC") and row["t0_source_live"] == "expected_manual"
+    assert row[D.as_of] == to_utc("2026-08-26 19:25", assume_tz="UTC")
+    assert "manual override (configs/t0_overrides.yaml)" in row["schedule_note"]
+    now = T0_LIVE + pd.Timedelta(minutes=31)
+    live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now), sec=FakeSEC(),
+                       append=False)
+    gated = [c for c in world["detector_calls"] if "not_before" in c[2]]
+    assert gated[-1][2]["not_before"] == to_utc("2026-08-26 19:15", assume_tz="UTC")
 
 
 def test_post_without_a_detected_release_raises(world, monkeypatch):

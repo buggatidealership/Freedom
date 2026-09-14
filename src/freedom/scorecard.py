@@ -30,6 +30,7 @@ import pandas as pd
 from .card import CALL_LONG, CALL_SHORT, call_for, forced_call_for
 from .config import Settings
 from .data.archive import read_parquet_or_none
+from .events import DETECTION_WINDOW
 from .live import live_predictions_path
 from .schemas import DECISION_TIMES, UTC, D, E, T, T0Source
 from .timeutil import to_utc
@@ -59,41 +60,63 @@ def _num(v) -> float:
     return f
 
 
+# A post card is `late` when as_of exceeds the measured release by more than k + max_fill_lag +
+# this slack: the detector locked onto a later reaction bar, so the row is not the post_k card it
+# claims to be (the 8-K acceptance lags the wire by minutes, never the other way, so this cannot
+# fire on a correctly timed card).
+LATE_SLACK = DETECTION_WINDOW
+
+
 def _bool(v) -> bool:
-    return not (v is None or (isinstance(v, float) and math.isnan(v))) and bool(v)
+    if v is None or v is pd.NA or (isinstance(v, float) and math.isnan(v)):
+        return False
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return bool(v)
 
 
-def dedupe_live_rows(live: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
-    """One live row per (event, decision) -> (kept, n_duplicates, n_superseded).
+def dedupe_live_rows(live: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
+    """One live row per (event, decision) -> (kept, dropped rows counted by exclusion reason:
+    `replay`, `off_schedule` for a superseded attempt, `duplicate`).
 
-    An on-schedule row outranks an off-schedule one. When the release is detected after the
-    scheduled instant, `freedom cards` records the first attempt off schedule and re-runs the
-    card at its true as_of (t0_live + k); that re-run is the card (ORCL 2026-09-10: both post
-    cards, the release detected five minutes after the pinned wire time). Keeping the earliest
-    run there would grade nothing: the attempt is excluded as off schedule and the card dropped
-    as its duplicate. A dropped attempt is `superseded` and counts as off schedule.
-    Among rows of the same standing the earliest run wins (run_at, then posted_at, then file
-    order): two overlapping card runs once produced the same post_30m card twice (ORCL
-    2026-09-10); the later one is a duplicate of the record, not a second call."""
+    A live row outranks a replay (a `--now` run appended to the record must never displace or
+    block the live card), and an on-schedule row outranks an off-schedule one. When the release
+    is detected after the scheduled instant, `freedom cards` records the first attempt off
+    schedule and re-runs the card at its true as_of (t0_live + k); that re-run is the card (it
+    would have applied to ORCL 2026-09-10, detected five minutes after the pinned wire time, had
+    the attempt rows survived). Keeping the earliest run there would grade nothing: the attempt
+    is excluded as off schedule and the card dropped as its duplicate. A dropped attempt is
+    `superseded` and counts as off schedule. Among rows of the same standing the earliest run
+    wins (run_at, then posted_at, then file order): two overlapping card runs once produced the
+    same post_30m card twice (ORCL 2026-09-10); the later one is a duplicate of the record, not
+    a second call."""
+    dropped = {"duplicate": 0, "off_schedule": 0, "replay": 0}
     if len(live) == 0 or E.event_id not in live.columns or D.decision_time not in live.columns:
-        return live, 0, 0
+        return live, dropped
     order = live.copy()
     order["_i"] = range(len(order))
-    order["_off"] = (order["off_schedule"].map(_bool).astype(bool) if "off_schedule" in order.columns
-                     else pd.Series(False, index=order.index))
+    for flag in ("replay", "off_schedule"):
+        order["_" + flag] = (order[flag].map(_bool).astype(bool) if flag in order.columns
+                             else pd.Series(False, index=order.index))
+    order = order.rename(columns={"_off_schedule": "_off"})
     for col in ("run_at", "posted_at"):
         order["_" + col] = pd.to_datetime(order[col], utc=True, errors="coerce") if col in order.columns else pd.NaT
-    order = order.sort_values(["_off", "_run_at", "_posted_at", "_i"], na_position="last", kind="mergesort")
+    order = order.sort_values(["_replay", "_off", "_run_at", "_posted_at", "_i"], na_position="last", kind="mergesort")
     key = [E.event_id, D.decision_time]
     keep = ~order.duplicated(key, keep="first")
     kept = order[keep]
     kept_off = {(str(e), str(d)): bool(o) for e, d, o in zip(kept[E.event_id], kept[D.decision_time], kept["_off"],
                                                             strict=True)}
-    dropped = order[~keep]
-    n_superseded = sum(bool(o) and not kept_off[(str(e), str(d))]
-                       for e, d, o in zip(dropped[E.event_id], dropped[D.decision_time], dropped["_off"], strict=True))
-    kept = kept.sort_values("_i").drop(columns=["_i", "_off", "_run_at", "_posted_at"])
-    return kept, int(len(dropped) - n_superseded), int(n_superseded)
+    gone = order[~keep]
+    for e, d, off, rp in zip(gone[E.event_id], gone[D.decision_time], gone["_off"], gone["_replay"], strict=True):
+        if rp:
+            dropped["replay"] += 1
+        elif off and not kept_off.get((str(e), str(d)), True):
+            dropped["off_schedule"] += 1  # an attempt superseded by the on-schedule re-run
+        else:
+            dropped["duplicate"] += 1
+    kept = kept.sort_values("_i").drop(columns=["_i", "_replay", "_off", "_run_at", "_posted_at"])
+    return kept, dropped
 
 
 def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> dict:
@@ -105,13 +128,13 @@ def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> d
     band = float(settings.no_trade_band)
     out: dict = {"generated_at": now_ts.isoformat(), "n_live_rows": 0 if live is None else int(len(live)),
                  "excluded": {"replay": 0, "off_schedule": 0, "no_probability": 0, "contaminated": 0, "premature": 0,
-                              "duplicate": 0},
+                              "late": 0, "duplicate": 0},
                  "by_decision": {}, "rows": [], "scored_total": 0, "pending_total": 0, "unlabelled_total": 0}
     if live is None or len(live) == 0:
         return out
-    live, n_dup, n_superseded = dedupe_live_rows(live)
-    out["excluded"]["duplicate"] = n_dup
-    out["excluded"]["off_schedule"] = n_superseded  # attempts replaced by an on-schedule re-run
+    live, dropped = dedupe_live_rows(live)
+    for reason, n in dropped.items():
+        out["excluded"][reason] += n
     truth = {}
     if targets is not None and len(targets):
         for _, t in targets.iterrows():
@@ -156,6 +179,14 @@ def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> d
                 out["excluded"]["premature"] += 1
                 out["rows"].append({"event_id": event_id, "decision": decision, "as_of": str(as_of), "p_up": round(p_up, 4),
                                     "call": call, "forced_call": forced, "status": "premature",
+                                    "margin_min": margin_min, "r_24h": None, "forced_hit": None, "banded_hit": None})
+                continue
+            k = DECISION_TIMES.get(decision, 0)
+            if k >= 0 and margin_min > k + float(settings.max_fill_lag_minutes) + LATE_SLACK.total_seconds() / 60:
+                # the detector locked onto a later reaction bar: this is not the post_k card it claims
+                out["excluded"]["late"] += 1
+                out["rows"].append({"event_id": event_id, "decision": decision, "as_of": str(as_of), "p_up": round(p_up, 4),
+                                    "call": call, "forced_call": forced, "status": "late",
                                     "margin_min": margin_min, "r_24h": None, "forced_hit": None, "banded_hit": None})
                 continue
         cell = per.setdefault(decision, {"counted": 0, "scored": 0, "pending": 0, "unlabelled": 0,
@@ -222,6 +253,7 @@ def scorecard_markdown(sc: dict) -> str:
              f"{sc['excluded']['no_probability']} without a probability, "
              f"{sc['excluded'].get('contaminated', 0)} pre cards made after the measured release, "
              f"{sc['excluded'].get('premature', 0)} post cards made before it, "
+             f"{sc['excluded'].get('late', 0)} post cards made too long after it, "
              f"{sc['excluded'].get('duplicate', 0)} duplicates of an earlier run).",
              "", "Forced pick = LONG when p_up >= 0.5 else SHORT, graded on every scored call (a coin flip scores "
              "50 %). Banded call = the money rule (NO TRADE inside the band). Intervals are Wilson 90 %.", "",
@@ -244,11 +276,11 @@ def scorecard_markdown(sc: dict) -> str:
             m = "" if r.get("margin_min") is None else f"{r['margin_min']:+.0f}"
             lines.append(f"| {r['event_id']} | {r['decision']} | {r['as_of'][:16]} | {m} | {r['call']} | {r['forced_call']} | "
                          f"{r['p_up']:.2f} | {100 * r['r_24h']:+.2f} % | {'yes' if r['forced_hit'] else 'no'} |")
-    bad = [r for r in sc["rows"] if r["status"] in ("contaminated", "premature")]
+    bad = [r for r in sc["rows"] if r["status"] in ("contaminated", "premature", "late")]
     if bad:
         lines += ["", "Excluded for disclosure order: " + ", ".join(
             f"{r['event_id']} {r['decision']} ({r['status']}, {r['margin_min']:+.0f} min vs release)" for r in bad)]
-    pending = [r for r in sc["rows"] if r["status"] not in ("scored", "contaminated", "premature")]
+    pending = [r for r in sc["rows"] if r["status"] not in ("scored", "contaminated", "premature", "late")]
     if pending:
         lines += ["", "Awaiting an outcome: " + ", ".join(f"{r['event_id']} {r['decision']} ({r['status']})" for r in pending)]
     return "\n".join(lines) + "\n"
