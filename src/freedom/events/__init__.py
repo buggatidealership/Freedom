@@ -923,6 +923,9 @@ def _load_manual_overrides(settings: Settings) -> dict[str, pd.Timestamp]:
         raw = yaml.safe_load(f) or {}
     out: dict[str, pd.Timestamp] = {}
     for k, v in (raw.items() if isinstance(raw, dict) else []):
+        if not str(k).strip():
+            log.warning("ignoring t0 override with an empty key")
+            continue
         try:
             out[str(k).strip().upper()] = to_utc(pd.Timestamp(str(v)), assume_tz=UTC)
         except (ValueError, TypeError) as exc:
@@ -1142,7 +1145,9 @@ def _resolve_event(ev: _Event, providers: _Providers, *, snapshots: pd.DataFrame
             calendar_flag, _ = hist
             flags.append("timing_from_history")
 
-    man = manual.get(event_id) or manual.get(f"{name.underlying}:{d_fmp.isoformat()}")
+    # keyed by id, the vendor date or the report date (the 8-K's date when it moved the row)
+    man = (manual.get(event_id) or manual.get(f"{name.underlying}:{d_fmp.isoformat()}")
+           or manual.get(f"{name.underlying}:{d_eff.isoformat()}"))
     res = resolve_release_time(report_date_ny=d_eff, sec_filings=sec.filings, intraday=bars,
                                calendar_flag=calendar_flag, manual=man, issuer_clock=clock)
     flags.extend(res.flags)
@@ -1617,7 +1622,7 @@ def upcoming_events(settings: Settings, days: int = 14, *, source: str = "fmp") 
         d_vendor = _as_date(r[E.report_date_ny])
         d, corrected = corrected_report_date(date_overrides, sym, d_vendor)
         table_id = _events_table_id(events, sym, d)
-        man = manual.get(f"{sym}:{d.isoformat()}") or (manual.get(str(table_id).upper()) if table_id else None)
+        man = (manual.get(str(table_id).upper()) if table_id else None) or manual.get(f"{sym}:{d.isoformat()}")
         if man is not None:
             expected_t0, expected_src = man, MANUAL_UPCOMING_SOURCE
         else:

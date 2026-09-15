@@ -87,8 +87,10 @@ call and banded call on the traded ones, with Wilson 90 % intervals, and writes
 One row per event and decision is counted: when two overlapping card runs record the same card, the
 earlier run stands and the later one is reported as a duplicate; when the release was detected after
 the scheduled instant, the first attempt (recorded off schedule) is replaced by the re-run at the
-true `as_of` and counted as off schedule. A post card made more than its offset plus twenty minutes
-after the measured release was mistimed by the detector and is excluded as late. A card whose parquet row was lost
+true `as_of` and counted as off schedule. A post card made more than its offset plus the fill-lag
+allowance (5 minutes) plus fifteen minutes after a release measured by an 8-K or a detection was
+mistimed by the detector and is excluded as late; a pinned release time is a schedule, not a
+measurement, so it never triggers this. A card whose parquet row was lost
 (the Oracle cards of 2026-09-10, dropped by a failed artifact restore) is restored from the posted
 comment through `configs/live_recovery.json`; `freedom live-import` appends such rows once and both
 jobs run it after restoring the live artifact.

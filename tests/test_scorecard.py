@@ -84,7 +84,7 @@ def test_scorecard_grades_only_live_on_schedule_cards(settings):
     assert statuses[("BB:2026-06", "pre_10m")] == "pending" and statuses[("COST:2026-06", "pre_10m")] == "unlabelled"
     md = scorecard.scorecard_markdown(sc)
     assert "| pre_10m | 4 | 2 | 1 | 100 % |" in md and "GME:2026-06 | pre_10m" in md and "Awaiting an outcome" in md
-    assert "Excluded for disclosure order: AMD:2026-06 pre_10m (contaminated, +8 min vs release)" in md
+    assert "Excluded by release timing: AMD:2026-06 pre_10m (contaminated, +8 min vs release)" in md
 
 
 def test_score_command_writes_the_files(settings, monkeypatch):
@@ -171,6 +171,14 @@ def test_late_post_card_is_excluded(settings):
     row = [r for r in sc["rows"] if r["event_id"] == "AMD:2026-06" and r["decision"] == "post_30m"]
     assert len(row) == 1 and row[0]["status"] == "late" and row[0]["margin_min"] == 58.0
     assert sc["excluded"]["late"] == 1 and "1 post cards made too long after it" in scorecard.scorecard_markdown(sc)
+    # against a pinned release (a schedule, not a measurement) the same margin is graded: the pin
+    # may simply be earlier than the real release, which is the operator's to correct
+    events = pd.read_parquet(settings.events_path)
+    events.loc[events[E.event_id] == "AMD:2026-06", E.t0_source] = "manual"
+    events.to_parquet(settings.events_path, index=False)
+    sc = scorecard.build_scorecard(settings, now=NOW)
+    row = [r for r in sc["rows"] if r["event_id"] == "AMD:2026-06" and r["decision"] == "post_30m"]
+    assert len(row) == 1 and row[0]["status"] == "scored" and sc["excluded"]["late"] == 0
 
 
 def test_live_import_keeps_an_attempt_and_its_rerun_apart(settings, tmp_path):

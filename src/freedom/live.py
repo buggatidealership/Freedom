@@ -278,7 +278,7 @@ def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, dec
     """The pre-release schedule: as_of = expected_t0 + offset (see expected_release)."""
     offset = DECISION_TIMES[decision]
     expected_t0, detail, source = expected_release(settings, event, events, now)
-    hhmm = to_ny(expected_t0).strftime("%H:%M")
+    hhmm = _clock(expected_t0)
     as_of = expected_t0 + pd.Timedelta(minutes=offset)
     if now > expected_t0:
         off, state = True, f"now is {(now - expected_t0)} after the expected release"
@@ -329,8 +329,9 @@ def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.T
         gate_note = (f"; bars before {_clock(not_before)} New York ignored "
                      f"(release pinned at {_clock(expected_t0)} by {detail})")
     t0_live = events_mod.detect_release_live(bars, day, now=now, **gate)
-    if gate and t0_live is not None:
-        # name what the gate hid, so a release that really came early is visible on the card
+    if gate:
+        # name what the gate hid (on a hit and on a miss), so a release that really came early is
+        # visible on the card or in the note
         earlier = events_mod.detect_release_live(bars, day, now=now)
         if earlier is not None and to_utc(earlier) < gate["not_before"]:
             gate_note += f"; an earlier qualifying bar at {_clock(to_utc(earlier))} New York was ignored"
@@ -411,8 +412,9 @@ def live_bars(settings: Settings, event: pd.Series, *, hl, fmp, start: pd.Timest
     if isinstance(market, str) and market:
         try:
             b = closed_bars(perp_bars(settings, hl, market, start, end, archive_on_failure=archive_on_failure), end)
-        except Exception as exc:  # no archive and no live bars: the FMP proxy is the fallback, not a crash
-            log.warning("Hyperliquid bars unavailable for %s: %s", market, exc)
+        except Exception as exc:  # no perp bars to use (or a pre card skipping a stale archive): the proxy is the fallback
+            log.warning("Hyperliquid bars unavailable for %s: %s%s", market, exc,
+                        "" if archive_on_failure else "; archived perp bars skipped for a pre-release card")
             b = None
         if b is not None:
             return b, "hyperliquid"
@@ -708,14 +710,21 @@ def append_live_prediction(settings: Settings, row: dict) -> Path:
     return path
 
 
-IMPORT_KEY = (E.event_id, D.decision_time, D.as_of, "model_id", "off_schedule")
-
-
 def _flag(v) -> bool:
-    """A recorded boolean flag; missing/NaN/NA read as False."""
+    """A recorded boolean flag: missing/NaN/NA read as False, strings by their text (a hand-edited
+    recovery file may carry "False"), anything else by truth value."""
     if v is None or v is pd.NA or (isinstance(v, float) and math.isnan(v)):
         return False
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
     return bool(v)
+
+
+def _import_key(r, as_of) -> tuple[str, str, str, str, bool]:
+    """(event_id, decision_time, as_of, model_id, off_schedule): an off-schedule attempt and its
+    on-schedule re-run share as_of = t0_live + k and the model, so the flag tells them apart."""
+    return (str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(as_of)), str(r.get("model_id")),
+            _flag(r.get("off_schedule")))
 
 
 def import_live_rows(settings: Settings, path: Path) -> tuple[int, int]:
@@ -737,12 +746,8 @@ def import_live_rows(settings: Settings, path: Path) -> tuple[int, int]:
     old = read_parquet_or_none(live_predictions_path(settings))
     if old is not None and len(old):
         old_as_of = pd.to_datetime(old[D.as_of], utc=True) if D.as_of in old.columns else pd.Series(pd.NaT, index=old.index)
-        seen = {(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(old_as_of.iloc[i])), str(r.get("model_id")),
-                 _flag(r.get("off_schedule")))
-                for i, (_, r) in enumerate(old.iterrows())}
-        mask = [(str(r[E.event_id]), str(r[D.decision_time]), str(pd.Timestamp(r[D.as_of])), str(r.get("model_id")),
-                 _flag(r.get("off_schedule")))
-                not in seen for _, r in new.iterrows()]
+        seen = {_import_key(r, old_as_of.iloc[i]) for i, (_, r) in enumerate(old.iterrows())}
+        mask = [_import_key(r, r[D.as_of]) not in seen for _, r in new.iterrows()]
         new = new[mask]
     skipped = len(rows) - len(new)
     if len(new) == 0:

@@ -15,7 +15,11 @@ joins the two.
 * Disclosure order is enforced once the release minute is measured (t0 from an 8-K, a detection,
   an issuer clock or a manual override): a pre-release card whose decision instant is not
   strictly before that minute is "contaminated", a post-release card whose instant precedes it
-  is "premature"; both are excluded from grading and listed. Every scored row records the margin
+  is "premature"; both are excluded from grading and listed. A post-release card whose instant
+  exceeds an 8-K or detected release by more than k + max_fill_lag_minutes + 15 min is "late"
+  (the detector locked onto a later reaction bar; the row is not the post_k card it claims to
+  be) and is excluded the same way; a pinned release (manual override, issuer clock) is a
+  schedule, not a measurement, so it never triggers this. Every scored row records the margin
   in minutes between its instant and the measured release.
 """
 
@@ -31,7 +35,7 @@ from .card import CALL_LONG, CALL_SHORT, call_for, forced_call_for
 from .config import Settings
 from .data.archive import read_parquet_or_none
 from .events import DETECTION_WINDOW
-from .live import live_predictions_path
+from .live import _flag, live_predictions_path
 from .schemas import DECISION_TIMES, UTC, D, E, T, T0Source
 from .timeutil import to_utc
 
@@ -60,19 +64,17 @@ def _num(v) -> float:
     return f
 
 
-# A post card is `late` when as_of exceeds the measured release by more than k + max_fill_lag +
-# this slack: the detector locked onto a later reaction bar, so the row is not the post_k card it
-# claims to be (the 8-K acceptance lags the wire by minutes, never the other way, so this cannot
-# fire on a correctly timed card).
+# A post card is `late` when as_of exceeds a release measured by an 8-K or a detection by more
+# than k + max_fill_lag + this slack: the detector locked onto a later reaction bar, so the row is
+# not the post_k card it claims to be. Only measured sources qualify (LATE_T0): against a pinned
+# release (manual override, issuer clock) the rule would flag a pin earlier than the real
+# release, and the pin is the operator's to correct, not the card's fault. A perp reaction that
+# trails the 8-K by more than the allowance is excluded too: on the runner's table 7.7 % of the
+# detected 8-K rows have the equity reaction more than 20 min after the acceptance.
 LATE_SLACK = DETECTION_WINDOW
+LATE_T0 = frozenset({T0Source.sec_8k.value, T0Source.detected.value})
 
-
-def _bool(v) -> bool:
-    if v is None or v is pd.NA or (isinstance(v, float) and math.isnan(v)):
-        return False
-    if isinstance(v, str):
-        return v.strip().lower() in ("true", "1", "yes")
-    return bool(v)
+_bool = _flag  # one reading of a recorded flag, shared with live-import
 
 
 def dedupe_live_rows(live: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
@@ -105,13 +107,15 @@ def dedupe_live_rows(live: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
     key = [E.event_id, D.decision_time]
     keep = ~order.duplicated(key, keep="first")
     kept = order[keep]
-    kept_off = {(str(e), str(d)): bool(o) for e, d, o in zip(kept[E.event_id], kept[D.decision_time], kept["_off"],
-                                                            strict=True)}
+    def _k(e, d) -> tuple[str, str]:  # duplicated() treats None and NaN ids as one key; so do we
+        return ("" if e is None or (isinstance(e, float) and math.isnan(e)) else str(e), str(d))
+
+    kept_off = {_k(e, d): bool(o) for e, d, o in zip(kept[E.event_id], kept[D.decision_time], kept["_off"], strict=True)}
     gone = order[~keep]
     for e, d, off, rp in zip(gone[E.event_id], gone[D.decision_time], gone["_off"], gone["_replay"], strict=True):
         if rp:
             dropped["replay"] += 1
-        elif off and not kept_off.get((str(e), str(d)), True):
+        elif off and not kept_off.get(_k(e, d), True):
             dropped["off_schedule"] += 1  # an attempt superseded by the on-schedule re-run
         else:
             dropped["duplicate"] += 1
@@ -139,13 +143,16 @@ def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> d
     if targets is not None and len(targets):
         for _, t in targets.iterrows():
             truth[str(t[E.event_id])] = _num(t.get(T.r("24h")))
-    t0s, measured = {}, set()
+    t0s, measured, late_ok = {}, set(), set()
     if events is not None and len(events) and E.t0 in events.columns:
         for _, e in events.iterrows():
             if not pd.isna(e[E.t0]):
                 t0s[str(e[E.event_id])] = to_utc(pd.Timestamp(e[E.t0]))
-                if E.t0_source in events.columns and str(e.get(E.t0_source)) in MEASURED_T0:
+                src = str(e.get(E.t0_source)) if E.t0_source in events.columns else ""
+                if src in MEASURED_T0:
                     measured.add(str(e[E.event_id]))
+                if src in LATE_T0:
+                    late_ok.add(str(e[E.event_id]))
     horizon = pd.Timedelta(hours=float(settings.horizon_hours))
     per: dict[str, dict] = {}
     for _, r in live.iterrows():
@@ -182,7 +189,8 @@ def build_scorecard(settings: Settings, *, now: pd.Timestamp | None = None) -> d
                                     "margin_min": margin_min, "r_24h": None, "forced_hit": None, "banded_hit": None})
                 continue
             k = DECISION_TIMES.get(decision, 0)
-            if k >= 0 and margin_min > k + float(settings.max_fill_lag_minutes) + LATE_SLACK.total_seconds() / 60:
+            if (decision in DECISION_TIMES and k >= 0 and event_id in late_ok
+                    and margin_min > k + float(settings.max_fill_lag_minutes) + LATE_SLACK.total_seconds() / 60):
                 # the detector locked onto a later reaction bar: this is not the post_k card it claims
                 out["excluded"]["late"] += 1
                 out["rows"].append({"event_id": event_id, "decision": decision, "as_of": str(as_of), "p_up": round(p_up, 4),
@@ -278,7 +286,7 @@ def scorecard_markdown(sc: dict) -> str:
                          f"{r['p_up']:.2f} | {100 * r['r_24h']:+.2f} % | {'yes' if r['forced_hit'] else 'no'} |")
     bad = [r for r in sc["rows"] if r["status"] in ("contaminated", "premature", "late")]
     if bad:
-        lines += ["", "Excluded for disclosure order: " + ", ".join(
+        lines += ["", "Excluded by release timing: " + ", ".join(
             f"{r['event_id']} {r['decision']} ({r['status']}, {r['margin_min']:+.0f} min vs release)" for r in bad)]
     pending = [r for r in sc["rows"] if r["status"] not in ("scored", "contaminated", "premature", "late")]
     if pending:

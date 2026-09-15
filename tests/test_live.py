@@ -308,6 +308,20 @@ def test_schedules_read_the_override_file_before_the_table(world):
     assert gated[-1][2]["not_before"] == to_utc("2026-08-26 19:15", assume_tz="UTC")
 
 
+def test_gate_names_the_hidden_bar_on_a_miss(world, monkeypatch):
+    """When the gate hides the only qualifying bar, the note says so: a release that really came
+    early must be visible to the operator, not silently absent."""
+    s = world["settings"]
+    ev = world["events"].assign(**{E.t0: to_utc("2026-08-26 20:15", assume_tz="UTC"), E.t0_source: "manual"})
+    ev.to_parquet(s.events_path, index=False)
+    early = to_utc("2026-08-26 12:00", assume_tz="UTC")
+    monkeypatch.setattr(events_mod, "detect_release_live", lambda bars, day, **kw: None if "not_before" in kw else early)
+    now = T0_LIVE + pd.Timedelta(minutes=31)
+    with pytest.raises(live.ReleaseNotDetected, match="an earlier qualifying bar at 08:00 New York was ignored"):
+        live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now), sec=FakeSEC())
+    assert live._flag("False") is False and live._flag("true") is True and live._flag(float("nan")) is False
+
+
 def test_post_without_a_detected_release_raises(world, monkeypatch):
     s = world["settings"]
     monkeypatch.setattr(events_mod, "detect_release_live", lambda bars, day, **kw: None)
