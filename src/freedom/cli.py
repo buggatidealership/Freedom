@@ -502,10 +502,10 @@ def sec_bundle() -> None:
         u_all = load_universe(s)
         u = event_universe(u_all)
         ciks = sorted({int(c) for c in u["cik"].dropna().tolist()})
-        fp, xp, nf, nx = events_mod.build_sec_bundle(s, ciks)
+        fp, xp, nf, nx, nc = events_mod.build_sec_bundle(s, ciks)
         cp, nt = write_cik_map(s, u_all)  # the ticker map is 403 on runners too: commit it alongside
-    _print_kv({"ciks": len(ciks), "filings rows": nf, "facts rows": nx, "filings": fp, "facts": xp,
-               "cik map tickers": nt, "cik map": cp}, title="freedom sec-bundle")
+    _print_kv({"ciks": len(ciks), "filings rows": nf, "acceptance instants corrected": nc, "facts rows": nx,
+               "filings": fp, "facts": xp, "cik map tickers": nt, "cik map": cp}, title="freedom sec-bundle")
 
 
 # ---- live-import --------------------------------------------------------------------------------------

@@ -41,7 +41,9 @@ behind them. Whether anything is predictable is an output of the harness, not an
 * **Release-time resolver**, in priority order, each producing `(t0, confidence, source)`:
   0. Manual override file (`configs/t0_overrides.yaml`, one event, confidence 1.0).
   1. SEC 8-K with item 2.02: `acceptanceDateTime` (US filers; measured within ~1 min of the
-     press release), confidence 0.95.
+     press release), confidence 0.95. The feed's `Z` suffix is not reliable (it sometimes
+     labels the Eastern clock, docs/data-sources.md), so 8-K instants are verified against the
+     filing index page: recent rows on every read, every row in the committed bundle.
   1b. The issuer's documented habitual release clock (`configs/release_clock_overrides.yaml`,
      `ASML: "07:00 Europe/Amsterdam"`, `TSM: "14:00 Asia/Taipei"`): `t0` = the report date at
      that local clock converted to UTC through the zone (DST follows the issuer's calendar),

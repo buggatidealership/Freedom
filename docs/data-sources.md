@@ -60,6 +60,16 @@ Every statement here was verified by a live request from the build environment o
   `acceptanceDateTime`. For US filers the earnings 8-K carries item `2.02` and its acceptance
   time is within about a minute of the press release: NVDA 2026-08-26 20:21:19 Z, AAPL
   2026-07-30 20:30:28 Z, 2026-04-30 20:30:41 Z, 2026-01-29 21:30:33 Z (winter time).
+  **The `Z` suffix is not reliable** (measured 2026-09-23). The feed sometimes carries the
+  Eastern clock under it: for a filing on its own day (General Mills 2026-09-23: feed
+  `07:01:47 Z`, index page `07:01:47` Eastern, i.e. 11:01:47 Z) and for every filing of a CIK
+  at a time (Ciena's 91 results 8-Ks read 4–5 h earlier in the 2026-09-21 bundle than in the
+  2026-09-14 one; Take-Two's flipped the week before). The filing index page
+  `.../<accession>-index.htm` prints the authoritative "Accepted" clock in Eastern time, so the
+  client verifies 8-K acceptance instants against it: rows filed in the last 7 days on every
+  read, every row when `freedom sec-bundle` builds the bundle (verified rows are marked
+  `accepted_verified` and reused by later builds; a live read takes the bundle's verified
+  instant over its own).
 * Foreign private issuers (TSM, ASML, BABA, ARM, NOK, NBIS, …) file 6-K with no item codes,
   and the filing time can lag the release by hours (TSM 2026-07-16 11:45 Z for a release made
   in Asian hours). 6-K acceptance time is **not** a release-time source; those names fall back

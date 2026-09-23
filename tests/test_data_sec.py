@@ -450,9 +450,9 @@ def test_cache_ttls_per_endpoint(edgar, sec, monkeypatch):
         seen[url] = cache_ttl
         return orig_json(self, url, params, cache_ttl=cache_ttl, **kw)
 
-    def spy_text(self, url, *, cache_ttl):
+    def spy_text(self, url, *, cache_ttl, **kw):
         seen[url] = cache_ttl
-        return orig_text(self, url, cache_ttl=cache_ttl)
+        return orig_text(self, url, cache_ttl=cache_ttl, **kw)
 
     monkeypatch.setattr(secmod._SecHttp, "get_json", spy_json)
     monkeypatch.setattr(secmod._SecHttp, "get_text", spy_text)
@@ -467,3 +467,93 @@ def test_cache_ttls_per_endpoint(edgar, sec, monkeypatch):
     assert seen[f"{COMPANYFACTS_URL}CIK0001045810.json"] == TTL_FACTS == 7 * day
     for url in (f"{NVDA_FOLDER}{NVDA_Q2}-index.htm", f"{NVDA_FOLDER}q2fy27pr.htm"):
         assert seen[url] is not None and seen[url] >= 10 * 365 * day, "documents cache forever"
+
+
+# ---- acceptance verification ------------------------------------------------------------------
+def accepted_page(eastern_clock: str) -> str:
+    """The formGrouping block of a filing index page (measured markup)."""
+    return (
+        '<div class="formGrouping">\n   <div class="infoHead">Filing Date</div>\n'
+        f'   <div class="info">{eastern_clock[:10]}</div>\n   <div class="infoHead">Accepted</div>\n'
+        f'   <div class="info">{eastern_clock}</div>\n   <div class="infoHead">Documents</div>\n'
+        '   <div class="info">3</div>\n</div>'
+    )
+
+
+def test_parse_index_acceptance_converts_the_eastern_clock():
+    idx = load_text("0001045810-26-000073-index.htm")
+    assert secmod.parse_index_acceptance(idx) == T_NVDA_Q2  # "2026-08-26 16:21:19" Eastern (EDT) -> 20:21:19 Z
+    winter = accepted_page("2026-01-29 16:30:33")
+    assert secmod.parse_index_acceptance(winter) == pd.Timestamp("2026-01-29 21:30:33", tz="UTC")  # EST: +5 h
+    assert secmod.parse_index_acceptance("<html><body>no such field</body></html>") is None
+    assert secmod.parse_index_acceptance("") is None
+    assert secmod.parse_index_acceptance(accepted_page("not a clock, really")) is None
+
+
+def test_earnings_filings_verifies_recent_8k_rows_against_the_index_page(settings, monkeypatch):
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr(secmod, "utcnow", lambda: datetime(2026, 9, 23, 12, 0, tzinfo=UTC))
+    cik = 40704  # General Mills: the measured case (feed 07:01:47 Z on the filing day, index 07:01:47 Eastern)
+    recent = {
+        "accessionNumber": ["0000040704-26-000050", "0000040704-26-000030", "0000040704-26-000040"],
+        "form": ["8-K", "8-K", "8-K"],
+        "filingDate": ["2026-09-23", "2026-06-24", "2026-09-22"],
+        "acceptanceDateTime": ["2026-09-23T07:01:47.000Z", "2026-06-24T11:00:12.000Z", "2026-09-22T20:05:00.000Z"],
+        "items": ["2.02,9.01", "2.02,9.01", "2.02"],
+        "primaryDocument": ["a.htm", "b.htm", "c.htm"],
+        "primaryDocDescription": ["8-K", "8-K", "8-K"],
+    }
+    with respx.mock(assert_all_mocked=True, assert_all_called=False) as m:
+        m.get(f"{SUBMISSIONS_URL}CIK0000040704.json").respond(json={"filings": {"recent": recent, "files": []}})
+        today = m.get(index_url(cik, "0000040704-26-000050")).mock(return_value=html(accepted_page("2026-09-23 07:01:47")))
+        agree = m.get(index_url(cik, "0000040704-26-000040")).mock(return_value=html(accepted_page("2026-09-22 16:05:00")))
+        old = m.get(index_url(cik, "0000040704-26-000030")).mock(return_value=html(accepted_page("2026-06-24 07:00:12")))
+        df = SECClient(settings).earnings_filings(cik)
+        by = df.set_index("accession")["accepted"]
+        assert by["0000040704-26-000050"] == pd.Timestamp("2026-09-23 11:01:47", tz="UTC")  # Eastern under a Z suffix, corrected
+        assert by["0000040704-26-000040"] == pd.Timestamp("2026-09-22 20:05:00", tz="UTC")  # index agrees: unchanged
+        assert by["0000040704-26-000030"] == pd.Timestamp("2026-06-24 11:00:12", tz="UTC")  # older than VERIFY_RECENT_DAYS: not checked
+        assert today.called and agree.called and not old.called
+        assert list(df.columns) == secmod.SUBMISSION_COLUMNS
+        assert df["accepted"].is_monotonic_increasing
+        assert_utc(df["accepted"])
+        # the bundle build verifies every row itself: None skips the recent check entirely
+        n_before = today.call_count
+        df2 = SECClient(settings).earnings_filings(cik, verify_recent_days=None)
+        assert today.call_count == n_before  # the index page is cached forever anyway
+        assert df2.set_index("accession")["accepted"]["0000040704-26-000050"] == pd.Timestamp("2026-09-23 07:01:47", tz="UTC")
+
+
+def test_verify_acceptances_keeps_the_feed_value_without_an_index_page(settings):
+    cik = 1
+    filings = pd.DataFrame(
+        {
+            "accession": ["0000000001-26-000001", "0000000001-26-000002", "0000000001-26-000003"],
+            "form": ["8-K", "8-K", "6-K"],
+            "filing_date": pd.to_datetime(["2026-09-01"] * 3, utc=True),
+            "accepted": pd.to_datetime(["2026-09-01T07:00:00Z"] * 3, utc=True),
+            "items": ["2.02", "2.02", ""],
+            "primary_doc": ["", "", ""],
+            "description": ["", "", ""],
+        }
+    )
+    with respx.mock(assert_all_mocked=True) as m:
+        missing = m.get(index_url(cik, "0000000001-26-000001")).respond(404)
+        m.get(index_url(cik, "0000000001-26-000002")).mock(return_value=html(accepted_page("2026-09-01 07:00:00")))
+        out, verified, changed = SECClient(settings).verify_acceptances(filings, cik)
+    assert verified.tolist() == [False, True, False]  # no index page yet; verified; 6-K never checked
+    assert changed == 1 and missing.called
+    assert out["accepted"].iloc[0] == pd.Timestamp("2026-09-01 07:00", tz="UTC")  # feed value kept
+    assert out["accepted"].iloc[1] == pd.Timestamp("2026-09-01 11:00", tz="UTC")
+    assert out["accepted"].iloc[2] == pd.Timestamp("2026-09-01 07:00", tz="UTC")
+    assert filings["accepted"].iloc[1] == pd.Timestamp("2026-09-01 07:00", tz="UTC")  # the input is not mutated
+    assert_utc(out["accepted"])
+
+
+def test_acceptance_from_index_uses_the_cached_index_page(edgar, sec):
+    assert sec.acceptance_from_index(NVDA, NVDA_Q2) == T_NVDA_Q2
+    assert edgar["nvda_index"].call_count == 1
+    sec.press_release_text(NVDA, NVDA_Q2)
+    assert sec.acceptance_from_index(NVDA, NVDA_Q2.replace("-", "")) == T_NVDA_Q2
+    assert edgar["nvda_index"].call_count == 1, "one request serves the acceptance check and the exhibit lookup"

@@ -1258,3 +1258,120 @@ def test_events_fall_back_to_the_committed_sec_bundle_when_edgar_gives_nothing(s
     assert ev_mod.sec_bundle_rows(settings, "sec_filings.parquet", 999) is not None  # empty frame, not None
     assert len(ev_mod.sec_bundle_rows(settings, "sec_filings.parquet", 999)) == 0
     ev_mod._BUNDLE_CACHE.clear()
+
+
+def test_sec_bundle_verifies_8k_acceptances_and_reuses_verified_rows(settings, monkeypatch):
+    """The submissions feed's clock is not reliable (Ciena's 91 results 8-Ks moved 4-5 h between
+    two weekly snapshots): the bundle build checks every 8-K row against its filing index page,
+    marks the checked rows, and a later build reuses them without a request."""
+    from freedom.data.sec import SECClient
+
+    settings.configs_dir = settings.data_dir / "configs"
+    cik = 936395
+    feed = pd.DataFrame({
+        "accession": ["0000936395-26-000001", "0000936395-26-000002", "0000936395-26-000003"],
+        "form": ["8-K", "8-K", "6-K"],
+        "filing_date": pd.to_datetime(["2026-09-03", "2026-06-04", "2026-01-01"], utc=True),
+        "accepted": pd.to_datetime(["2026-09-03 07:07:42", "2026-06-04 07:05:06", "2026-01-01 12:00:00"], utc=True),
+        "items": ["2.02,9.01", "2.02,9.01", ""], "primary_doc": [""] * 3, "description": [""] * 3,
+    })
+    index = {"0000936395-26-000001": pd.Timestamp("2026-09-03 11:07:42", tz="UTC"), "0000936395-26-000002": None}
+    calls: list[str] = []
+
+    def fake_filings(self, c, *, verify_recent_days=7):
+        assert c == cik and verify_recent_days is None, "the bundle build verifies every row itself"
+        return feed.copy()
+
+    def fake_index(self, c, accession):
+        calls.append(accession)
+        return index[accession]
+
+    monkeypatch.setattr(SECClient, "earnings_filings", fake_filings)
+    monkeypatch.setattr(SECClient, "acceptance_from_index", fake_index)
+    monkeypatch.setattr(SECClient, "company_facts_eps",
+                        lambda self, c: pd.DataFrame(columns=["period_end", "value", "fp", "form", "filed"]))
+    fp, _xp, nf, _nx, corrected = ev_mod.build_sec_bundle(settings, [cik])
+    b = pd.read_parquet(fp)
+    assert nf == 3 and corrected == 1 and sorted(calls) == ["0000936395-26-000001", "0000936395-26-000002"]
+    by = b.set_index("accession")
+    assert by.loc["0000936395-26-000001", "accepted"] == pd.Timestamp("2026-09-03 11:07:42", tz="UTC")
+    assert bool(by.loc["0000936395-26-000001", "accepted_verified"])
+    assert by.loc["0000936395-26-000002", "accepted"] == pd.Timestamp("2026-06-04 07:05:06", tz="UTC")  # no index page: feed kept
+    assert not bool(by.loc["0000936395-26-000002", "accepted_verified"])
+    assert not bool(by.loc["0000936395-26-000003", "accepted_verified"])  # 6-K: never a time source, not checked
+    assert pd.to_datetime(b["accepted"], utc=True).is_monotonic_increasing
+    assert (b["cik"] == cik).all()
+    # second build: the verified row is reused without a request although the feed still says 07:07
+    calls.clear()
+    index["0000936395-26-000002"] = pd.Timestamp("2026-06-04 11:05:06", tz="UTC")
+    fp, _xp, _nf, _nx, corrected = ev_mod.build_sec_bundle(settings, [cik])
+    by = pd.read_parquet(fp).set_index("accession")
+    assert calls == ["0000936395-26-000002"] and corrected == 2
+    assert by.loc["0000936395-26-000001", "accepted"] == pd.Timestamp("2026-09-03 11:07:42", tz="UTC")
+    assert by.loc["0000936395-26-000002", "accepted"] == pd.Timestamp("2026-06-04 11:05:06", tz="UTC")
+    assert by["accepted_verified"].tolist() == [False, True, True]  # sorted by accepted: the 6-K first
+    rows = ev_mod.sec_bundle_rows(settings, "sec_filings.parquet", cik)
+    assert "accepted_verified" in rows.columns and "cik" not in rows.columns
+    ev_mod._BUNDLE_CACHE.clear()
+
+
+def test_overlay_takes_verified_acceptances_from_the_bundle():
+    live = pd.DataFrame({
+        "accession": ["0000936395-26-000002", "0000936395-26-000001", "0000936395-26-000009"],
+        "form": ["8-K", "8-K", "8-K"],
+        "filing_date": pd.to_datetime(["2026-06-04", "2026-09-03", "2026-09-20"], utc=True),
+        "accepted": pd.to_datetime(["2026-06-04 07:05:06", "2026-09-03 07:07:42", "2026-09-20 20:05:00"], utc=True),
+        "items": ["2.02"] * 3, "primary_doc": [""] * 3, "description": [""] * 3,
+    })
+    bundled = pd.DataFrame({
+        "accession": ["0000936395-26-000001", "0000936395-26-000002"],
+        "form": ["8-K", "8-K"],
+        "filing_date": pd.to_datetime(["2026-09-03", "2026-06-04"], utc=True),
+        "accepted": pd.to_datetime(["2026-09-03 11:07:42", "2026-06-04 07:05:06"], utc=True),
+        "items": ["2.02", "2.02"], "primary_doc": ["", ""], "description": ["", ""],
+        "accepted_verified": [True, False],
+    })
+    out = ev_mod.overlay_verified_acceptances(live, bundled)
+    by = out.set_index("accession")["accepted"]
+    assert by["0000936395-26-000001"] == pd.Timestamp("2026-09-03 11:07:42", tz="UTC")  # verified: replaced
+    assert by["0000936395-26-000002"] == pd.Timestamp("2026-06-04 07:05:06", tz="UTC")  # unverified bundle row: live kept
+    assert by["0000936395-26-000009"] == pd.Timestamp("2026-09-20 20:05:00", tz="UTC")  # newer than the bundle: kept
+    assert out["accepted"].is_monotonic_increasing and str(out["accepted"].dtype) == "datetime64[ns, UTC]"
+    assert live["accepted"].iloc[1] == pd.Timestamp("2026-09-03 07:07:42", tz="UTC")  # input not mutated
+    assert ev_mod.overlay_verified_acceptances(live, bundled.drop(columns=["accepted_verified"])) is live
+    assert ev_mod.overlay_verified_acceptances(live, None) is live
+    assert ev_mod.overlay_verified_acceptances(None, bundled) is None
+
+
+def test_events_take_the_bundles_verified_acceptance_over_a_live_feed_value(settings, fake, monkeypatch):
+    """A sandbox build reads EDGAR live, where an older row can carry the Eastern clock under a Z
+    suffix; the bundle's index-page-verified instant wins, and the row is not flagged sec_bundle
+    because the filings themselves came from EDGAR."""
+    from freedom.data.sec import SECClient
+
+    write_universe(settings)
+    settings.configs_dir = settings.data_dir / "configs"
+    settings.configs_dir.mkdir()
+    right = pd.Timestamp("2026-08-27 20:31", tz="UTC")
+    wrong = pd.Timestamp("2026-08-27 16:31", tz="UTC")  # 16:31 Eastern read as UTC
+    pd.DataFrame({"cik": [AAPL_CIK], "accession": ["0000320193-26-000099"], "form": ["8-K"],
+                  "filing_date": [pd.Timestamp("2026-08-27", tz="UTC")], "accepted": [right], "items": ["2.02,9.01"],
+                  "primary_doc": ["x.htm"], "description": ["results"], "accepted_verified": [True]}
+                 ).to_parquet(settings.configs_dir / "sec_filings.parquet", index=False)
+    pd.DataFrame({"cik": [], "period_end": [], "value": [], "fp": [], "form": [], "filed": []}).to_parquet(
+        settings.configs_dir / "sec_eps_facts.parquet", index=False)
+    ev_mod._BUNDLE_CACHE.clear()
+
+    def live(self, cik, **kw):
+        return pd.DataFrame({"accession": ["0000320193-26-000099"], "form": ["8-K"],
+                             "filing_date": [pd.Timestamp("2026-08-27", tz="UTC")], "accepted": [wrong],
+                             "items": ["2.02,9.01"], "primary_doc": ["x.htm"], "description": ["results"]})
+
+    monkeypatch.setattr(SECClient, "earnings_filings", live)
+    fake.earnings["AAPL"] = [{"symbol": "AAPL", "date": "2026-08-27", "epsActual": 1.1, "epsEstimated": 1.0,
+                              "revenueActual": 9.1e10, "revenueEstimated": 9.0e10, "lastUpdated": "2026-08-30"}]
+    df = build_events(settings, underlyings=["AAPL"], since=pd.Timestamp("2026-08-01"))
+    row = df[df[E.underlying] == "AAPL"].iloc[0]
+    assert row[E.t0_source] == "sec_8k" and row[E.t0] == right
+    assert "sec_bundle" not in row[E.flags].split(";")
+    ev_mod._BUNDLE_CACHE.clear()

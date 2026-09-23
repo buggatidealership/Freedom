@@ -472,7 +472,7 @@ def test_sec_bundle_writes_the_bundle_and_the_cik_map(dirs, monkeypatch, tmp_pat
 
     def bundle(s, ciks):
         seen["ciks"] = ciks
-        return s.configs_dir / "sec_filings.parquet", s.configs_dir / "sec_eps_facts.parquet", 5, 7
+        return s.configs_dir / "sec_filings.parquet", s.configs_dir / "sec_eps_facts.parquet", 5, 7, 2
 
     monkeypatch.setattr(events_mod, "build_sec_bundle", bundle)
     result = runner.invoke(app, ["sec-bundle"])
@@ -480,3 +480,4 @@ def test_sec_bundle_writes_the_bundle_and_the_cik_map(dirs, monkeypatch, tmp_pat
     assert seen["ciks"] == [1045810]
     assert (configs / "cik_map.yaml").exists() and "NVDA" in (configs / "cik_map.yaml").read_text()
     assert "cik map tickers" in result.output and "1" in result.output
+    assert "acceptance instants corrected" in result.output

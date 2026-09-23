@@ -9,6 +9,13 @@ Measured server facts (2026-09-02, see docs/data-sources.md):
   served at ``https://data.sec.gov/submissions/<name>`` as the same columnar dict at top level.
   ``acceptanceDateTime`` is an ISO instant with a ``Z`` suffix (``2026-08-26T20:21:19.000Z``);
   8-K ``items`` is a comma-separated string (``"2.02,9.01"``); 6-K rows have no items.
+  Measured 2026-09-23: the ``Z`` suffix is not reliable. The feed sometimes carries the
+  *Eastern* clock under it: for every filing of a CIK at a time (Ciena's 91 results 8-Ks read
+  4-5 h earlier in the 2026-09-21 snapshot than in the 2026-09-14 one, Take-Two's flipped the
+  week before) and for a filing on its own day (General Mills 2026-09-23: feed 07:01:47 Z, index
+  page 07:01:47 Eastern). The filing index page's "Accepted" value (Eastern) is authoritative,
+  so 8-K acceptance instants are verified against it: recent rows on every read
+  (``earnings_filings``), every row when the bundle is built (``freedom sec-bundle``).
 * ``https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json``:
   ``facts.us-gaap.EarningsPerShareDiluted.units["USD/shares"]`` rows carry ``start, end, val,
   accn, fy, fp, form, filed`` (+ ``frame`` on the canonical row). The same ``fp`` appears twice
@@ -18,7 +25,8 @@ Measured server facts (2026-09-02, see docs/data-sources.md):
   exhibit (``EX-99.1``); the exhibit itself is served with an SGML ``<DOCUMENT>...<TEXT>``
   wrapper around the HTML.
 
-Timestamps: ``accepted`` is the exact UTC instant. Calendar dates (``filing_date``,
+Timestamps: ``accepted`` is the exact UTC instant (feed value, replaced by the index page's
+where the two differ, see above). Calendar dates (``filing_date``,
 ``period_end``, ``period_start``, ``filed``) are EDGAR dates represented as tz-aware UTC
 *midnight* Timestamps so that every datetime column leaving this client is UTC; read them with
 ``edgar_date`` (``.dt.date``), never by converting to another zone, which shifts the day.
@@ -34,6 +42,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin
@@ -50,6 +59,7 @@ from ..data.base import (
     TokenBucket,
     _is_retryable,
     cache_key,
+    utcnow,
 )
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -63,9 +73,17 @@ TTL_SUBMISSIONS = 1 * DAY
 TTL_FACTS = 7 * DAY
 TTL_FOREVER = 100 * 365 * DAY  # filed documents never change; HttpClient treats None as "no cache"
 TTL_MISSING = 1 * DAY  # a 404 is re-checked daily: a just-accepted filing can lag on the Archives
+TTL_MISSING_INDEX = 600  # an index page that is not there yet is re-checked within minutes
 
 EARNINGS_ITEM = "2.02"  # 8-K item: Results of Operations and Financial Condition
 PRESS_RELEASE_EXHIBIT = "EX-99.1"
+# 8-K rows filed within this many days are checked against their index page on every read: the
+# feed labels a same-day acceptance with the Eastern clock and normalises it later (or never)
+VERIFY_RECENT_DAYS = 7
+# index pages fetched concurrently by the bundle build: the request rate stays under the shared
+# limiter (sec_requests_per_second), the threads only hide the per-request latency (~1 s here)
+VERIFY_WORKERS = 6
+EDGAR_TZ = "America/New_York"  # the clock on filing index pages
 
 TICKER_COLUMNS = ["ticker", "cik", "title"]
 SUBMISSION_COLUMNS = [
@@ -75,6 +93,10 @@ EPS_COLUMNS = ["period_end", "value", "fp", "form", "filed"]
 EPS_EXTRA_COLUMNS = ["period_start", "fy", "accession", "frame"]
 
 _ACCESSION_RE = re.compile(r"^(\d{10})-?(\d{2})-?(\d{6})$")
+# <div class="infoHead">Accepted</div> <div class="info">2026-08-26 16:21:19</div>
+_ACCEPTED_RE = re.compile(
+    r"Accepted\s*</div>\s*<div[^>]*>\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})\s*<", re.IGNORECASE
+)
 
 
 # ---- plumbing ----------------------------------------------------------------------------------
@@ -123,11 +145,12 @@ class _SecHttp(HttpClient):
     through the same cache, limiter and retry policy. Both GETs turn an EDGAR 403 into
     ProviderUnavailable (see _policy_block)."""
 
-    def get_text(self, url: str, *, cache_ttl: int | None) -> str | None:
+    def get_text(self, url: str, *, cache_ttl: int | None, missing_ttl: int | None = None) -> str | None:
         """Body of a document, or None when EDGAR has no such document (HTTP 404).
 
-        A 404 is remembered for TTL_MISSING so that repeated lookups of a filing without an
-        index page or exhibit do not re-hit EDGAR. Any other error propagates."""
+        A 404 is remembered for `missing_ttl` seconds (default TTL_MISSING) so that repeated
+        lookups of a filing without an index page or exhibit do not re-hit EDGAR. Any other
+        error propagates."""
         key = cache_key(self.provider, f"GET-TEXT {url}", None)
         if cache_ttl is not None:
             hit = self.cache.get(self.provider, key, cache_ttl)
@@ -143,7 +166,8 @@ class _SecHttp(HttpClient):
             text = self._request_text(url)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
-                self.cache.set(self.provider, key, {_MISSING_KEY: time.time() + TTL_MISSING})
+                ttl = TTL_MISSING if missing_ttl is None else missing_ttl
+                self.cache.set(self.provider, key, {_MISSING_KEY: time.time() + ttl})
                 return None
             blocked = _policy_block(url, exc)
             if blocked is not None:
@@ -202,6 +226,22 @@ def _dates_utc(values: list[Any]) -> pd.DatetimeIndex:
     cleaned = [v if isinstance(v, str) and v.strip() else None for v in values]
     parsed = pd.to_datetime(cleaned, utc=True, format="ISO8601", errors="coerce")
     return parsed.as_unit("ns")  # pandas>=3 infers [s]/[us]; keep one resolution everywhere
+
+
+def parse_index_acceptance(index_html: str) -> pd.Timestamp | None:
+    """The "Accepted" clock of a filing index page as a UTC instant, or None when the page has
+    none. EDGAR prints it in Eastern time without a zone (``2026-08-26 16:21:19``); the
+    conversion follows the zone's DST rule, so summer rows move by 4 h and winter rows by 5 h."""
+    m = _ACCEPTED_RE.search(index_html or "")
+    if not m:
+        return None
+    try:
+        # EDGAR accepts filings 06:00-22:00 Eastern, so the DST fold and gap (01:00-03:00) never
+        # occur in practice; the arguments keep a stray value from raising
+        ts = pd.Timestamp(m.group(1).replace("T", " ")).tz_localize(EDGAR_TZ, ambiguous=True, nonexistent="shift_forward")
+    except (ValueError, TypeError):
+        return None
+    return ts.tz_convert("UTC").as_unit("ns")
 
 
 def _submissions_page_to_frame(page: dict[str, Any] | None) -> pd.DataFrame:
@@ -399,15 +439,66 @@ class SECClient:
         df = df.sort_values(["accepted", "accession"], kind="mergesort", na_position="last")
         return df.reset_index(drop=True)
 
-    def earnings_filings(self, cik: int) -> pd.DataFrame:
+    def earnings_filings(self, cik: int, *, verify_recent_days: int | None = VERIFY_RECENT_DAYS) -> pd.DataFrame:
         """8-K rows whose items include 2.02, plus 6-K rows, sorted by accepted.
 
-        Amendments (8-K/A, 6-K/A) are excluded: their acceptance time is not a release time."""
+        Amendments (8-K/A, 6-K/A) are excluded: their acceptance time is not a release time.
+        8-K rows filed within `verify_recent_days` have their `accepted` checked against the
+        filing index page (module docstring: the feed's same-day clock is Eastern under a Z
+        suffix); None skips the check (the bundle build verifies every row itself)."""
         df = self.submissions(cik)
         has_item = df["items"].map(lambda s: EARNINGS_ITEM in split_items(s))
         keep = ((df["form"] == "8-K") & has_item) | (df["form"] == "6-K")
-        out = df[keep].sort_values(["accepted", "accession"], kind="mergesort", na_position="last")
+        out = df[keep].reset_index(drop=True)
+        if verify_recent_days is not None and len(out):
+            since = pd.Timestamp(utcnow()).normalize() - pd.Timedelta(days=int(verify_recent_days))
+            recent = (out["form"] == "8-K") & (out["filing_date"] >= since)
+            if recent.any():
+                out, _, _ = self.verify_acceptances(out, cik, rows=recent)
+        out = out.sort_values(["accepted", "accession"], kind="mergesort", na_position="last")
         return out.reset_index(drop=True)
+
+    def acceptance_from_index(self, cik: int, accession: str) -> pd.Timestamp | None:
+        """The acceptance instant printed on the filing's index page (Eastern -> UTC), or None
+        when EDGAR has no index page for it yet (a just-accepted filing can lag on the
+        Archives; the miss is re-checked after TTL_MISSING_INDEX). Pages are cached forever."""
+        acc = normalise_accession(accession)
+        index_url = f"{self.filing_folder_url(cik, acc)}{acc}-index.htm"
+        index_html = self.http.get_text(index_url, cache_ttl=TTL_FOREVER, missing_ttl=TTL_MISSING_INDEX)
+        if index_html is None:
+            return None
+        return parse_index_acceptance(index_html)
+
+    def verify_acceptances(self, filings: pd.DataFrame, cik: int, *, rows: pd.Series | None = None,
+                           workers: int = 1) -> tuple[pd.DataFrame, pd.Series, int]:
+        """Replace `accepted` by the index page's instant for the selected `rows` (default: every
+        8-K). Returns (copy of `filings`, boolean Series of the rows an index page answered
+        for, number of rows whose instant changed). Rows without an index page keep the feed
+        value and count as unverified. `workers` > 1 fetches the pages concurrently (the
+        limiter still spaces the requests); any fetch error propagates."""
+        out = filings.copy()
+        if rows is None:
+            rows = out["form"].astype(str) == "8-K"
+        rows = rows.reindex(out.index, fill_value=False).astype(bool)
+        verified = pd.Series(False, index=out.index)
+        changed = 0
+        todo = list(out.index[rows])
+        if workers > 1 and len(todo) > 1:
+            with ThreadPoolExecutor(max_workers=min(int(workers), len(todo))) as pool:
+                pages = list(pool.map(lambda i: self.acceptance_from_index(cik, out.at[i, "accession"]), todo))
+        else:
+            pages = [self.acceptance_from_index(cik, out.at[i, "accession"]) for i in todo]
+        for i, found in zip(todo, pages, strict=True):
+            if found is None:
+                continue
+            verified.at[i] = True
+            feed = out.at[i, "accepted"]
+            if pd.isna(feed) or pd.Timestamp(feed) != found:
+                out.at[i, "accepted"] = found
+                changed += 1
+        if changed:
+            out["accepted"] = pd.to_datetime(out["accepted"], utc=True).dt.as_unit("ns")
+        return out, verified, changed
 
     # -- XBRL facts ----------------------------------------------------------------------------
     def company_facts_eps(self, cik: int) -> pd.DataFrame:

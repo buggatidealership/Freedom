@@ -104,7 +104,7 @@ import yaml
 from ..config import Settings
 from ..data.base import BudgetExhausted, ProviderUnavailable, utcnow
 from ..data.fmp import FMPError
-from ..data.sec import split_items
+from ..data.sec import VERIFY_WORKERS, split_items
 from ..schemas import EVENT_KINDS, NY, SCHEMA_VERSION, UTC, C, E, Kind, T0Source, U
 from ..timeutil import classify_timing, to_utc
 
@@ -777,16 +777,92 @@ def sec_bundle_rows(settings: Settings, name: str, cik: int) -> pd.DataFrame | N
     return rows.reset_index(drop=True)
 
 
-def build_sec_bundle(settings: Settings, ciks: list[int]) -> tuple[Path, Path, int, int]:
+def verified_bundle_acceptances(path: Path) -> dict[tuple[int, str], pd.Timestamp]:
+    """(cik, accession) -> acceptance instant for the rows an existing bundle already verified
+    against the filing index page; empty when there is no bundle or it predates the column."""
+    if not Path(path).exists():
+        return {}
+    try:
+        df = pd.read_parquet(path)
+    except Exception as exc:  # noqa: BLE001 - an unreadable old bundle is rebuilt from scratch
+        log.warning("sec-bundle: existing %s not read (%s); verifying every row", path, exc)
+        return {}
+    if "accepted_verified" not in df.columns or not {"cik", "accession", "accepted"} <= set(df.columns):
+        return {}
+    ok = df["accepted_verified"].astype(bool) & df["accepted"].notna()
+    acc = pd.to_datetime(df.loc[ok, "accepted"], utc=True)
+    return {(int(c), str(a)): pd.Timestamp(t) for c, a, t in zip(df.loc[ok, "cik"], df.loc[ok, "accession"], acc, strict=True)}
+
+
+def verify_bundle_acceptances(sec, filings: pd.DataFrame, cik: int,
+                              prior: dict[tuple[int, str], pd.Timestamp]) -> tuple[pd.DataFrame, int]:
+    """`filings` with every 8-K row's `accepted` verified against its filing index page
+    (data/sec.py: the feed's clock is not reliable) and an `accepted_verified` column. Rows in
+    `prior` (verified by an earlier bundle) are reused without a request. Returns (frame,
+    number of rows whose instant differs from the feed's)."""
+    out = filings.copy()
+    feed = pd.to_datetime(out["accepted"], utc=True)
+    is_8k = out["form"].astype(str) == "8-K"
+    known = pd.to_datetime(pd.Series([prior.get((int(cik), str(a)), pd.NaT) for a in out["accession"]],
+                                     index=out.index, dtype="object"), utc=True)
+    reuse = is_8k & known.notna()
+    if reuse.any():
+        out.loc[reuse, "accepted"] = known[reuse]
+    out, verified, _ = sec.verify_acceptances(out, cik, rows=is_8k & ~reuse, workers=VERIFY_WORKERS)
+    out["accepted"] = pd.to_datetime(out["accepted"], utc=True).dt.as_unit("ns")
+    out["accepted_verified"] = (verified | reuse).astype(bool)
+    same = (out["accepted"] == feed) | (out["accepted"].isna() & feed.isna())
+    changed = int((~same).sum())
+    out = out.sort_values(["accepted", "accession"], kind="mergesort", na_position="last")
+    return out.reset_index(drop=True), changed
+
+
+def overlay_verified_acceptances(filings: pd.DataFrame | None, bundled: pd.DataFrame | None) -> pd.DataFrame | None:
+    """`filings` (a live EDGAR read) with `accepted` taken from the bundle wherever the bundle
+    verified that accession against its filing index page: the live read verifies only recent
+    rows, and the feed's older instants for a CIK can be off by 4-5 h (data/sec.py)."""
+    if filings is None or bundled is None or len(filings) == 0 or len(bundled) == 0:
+        return filings
+    if "accepted_verified" not in bundled.columns or "accession" not in filings.columns:
+        return filings
+    v = bundled[bundled["accepted_verified"].astype(bool) & bundled["accepted"].notna()]
+    if len(v) == 0:
+        return filings
+    lookup = dict(zip(v["accession"].astype(str), pd.to_datetime(v["accepted"], utc=True), strict=True))
+    known = pd.to_datetime(filings["accession"].astype(str).map(lookup), utc=True)
+    feed = pd.to_datetime(filings["accepted"], utc=True)
+    take = known.notna() & (feed != known)
+    if not take.any():
+        return filings
+    out = filings.copy()
+    out.loc[take, "accepted"] = known[take]
+    out["accepted"] = pd.to_datetime(out["accepted"], utc=True).dt.as_unit("ns")
+    log.info("%d acceptance instant(s) replaced by the verified bundle's (%s)", int(take.sum()),
+             ", ".join(out.loc[take, "accession"].astype(str).head(3)))
+    return out.sort_values(["accepted", "accession"], kind="mergesort", na_position="last").reset_index(drop=True)
+
+
+def build_sec_bundle(settings: Settings, ciks: list[int]) -> tuple[Path, Path, int, int, int]:
     """Fetch EDGAR filings and EPS facts for `ciks` and write the two bundle parquets.
-    Run where EDGAR is reachable; the events build falls back to them elsewhere."""
+    Run where EDGAR is reachable; the events build falls back to them elsewhere. Every 8-K
+    row's acceptance instant is verified against its filing index page (the feed's clock is
+    not reliable, data/sec.py); rows the previous bundle verified are reused without a request,
+    so a weekly refresh only checks new filings. Returns (filings path, facts path, filings
+    rows, facts rows, rows whose instant differs from the feed's)."""
     from ..data.sec import SECClient
 
     sec = SECClient(settings)
+    fp, xp = settings.configs_dir / SEC_FILINGS_BUNDLE, settings.configs_dir / SEC_FACTS_BUNDLE
+    prior = verified_bundle_acceptances(fp)
     filings, facts = [], []
+    corrected = 0
     for cik in ciks:
         try:
-            f = sec.earnings_filings(cik)
+            f = sec.earnings_filings(cik, verify_recent_days=None)
+            f, n = verify_bundle_acceptances(sec, f, cik, prior)
+            if n:
+                log.info("sec-bundle: CIK %s: %d acceptance instant(s) differ from the submissions feed", cik, n)
+            corrected += n
             filings.append(f.assign(cik=int(cik)))
         except (ProviderUnavailable, httpx.HTTPError, ValueError, KeyError) as exc:
             log.warning("sec-bundle: filings failed for CIK %s: %s", cik, exc)
@@ -796,14 +872,13 @@ def build_sec_bundle(settings: Settings, ciks: list[int]) -> tuple[Path, Path, i
         except (ProviderUnavailable, httpx.HTTPError, ValueError, KeyError) as exc:
             log.warning("sec-bundle: companyfacts failed for CIK %s: %s", cik, exc)
     settings.configs_dir.mkdir(parents=True, exist_ok=True)
-    fp, xp = settings.configs_dir / SEC_FILINGS_BUNDLE, settings.configs_dir / SEC_FACTS_BUNDLE
     fdf = pd.concat(filings, ignore_index=True) if filings else pd.DataFrame(columns=["cik"])
     xdf = pd.concat(facts, ignore_index=True) if facts else pd.DataFrame(columns=["cik"])
     fdf.to_parquet(fp, index=False)
     xdf.to_parquet(xp, index=False)
     _BUNDLE_CACHE.pop(fp, None)
     _BUNDLE_CACHE.pop(xp, None)
-    return fp, xp, len(fdf), len(xdf)
+    return fp, xp, len(fdf), len(xdf), corrected
 
 
 class _Providers:
@@ -861,10 +936,12 @@ class _Providers:
                 data.facts = self.sec.company_facts_eps(cik)
             except (ProviderUnavailable, httpx.HTTPError, ValueError, KeyError) as exc:
                 log.warning("SEC companyfacts unavailable for CIK %s: %s", cik, exc)
+            bundled = sec_bundle_rows(self.settings, SEC_FILINGS_BUNDLE, cik)
             if data.filings is None or len(data.filings) == 0:
-                bundled = sec_bundle_rows(self.settings, SEC_FILINGS_BUNDLE, cik)
                 if bundled is not None and len(bundled):
                     data.filings, data.from_bundle = bundled, True
+            else:
+                data.filings = overlay_verified_acceptances(data.filings, bundled)
             if data.facts is None or len(data.facts) == 0:
                 bundled = sec_bundle_rows(self.settings, SEC_FACTS_BUNDLE, cik)
                 if bundled is not None and len(bundled):
