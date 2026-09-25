@@ -1375,3 +1375,38 @@ def test_events_take_the_bundles_verified_acceptance_over_a_live_feed_value(sett
     assert row[E.t0_source] == "sec_8k" and row[E.t0] == right
     assert "sec_bundle" not in row[E.flags].split(";")
     ev_mod._BUNDLE_CACHE.clear()
+
+
+def test_detector_relaxed_return_threshold_finds_a_muted_release_on_volume():
+    """Characterisation of the detector at the relaxed candidate threshold the live pinned
+    confirmation uses: after-hours bars of ~3 units, the pinned minute trades 45 on a 0.35 % gap
+    and a 0.3 % bar. The 1 % rule misses it; 0.2 % inside the pinned window (one minute before to
+    five after) finds it. The quiet-day loop only shows the rule is silent on bars that pass
+    neither leg; the false-positive behaviour on real jumpy bars is measured in live.py's notes
+    and guarded by confirm_pinned_release's range leg (tests/test_live.py)."""
+    rng = np.random.default_rng(3)
+    rows = []
+    for d in pd.bdate_range("2026-09-17", "2026-09-24"):
+        for m in range(0, 120):  # 20:00-21:59 UTC (16:00-17:59 New York, closing bar then after-hours)
+            t = pd.Timestamp(d.date(), tz="UTC") + pd.Timedelta(hours=20, minutes=m)
+            px = 900.0 + rng.normal(0, 0.3)
+            vol = 3.0 + abs(rng.normal(0, 1.0))
+            o, c = px, px * (1 + rng.normal(0, 0.0003))
+            if d.date() == pd.Timestamp("2026-09-24").date() and m == 15:
+                o, c, vol = 898.3 * 1.006, 898.3 * 1.006 * 1.003, 45.0
+            rows.append({C.market: "xyz:COST", C.interval: "1m", C.t: t, C.t_end: t + pd.Timedelta(minutes=1),
+                         C.open: o, C.high: max(o, c), C.low: min(o, c), C.close: c, C.volume: vol, C.n_trades: 5,
+                         C.source: "hl"})
+    bars = pd.DataFrame(rows)
+    day = pd.Timestamp("2026-09-24")
+    pin = pd.Timestamp("2026-09-24 20:15", tz="UTC")
+    assert detect_release_from_bars(bars, day, not_before=pin - pd.Timedelta(minutes=15)) is None
+    window = bars[bars[C.t] <= pin + pd.Timedelta(minutes=5)]
+    hit = detect_release_from_bars(window, day, not_before=pin - pd.Timedelta(minutes=1), abs_ret_threshold=0.002)
+    assert hit is not None and hit[0] == pin and hit[1] is False
+    quiet = bars[bars[C.t] < pd.Timestamp("2026-09-24", tz="UTC")]
+    for d in sorted(set(quiet[C.t].dt.date)):
+        p = pd.Timestamp(f"{d} 20:15", tz="UTC")
+        window = quiet[quiet[C.t] <= p + pd.Timedelta(minutes=5)]
+        assert detect_release_from_bars(window, pd.Timestamp(d), not_before=p - pd.Timedelta(minutes=1),
+                                        abs_ret_threshold=0.002) is None

@@ -1530,7 +1530,8 @@ def expected_release_clock(events: pd.DataFrame, underlying: str, *,
 
 def detect_release_live(bars: pd.DataFrame, expected_date_ny: pd.Timestamp, **kw) -> pd.Timestamp | None:
     """Live wrapper around detect_release_from_bars for bars ending at or before now; returns the
-    detected bar start or None. Same thresholds as the historical detector."""
+    detected bar start or None. Same thresholds as the historical detector unless the caller
+    overrides them (live.post_schedule relaxes the return threshold around a pinned release)."""
     now = kw.pop("now", None)
     now = to_utc(now, assume_tz=UTC) if now is not None else pd.Timestamp(utcnow())
     if bars is None or len(bars) == 0:

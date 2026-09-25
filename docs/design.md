@@ -363,7 +363,20 @@ builds features `as_of` a well-defined instant and loads the trained model for `
   ignores bars starting more than 15 minutes before it: a perp trades around the clock, and
   one stray ≥ 1 % print hours before the release would otherwise become `t0_live` and put every
   post card of the day off schedule (para:CIEN 2026-09-03 replayed: 03:45 ET for a 07:00 ET
-  release). Under a median 8-K clock or a calendar flag, which can be hours wrong, the whole
+  release). Inside a tight window around a pinned release (1 minute before to 5 after) a bar
+  that passes the volume leg with a move of only 0.2 % also counts as the release when the five
+  bars from it span 1 % high to low: a quiet name can react on unmistakable volume without any
+  one-minute bar reaching 1 % (xyz:COST 2026-09-24: 45 contracts at the pinned minute against a
+  zero after-hours baseline, bars of 0.6 to 0.8 %, 2.3 % over five minutes, no post card). The
+  cost, measured by sliding a hypothetical pin over every minute of a quiet New York day
+  (2026-09-23, with one to two prior days of bars where production has ten): xyz:COST never
+  confirms, xyz:BB (an $8 perp, jumpy around the clock) confirms 42 of 1440 pin positions
+  (2.9 %; 11 of the 91 in its own 06:30 to 08:00 pre-market band, none after the close) against
+  0 for the 1 % rule, so a pin that is wrong or a release that is late by more than five minutes
+  carries roughly a one-in-ten chance of a plausible card at a wrong `t0_live` in a jumpy name's
+  pre-market; the scorecard excludes such a card as premature. A later 1 % bar does not overturn a confirmation
+  (on a slow reaction it is the reaction's own continuation); only an earlier standard detection
+  does. Under a median 8-K clock or a calendar flag, which can be hours wrong, the whole
   report day stays in play so that a wrong schedule surfaces as an off-schedule row rather than
   as a plausible card. The perp's bars are the archived ones plus a live pull; when the live
   call fails the archived bars are used (never the equity proxy, whose pre-market prints are a

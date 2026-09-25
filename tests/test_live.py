@@ -256,7 +256,8 @@ def test_post_detector_ignores_bars_before_a_pinned_release(world):
     ev.to_parquet(s.events_path, index=False)
     res = live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now),
                              sec=FakeSEC(), append=False)
-    gated = [c for c in world["detector_calls"] if "not_before" in c[2]]  # the gate also runs an ungated check
+    # the gate also runs an ungated check and a volume-confirmation pass with a relaxed return rule
+    gated = [c for c in world["detector_calls"] if "not_before" in c[2] and "abs_ret_threshold" not in c[2]]
     assert gated[-1][2]["not_before"] == to_utc("2026-08-26 20:00", assume_tz="UTC")
     assert "bars before 16:00 New York ignored (release pinned at 16:15 by events table: manual" in res["row"]["schedule_note"]
     assert res["row"]["off_schedule"] is False and res["row"]["t0_live"] == T0_LIVE
@@ -304,7 +305,7 @@ def test_schedules_read_the_override_file_before_the_table(world):
     now = T0_LIVE + pd.Timedelta(minutes=31)
     live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now), sec=FakeSEC(),
                        append=False)
-    gated = [c for c in world["detector_calls"] if "not_before" in c[2]]
+    gated = [c for c in world["detector_calls"] if "not_before" in c[2] and "abs_ret_threshold" not in c[2]]
     assert gated[-1][2]["not_before"] == to_utc("2026-08-26 19:15", assume_tz="UTC")
 
 
@@ -508,3 +509,126 @@ def test_a_calendar_hit_the_table_knows_is_predicted_from_the_table_row(world, m
     assert row[E.event_id] == EVENT and row[E.estimate_source] == "consensus_snapshot"  # the table row, not the calendar's
     assert row["t0_source_live"] == "expected_sec_8k" and "median of 3 sec_8k acceptances" in row["schedule_note"]
     assert live.with_event_ids(up)[E.event_id].tolist() == [EVENT]  # a table id is never re-minted
+
+
+def test_pinned_release_is_confirmed_by_volume_when_the_bars_move_little(world, monkeypatch):
+    """Costco 2026-09-24: 45 contracts at the pinned minute against a zero baseline, bars of
+    0.6-0.8 %, no bar at the 1 % the unpinned detector needs. Within a few minutes of the pin the
+    volume spike with a 1 % five-bar range is the release. (The world's bars span 2 % every bar,
+    so the range leg passes; confirm_pinned_release itself is tested on shaped bars below.)"""
+    s = world["settings"]
+    pin = to_utc("2026-08-26 20:15", assume_tz="UTC")
+    ev = world["events"].assign(**{E.t0: pin, E.t0_source: "manual"})
+    ev.to_parquet(s.events_path, index=False)
+    calls: list[tuple] = []
+
+    def detector(bars, day, **kw):
+        calls.append((bars, day, kw))
+        if "abs_ret_threshold" in kw:  # the relaxed pass sees the muted 16:15 bar
+            return pin
+        return None  # nothing reaches 1 %
+
+    monkeypatch.setattr(events_mod, "detect_release_live", detector)
+    now = pin + pd.Timedelta(minutes=31)
+    res = live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now),
+                             sec=FakeSEC(), append=False)
+    assert res["row"]["t0_live"] == pin and res["row"]["off_schedule"] is False
+    assert "release confirmed at 16:15 New York by volume and a 2.0 % range over 5 minutes (no single bar moved 1 %)" \
+           in res["row"]["schedule_note"]
+    relaxed = [c for c in calls if "abs_ret_threshold" in c[2]][-1]
+    assert relaxed[2]["abs_ret_threshold"] == live.PINNED_CANDIDATE_ABS_RET == 0.002
+    assert relaxed[2]["not_before"] == pin - live.PINNED_CONFIRM_BEFORE == to_utc("2026-08-26 20:14", assume_tz="UTC")
+    assert pd.to_datetime(relaxed[0][C.t], utc=True).max() <= pin + live.PINNED_CONFIRM_AFTER  # bounded on the right too
+    # the standard pass finding an earlier bar keeps precedence; the relaxed pass never moves t0 later
+    monkeypatch.setattr(events_mod, "detect_release_live",
+                        lambda bars, day, **kw: pin if "abs_ret_threshold" in kw else pin - pd.Timedelta(minutes=2))
+    now2 = pin - pd.Timedelta(minutes=2) + pd.Timedelta(minutes=31)
+    res = live.predict_event(s, event_id=EVENT, decision="post_30m", now=now2, hl=FakeHL(now2), fmp=FakeFMP(now2),
+                             sec=FakeSEC(), append=False)
+    assert res["row"]["t0_live"] == pin - pd.Timedelta(minutes=2)
+    assert "confirmed" not in res["row"]["schedule_note"]
+    # the standard pass finding a later 1 % bar (the second minute of the reaction) yields to the
+    # relaxed pass's earlier pinned-minute bar
+    monkeypatch.setattr(events_mod, "detect_release_live",
+                        lambda bars, day, **kw: pin if "abs_ret_threshold" in kw else pin + pd.Timedelta(minutes=1))
+    res = live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now),
+                             sec=FakeSEC(), append=False)
+    assert res["row"]["t0_live"] == pin and res["row"]["off_schedule"] is False
+    assert "release confirmed at 16:15 New York by volume and a 2.0 % range over 5 minutes (the first 1 % bar came at " \
+           "16:16 New York)" in res["row"]["schedule_note"]
+    # a 1 % bar nine minutes after the confirmation is the slow reaction's own continuation, not a
+    # late release: the confirmation stands (a wrong pin on a jumpy name is the accepted exposure)
+    late = pin + pd.Timedelta(minutes=9)
+    monkeypatch.setattr(events_mod, "detect_release_live",
+                        lambda bars, day, **kw: pin if "abs_ret_threshold" in kw else late)
+    res = live.predict_event(s, event_id=EVENT, decision="post_30m", now=now, hl=FakeHL(now), fmp=FakeFMP(now),
+                             sec=FakeSEC(), append=False)
+    assert res["row"]["t0_live"] == pin and res["row"]["off_schedule"] is False
+    assert "(the first 1 % bar came at 16:24 New York)" in res["row"]["schedule_note"]
+
+
+def _shaped_bars(pin: pd.Timestamp, *, spike_ret: float, follow: list[float], vol: float = 45.0,
+                 follow_vol: float | None = None) -> pd.DataFrame:
+    """After-hours-like 1-minute bars around `pin`: a zero-volume baseline on prior days and on
+    the day, then a candidate bar at `pin` moving `spike_ret` on `vol` contracts followed by bars
+    whose close-to-close moves are `follow`; highs and lows hug the opens and closes."""
+    rows = []
+    px = 900.0
+    for d in range(-4, 1):
+        base = pin.normalize() + pd.Timedelta(days=d) + pd.Timedelta(hours=pin.hour - 1)
+        for m in range(0, 120):
+            t = base + pd.Timedelta(minutes=m)
+            o = c = px
+            v = 0.0
+            if d == 0 and t >= pin:
+                k = int((t - pin) / pd.Timedelta(minutes=1))
+                if k == 0:
+                    o, c, v = px, px * (1 + spike_ret), vol
+                elif k <= len(follow):
+                    o, c, v = px, px * (1 + follow[k - 1]), (vol if follow_vol is None else follow_vol)
+                px = c
+            rows.append({C.market: "xyz:X", C.interval: "1m", C.t: t, C.t_end: t + pd.Timedelta(minutes=1), C.open: o,
+                         C.high: max(o, c) * 1.0002, C.low: min(o, c) * 0.9998, C.close: c, C.volume: v, C.n_trades: int(v),
+                         C.source: "hl"})
+    return pd.DataFrame(rows)
+
+
+def test_confirm_pinned_release_needs_a_one_percent_range_across_the_window():
+    pin = to_utc("2026-09-24 20:15", assume_tz="UTC")
+    day = pd.Timestamp("2026-09-24")
+    now = pin + pd.Timedelta(minutes=15)
+    # Costco-shaped: +0.6 % then -0.8 %, -0.6 %, +0.2 %, -0.4 %: 1.6 % high to low over five bars
+    cost_like = _shaped_bars(pin, spike_ret=0.006, follow=[-0.008, -0.006, 0.002, -0.004])
+    hit = live.confirm_pinned_release(cost_like, day, pin, now)
+    assert hit is not None and hit[0] == pin and 0.015 < hit[1] < 0.018
+    assert events_mod.detect_release_live(cost_like, day, now=now, not_before=pin - pd.Timedelta(minutes=15)) is None
+    # an isolated 0.6 % print on volume with nothing behind it is not a release
+    lone = _shaped_bars(pin, spike_ret=0.006, follow=[0.0, 0.0, 0.0, 0.0])
+    assert live.confirm_pinned_release(lone, day, pin, now) is None
+    # a reaction that starts and ends before the window (spike at pin - 3, follow-through at pin - 2)
+    early = _shaped_bars(pin - pd.Timedelta(minutes=3), spike_ret=0.006, follow=[-0.008, 0.0, 0.0, 0.0])
+    assert live.confirm_pinned_release(early, day, pin, now) is None
+    # a reaction that starts two minutes early but is still unfolding inside the window is taken from
+    # its first in-window bar: one minute late, the price of not looking before the window
+    early2 = _shaped_bars(pin - pd.Timedelta(minutes=2), spike_ret=0.006, follow=[-0.008, -0.006, 0.002, -0.004])
+    assert live.confirm_pinned_release(early2, day, pin, now)[0] == pin - pd.Timedelta(minutes=1)
+    # ... and one minute before it is inside
+    one_early = _shaped_bars(pin - pd.Timedelta(minutes=1), spike_ret=0.006, follow=[-0.008, -0.006, 0.002, -0.004])
+    assert live.confirm_pinned_release(one_early, day, pin, now)[0] == pin - pd.Timedelta(minutes=1)
+    # a candidate bar under 0.2 % never qualifies, however large the (volume-less) range behind it
+    flat_start = _shaped_bars(pin, spike_ret=0.001, follow=[-0.008, -0.006, 0.002, -0.004], follow_vol=0.0)
+    assert live.confirm_pinned_release(flat_start, day, pin, now) is None
+    # the range window must have elapsed: at pin + 3 the five bars are not all closed yet
+    assert live.confirm_pinned_release(cost_like, day, pin, pin + pd.Timedelta(minutes=3)) is None
+    # a lone print at the pin followed by the real reaction at pin + 4: the reaction, not the print
+    late_real = _shaped_bars(pin, spike_ret=0.003, follow=[0.0, 0.0, 0.0, 0.006, -0.008, -0.006])
+    late_real.loc[late_real[C.t] == pin + pd.Timedelta(minutes=4), C.volume] = 45.0
+    hit = live.confirm_pinned_release(late_real, day, pin, now)
+    assert hit is not None and hit[0] == pin + pd.Timedelta(minutes=4)
+    # Costco's heavy pre-release bars (20:07: 72 contracts, 0.16 %) with the pin slid onto them: the
+    # candidate leg holds them out, and a 0.25 % version fails the range leg on a flat tape
+    for ret in (0.0016, 0.0025):
+        heavy = _shaped_bars(pin, spike_ret=0.0, follow=[], vol=0.0)
+        early_bar = pin - pd.Timedelta(minutes=8)
+        heavy.loc[heavy[C.t] == early_bar, [C.close, C.high, C.volume, C.n_trades]] = [900.0 * (1 + ret), 900.0 * (1 + ret) * 1.0002, 72.0, 72]
+        assert live.confirm_pinned_release(heavy, day, early_bar, early_bar + pd.Timedelta(minutes=15)) is None, ret

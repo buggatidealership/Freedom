@@ -295,6 +295,63 @@ def pre_schedule(settings: Settings, event: pd.Series, events: pd.DataFrame, dec
 # 8-K clock in events.expected_t0_for, so it sets the expectation only for an issuer without 8-K
 # acceptances in the table: ASML, TSM.)
 PINNED_T0_SOURCES = frozenset({"expected_manual", "expected_issuer_clock"})
+# A pinned release whose reaction unfolds over several bars is confirmed inside a tight window
+# around the pin. The unpinned detector needs one bar that moves 1 %; xyz:COST 2026-09-24 printed
+# 45 contracts at the pinned minute against a zero after-hours baseline (robust z = 45) and moved
+# 0.6, 0.8 and 0.6 % on three consecutive bars, 2.3 % high to low over five minutes, and no post
+# card was made. The confirmation keeps the detector's volume leg, lowers the candidate bar's
+# own move to PINNED_CANDIDATE_ABS_RET and asks the PINNED_RANGE_BARS bars from the candidate to
+# span PINNED_RANGE_THRESHOLD: the 1 % may take five minutes instead of one. Measured with a
+# hypothetical pin slid over every minute of a quiet New York day (2026-09-23, no release, one
+# to two prior days of bars for the baseline where production has ten): xyz:COST 0 of 1440 pin
+# positions confirm; xyz:BB, an $8 perp that is jumpy around the clock, 42 of 1440 (2.9 %) do,
+# 11 of the 91 positions in the 06:30-08:00 New York band where its own pin sits and none in
+# the after-close or evening bands, against 0 of 1440 for the 1 % rule. So the exposure is a pin
+# that is wrong or a release that is late by more than PINNED_CONFIRM_AFTER on a jumpy name:
+# roughly a one-in-ten chance of a plausible card at a wrong t0_live in that name's pre-market
+# (the scorecard then excludes it as premature). The confirmation is not overturned by a later 1 % bar: on a slow
+# reaction that bar is the reaction's own continuation, and reading it as a late release would
+# drop exactly the cards this rule exists for. The standard detector wins only when it finds an
+# earlier (or the same) bar.
+PINNED_CONFIRM_BEFORE = pd.Timedelta(minutes=1)
+PINNED_CONFIRM_AFTER = pd.Timedelta(minutes=5)
+PINNED_CANDIDATE_ABS_RET = 0.002
+PINNED_RANGE_BARS = 5
+PINNED_RANGE_THRESHOLD = 0.01
+
+
+def confirm_pinned_release(bars: pd.DataFrame, day: pd.Timestamp, pin: pd.Timestamp,
+                           now: pd.Timestamp) -> tuple[pd.Timestamp, float] | None:
+    """(start of the confirming bar, high-to-low range of the bars in the PINNED_RANGE_BARS
+    minutes from it as a fraction of the close before it) for the first bar in
+    [pin - PINNED_CONFIRM_BEFORE, pin + PINNED_CONFIRM_AFTER] that the live detector accepts at
+    PINNED_CANDIDATE_ABS_RET (its volume leg unchanged) and whose range window has elapsed by
+    `now` (the range is taken over the bars present in it) and spans PINNED_RANGE_THRESHOLD;
+    None when no bar qualifies."""
+    if bars is None or len(bars) == 0:
+        return None
+    t = pd.to_datetime(bars[C.t], utc=True)
+    lo, hi = pin - PINNED_CONFIRM_BEFORE, pin + PINNED_CONFIRM_AFTER
+    candidates = bars[t <= hi]
+    span = pd.Timedelta(minutes=PINNED_RANGE_BARS)
+    not_before = lo
+    while not_before <= hi:
+        hit = events_mod.detect_release_live(candidates, day, now=now, not_before=not_before,
+                                             abs_ret_threshold=PINNED_CANDIDATE_ABS_RET)
+        if hit is None:
+            return None
+        start = to_utc(hit)
+        if start + span <= now:
+            window = bars[(t >= start) & (t < start + span)]
+            before = bars[t < start]
+            if len(window) and len(before):
+                ref = float(pd.to_numeric(before[C.close], errors="coerce").iloc[-1])
+                hi_px = float(pd.to_numeric(window[C.high], errors="coerce").max())
+                lo_px = float(pd.to_numeric(window[C.low], errors="coerce").min())
+                if ref > 0 and (hi_px - lo_px) / ref >= PINNED_RANGE_THRESHOLD:
+                    return start, (hi_px - lo_px) / ref
+        not_before = start + pd.Timedelta(minutes=1)
+    return None
 
 
 def _clock(ts: pd.Timestamp) -> str:
@@ -314,7 +371,9 @@ def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.T
     card of the day permanently off schedule (para:CIEN 2026-09-03 replayed: 03:45 ET for a
     07:00 ET release). A median 8-K clock or a calendar flag can be hours wrong (GME 2026-09-08),
     so there the whole report day stays in play and a wrong schedule surfaces as an off-schedule
-    row rather than as a plausible card."""
+    row rather than as a plausible card. Inside a few minutes of a pinned release a volume spike
+    whose reaction spans 1 % over five bars also counts (confirm_pinned_release): it is t0_live
+    unless the standard detector found an earlier bar."""
     k = DECISION_TIMES[decision]
     day = report_day(event)
     if bars is None or len(bars) == 0:
@@ -330,6 +389,17 @@ def post_schedule(settings: Settings, event: pd.Series, decision: str, now: pd.T
                      f"(release pinned at {_clock(expected_t0)} by {detail})")
     t0_live = events_mod.detect_release_live(bars, day, now=now, **gate)
     if gate:
+        # a reaction that unfolds over several bars at the pinned minute is the release too
+        confirmed = confirm_pinned_release(bars, day, expected_t0, now)
+        if confirmed is not None:
+            start, rng = confirmed
+            standard = to_utc(t0_live) if t0_live is not None else None
+            if standard is None or start < standard:
+                t0_live = start
+                tail = ("no single bar moved 1 %" if standard is None
+                        else f"the first 1 % bar came at {_clock(standard)} New York")
+                gate_note += (f"; release confirmed at {_clock(start)} New York by volume and a {100 * rng:.1f} % "
+                              f"range over {PINNED_RANGE_BARS} minutes ({tail})")
         # name what the gate hid (on a hit and on a miss), so a release that really came early is
         # visible on the card or in the note
         earlier = events_mod.detect_release_live(bars, day, now=now)
