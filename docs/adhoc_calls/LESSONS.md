@@ -279,3 +279,4 @@ Written 2026-10-15 09:40 UTC. **Call DOWN 2.5 % at P(up) 0.39; realised −2.01 
 - **Pending at the next wake:** the 6-K content (GM vs 65-67 %, Q4 guide, FY line, capex) to mark KS1-KS4 and the A-print regime hypothesis; the ADR's Oct 15 close and Taiwan's Oct 16 close as the day-two line.
 - **Tallies (D):** pre-release research, cluster as one **13 of 16** (individually 14 of 21); coin 11.5 of 17 (13 of 21). Brier running: 16 scored calls **3.6350 vs the coin's 4.000** (mean 0.2272 vs 0.250). DOWN calls 9 of 11; UP calls 2 of 5.
 
+- **Scoreboard note (S, the user's report, 2026-10-15):** the TSMC call was the closest of the four models on the card and took the first place on the running board. Not evidence of skill on its own: one print, coin on the same side, size 0.5 pt off with the shrink line closer still.
