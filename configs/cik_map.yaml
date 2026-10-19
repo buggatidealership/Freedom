@@ -20,6 +20,7 @@ tickers:
   BX: {cik: 1393818, title: Blackstone Inc.}
   CBRS: {cik: 2021728, title: Cerebras Systems Inc.}
   CIEN: {cik: 936395, title: CIENA CORP}
+  CIFR: {cik: 1819989, title: Cipher Digital Inc.}
   COHR: {cik: 820318, title: COHERENT CORP.}
   COIN: {cik: 1679788, title: 'Coinbase Global, Inc.'}
   COST: {cik: 909832, title: COSTCO WHOLESALE CORP /NEW}
@@ -27,6 +28,7 @@ tickers:
   CRDO: {cik: 1807794, title: Credo Technology Group Holding Ltd}
   CRWD: {cik: 1535527, title: 'CrowdStrike Holdings, Inc.'}
   CRWV: {cik: 1769628, title: 'CoreWeave, Inc.'}
+  CVX: {cik: 93410, title: CHEVRON CORP}
   DELL: {cik: 1571996, title: Dell Technologies Inc.}
   DKNG: {cik: 1883685, title: DraftKings Inc.}
   EBAY: {cik: 1065088, title: EBAY INC}
@@ -39,6 +41,7 @@ tickers:
   HOOD: {cik: 1783879, title: 'Robinhood Markets, Inc.'}
   IBM: {cik: 51143, title: INTERNATIONAL BUSINESS MACHINES CORP}
   INTC: {cik: 50863, title: INTEL CORP}
+  IONQ: {cik: 1824920, title: 'IonQ, Inc.'}
   IREN: {cik: 1878848, title: IREN Ltd}
   LITE: {cik: 1633978, title: Lumentum Holdings Inc.}
   LLY: {cik: 59478, title: ELI LILLY & Co}
@@ -57,6 +60,7 @@ tickers:
   NOW: {cik: 1373715, title: 'ServiceNow, Inc.'}
   NVDA: {cik: 1045810, title: NVIDIA CORP}
   ORCL: {cik: 1341439, title: ORACLE CORP}
+  OURA: {cik: 2133022, title: Oura Inc.}
   PLTR: {cik: 1321655, title: Palantir Technologies Inc.}
   QCOM: {cik: 804328, title: QUALCOMM INC/DE}
   QNT: {cik: 2110105, title: Quantinuum Inc.}
@@ -73,6 +77,8 @@ tickers:
   TSLA: {cik: 1318605, title: 'Tesla, Inc.'}
   TSM: {cik: 1046179, title: TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD}
   TTWO: {cik: 946581, title: TAKE TWO INTERACTIVE SOFTWARE INC}
+  TWST: {cik: 1581280, title: Twist Bioscience Corp}
+  UMC: {cik: 1033767, title: UNITED MICROELECTRONICS CORP}
   USAR: {cik: 1970622, title: 'USA Rare Earth, Inc.'}
   VST: {cik: 1692819, title: Vistra Corp.}
   WDC: {cik: 106040, title: WESTERN DIGITAL CORP}
