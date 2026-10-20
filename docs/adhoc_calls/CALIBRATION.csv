@@ -1,0 +1,26 @@
+call,date,side,size_pct,p_up,realized_pct,direction,note
+FOXCONN_2317,2026-10-05,UP,,0.52,,HIT,pre-release; size and realized in the doc
+RPM,2026-10-06,UP,1.5,0.57,+3.16,HIT,
+STZ,2026-10-07,DOWN,4.5,,,MISS,post-release call; P(up) in the doc
+SAMSUNG_005930,2026-10-08,DOWN,1.5,0.45,-2.42,HIT,
+QUANTA_2382,2026-10-08,UP,2.0,0.51,-2.84,MISS,
+LEVI,2026-10-08,DOWN,6.5,,-2.36,HIT,P(up) in the doc
+APLD,2026-10-08,UP,8.0,,+0.17,HIT,P(up) in the doc
+PEP,2026-10-08,DOWN,3.0,,+3.73,MISS,P(up) in the doc
+FASTRETAILING_9983,2026-10-08,DOWN,5.5,0.46,-4.04,HIT,
+UNH,2026-10-13,DOWN,3.0,0.46,-0.20,HIT,A print faded from +5 open
+DPZ,2026-10-13,DOWN,2.0,0.48,-4.76,HIT,
+WFC,2026-10-13,DOWN,2.5,0.49,-3.10,HIT,bank cluster
+JPM,2026-10-13,DOWN,1.3,0.47,-0.86,HIT,bank cluster
+GS,2026-10-13,UP,2.0,0.53,-0.23,MISS,bank cluster; A print sold
+JNJ,2026-10-13,DOWN,1.2,0.42,-5.73,HIT,
+C,2026-10-13,UP,1.5,0.50,-5.60,MISS,bank cluster; pre-released line
+ASML_AMS,2026-10-14,DOWN,3.0,0.41,+1.23,MISS,A print; ADR catch-up set the sign
+BAC,2026-10-14,DOWN,2.4,0.32,-4.76,HIT,known charge plus operating miss
+MS,2026-10-14,UP,2.5,0.51,-2.75,MISS,A print sold
+BLK,2026-10-14,UP,3.0,0.52,+0.72,HIT,A print bought; +2.6 relative
+TSMC_2330,2026-10-15,DOWN,2.5,0.39,-2.01,HIT,A print sold; graded on the release-day close
+IBKR,2026-10-15,DOWN,3.0,0.39,-3.88,HIT,B+ print sold with the sector
+GE,2026-10-20,DOWN,4.0,0.36,-3.67,HIT,fourth straight beat-and-raise sold
+NFLX,2026-10-20,DOWN,5.0,0.41,,,pending Oct 21 close
+SPCX,2026-10-20,DOWN,5.0,0.42,,,pending Oct 21 close; date unconfirmed

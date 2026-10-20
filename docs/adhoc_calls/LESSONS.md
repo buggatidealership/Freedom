@@ -317,3 +317,15 @@ Written 2026-10-20 20:52 UTC. **Call DOWN 4.0 % at P(up) 0.36; realised −3.67 
 - **New lessons (testable).** 1. *Cash-flow switch on quality compounders:* a raise with FCF down y/y or conversion under the guide's floor is the sold-print mechanism; give it its own switch at P ≥ 0.3 on names priced on cash conversion (GE, ASML-type). Helped if the next such print closes down. 2. *ABOVE line = street + own median raise,* not street + 1 %: a raise landing on the threshold reads as a hold (GE 8.05 vs 7.91 sold). 3. *Gap as a size input on pre-open prints:* GE's close/gap ran 1.26-2.1; when the open is known before the close the size should scale off it — not usable at the lock, usable for the day-two record.
 - **Tallies (D):** pre-release research, cluster as one **15 of 18** (individually 16 of 23); coin 11.5 of 19 (13 of 23). Brier running: 18 scored calls **3.9167 vs the coin's 4.500** (mean 0.2176 vs 0.250). DOWN calls 11 of 13; UP calls 2 of 5. Six straight hits, all DOWN calls on good prints sold; the method is still untested on a bought print.
 
+
+## Trust calibration (standing section; updated at every grading)
+
+The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
+
+- **Call types and their graded record (as of 2026-10-20, 23 graded):**
+  - DOWN on a good print from a sold-off base in a sold-print regime: **11 of 13** hits (misses: PEP, ASML by the ADR catch-up). Sizes near the conditional or options benchmark landed within 1 pt in 6 of the last 7. Trust: high, but regime-conditional.
+  - UP calls: **2 of 5** (hits: BLK, APLD-type in-line prints; misses: GS, C, MS, all A prints sold). Trust: low; an UP call needs a reason the regime does not apply (a head start in the grade window, a non-de-rated base, a sector bid).
+  - Coin-distance: calls with P(up) within 0.05 of 0.50 went 6 of 9; calls at ≤ 0.42 went 7 of 7. The stated P(up) has been honest at the extremes and uninformative near the coin.
+  - Size: the shrink line won on sold prints with small moves (ASML, MS, TSMC); the conditional/options size won on large sold moves (JNJ, C, BAC, IBKR, GE). Rule in force: shrink when the side is against the regime, full size when with it.
+- **How trust moves:** each type's trust is its graded record; a type with ≥ 8 graded calls and ≥ 70 % hits may size at the conditional; a type under 60 % or under 5 calls sizes at the shrink line regardless of conviction. A regime flip (two bought A prints in five) resets the DOWN-on-good-print type to "untested" and the UP type to "watch".
+- **What a future session must not do:** trust pretraining ("beats get bought") over this record; spend agents where a data pull suffices; lock before reading the release clock and the company's own filings; grade without marking every standing lesson.
