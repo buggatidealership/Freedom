@@ -22,10 +22,12 @@ BLK,2026-10-14,UP,3.0,0.52,+0.72,HIT,A print bought; +2.6 relative
 TSMC_2330,2026-10-15,DOWN,2.5,0.39,-2.01,HIT,A print sold; graded on the release-day close
 IBKR,2026-10-15,DOWN,3.0,0.39,-3.88,HIT,B+ print sold with the sector
 GE,2026-10-20,DOWN,4.0,0.36,-3.67,HIT,fourth straight beat-and-raise sold
-NFLX,2026-10-20,DOWN,5.0,0.41,,,pending Oct 21 close
-SPCX,2026-10-20,DOWN,5.0,0.42,,,pending Oct 21 close; date unconfirmed
+NFLX,2026-10-20,DOWN,5.0,0.41,-5.31,HIT,in-line Q3 with the ad-revenue line cut; sixth straight sold print; gap -6.6 faded to -5.3
+SPCX,2026-10-20,DOWN,5.0,0.42,7.79,MISS,SI segment inflection to GAAP profit bought +7.8; first bought A print from a sold-off base this round
 SAP,2026-10-21,DOWN,3.0,0.47,,,pending Oct 22 Xetra close; coin-flip P(up), side on skew
 IBM,2026-10-21,DOWN,6.0,0.42,,,pending Oct 22 close; de-rated and chased base, cash-flow switch
 LRCX,2026-10-21,DOWN,5.0,0.45,,,pending Oct 22 close; flushed −12.5 % into the print, near-coin, size toward the mixture median
 TSLA,2026-10-21,DOWN,4.5,0.42,,,pending Oct 22 close; +9 % merger run into a weak print; options 4.6 as size
 TXN,2026-10-21,DOWN,3.5,0.44,,,pending Oct 22 close; guide-vs-street name, chased +3.9 % on an analog sector bid, near-coin, shrink size
+PM,2026-10-21,DOWN,2.5,0.42,-1.22,HIT,record quarter with the FY line held below the street; gap -6.4 bought back to -1.2
+META,2026-10-21,DOWN,6.0,0.39,,,pending Oct 22 close; 2027 capex language as the switch
