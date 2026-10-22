@@ -337,6 +337,8 @@ Written 2026-10-21 20:50 UTC. **NFLX: DOWN 5.0 % at P(up) 0.41, realised −5.31
 
 Written 2026-10-22 16:12 UTC. **SAP: DOWN 3.0 % at P(up) 0.47, realised +3.21 % → MISS (size error 6.21), coin DOWN miss, Brier 0.2809.** Cost: two data pulls, one search, one page fetch.
 
+**Excluded from the track record (2026-10-22, by the user):** the board removed SAP as a post-release call. The lock commit is stamped 17:57 UTC Oct 21 and the release came at the US close (~20:00 UTC) with a 23:00 CEST webcast, so by the timestamps the lock preceded the release; the board's decision governs. The tallies below this entry no longer include SAP; the lessons stand because they were learned.
+
 **The lessons first.**
 1. *At a coin flip, the name's own base rate breaks the tie, not the tail skew.* I had P(up) at 0.47 and chose DOWN because the down tail was fatter. The name was 10 of 12 up on prints; it printed in line with an 18 % profit beat and an upper-end steer and closed +3.2 %. Rule replacing hypothesis 6: when P(up) is within 0.05 of 0.50, side with the own-print base rate if it is ≥ 0.65 or ≤ 0.35 either way; use the skew only when the base rate is itself near 0.5.
 2. *The chase-sold regime is a US-tape rule.* ASML (+1.2 %) and SAP (+3.2 %) are the two European after-US-close prints this round, both good prints from run-ups, both bought on day one: 0 of 2 for the regime. The regime's evidence is US names in the AI-capex and financials tape; for European names the own cell governs until this breaks.
@@ -362,7 +364,7 @@ Written 2026-10-22 20:55 UTC. **META DOWN 6.0 → −6.98 HIT. IBM DOWN 6.0 → 
 8. *Process.* The posts rule from the user is now in force: for any public take, primary sources only (the 8-K/6-K and the transcript), and the view comes from the pre-print scenario table marked against the release, never from a press paraphrase. The Meta take last night was written before the release and said so; the Tesla take was grounded on the transcript summary and the 8-K.
 
 - **Standing lessons marked (summary across the seven):** 1 helped ×7; 2 helped (META, LRCX, TSLA, TXN, SPOT), hurt (IBM, LMT); 3 helped inside AI-capex (META, LRCX, TSLA, TXN), hurt outside (IBM, LMT); 4 helped (META, TXN, TSLA), hurt (LRCX deviation, SPOT shrink); 5 reversals and extensions as above; 6-7 met ×7; 8 helped (META capex line, IBM/LMT FCF lines in reverse), beaten by the layer rule on Tesla; 9 own cell lost to the sector on LRCX/TXN/LMT, won on SPOT; 10 met; peer-print lead 3 of 5 (GM→TSLA helped, NFLX→SPOT hurt).
-- **Tallies (D):** pre-release research, cluster as one **21 of 28** (individually 22 of 33); coin 18.5 of 29 (20 of 33). Brier running: 28 scored pre-release calls **6.3364 vs the coin's 7.000** (mean 0.2263 vs 0.250). DOWN calls 17 of 23; UP calls 2 of 5 (pre-release); post-release class 1 of 2 (STZ miss, SPOT hit). The two misses today were both bought A prints outside the AI-capex tape; the four hits were all inside it or on it (TI as a semis name).
+- **Tallies (D), SAP excluded by the board (see the SAP entry):** pre-release research, cluster as one **21 of 27** (individually 22 of 32); coin 18.5 of 28 (20 of 32). Brier running: 27 scored pre-release calls **6.0555 vs the coin's 6.750** (mean 0.2243 vs 0.250). DOWN calls 17 of 22; UP calls 2 of 5 (pre-release); post-release class 1 of 2 (STZ miss, SPOT hit). The two misses today were both bought A prints outside the AI-capex tape; the four hits were all inside it or on it (TI as a semis name).
 
 ## Trust calibration (standing section; updated at every grading)
 
