@@ -37,8 +37,8 @@ BE,2026-10-22,DOWN,5.0,0.38,-11.35,HIT,record quarter and third guide raise sold
 WDC,2026-10-22,DOWN,5.0,0.39,-3.05,HIT,Dec guide 16 % above the street on revenue sold -3; AI-capex raises sold 4 of 4 this week
 AXP,2026-10-23,DOWN,2.5,0.40,-3.68,HIT,EPS guide raised to the street and sold -3.7; own habit (1 of 9 up) beat the non-AI relief regime
 VZ,2026-10-26,UP,3.5,0.58,-3.49,MISS,A print (406k net adds, third raise) sold -3.5 on light consolidated revenue and the SpaceX overhang; own-habit rule hurt
-HSBC,2026-10-27,DOWN,2.5,0.46,,,pending Oct 27 London close vs 1365.4p; Budget-eve overhang, buyback size as the swing
-NOVN,2026-10-27,DOWN,2.0,0.43,,,pending Oct 27 SIX close vs CHF 127.48; crowded defensive at the highs (PM analog), H2 cost step-up
+HSBC,2026-10-27,DOWN,2.5,0.46,-5.42,HIT,London close 1291.4p vs 1365.4p (ADR -5.53); revenue light and CET1 under the 14-14.5 range sold despite a $1 B buyback; UK bank peers flat, so the Budget-eve mechanism is not supported
+NOVN,2026-10-27,DOWN,2.0,0.43,1.02,MISS,SIX close 128.78 vs 127.48 (ADR +1.26); core EPS 2.46 vs 2.25 and the FY core operating income guide raised; the PM analog needed a held line and got a raise; own 2026 dip-buy cell was right
 PYPL,2026-10-27,DOWN,3.5,0.47,,,pending Oct 27 close; no-lean de-rated fintech, skew as the tie-break
 UPS,2026-10-27,DOWN,4.0,0.41,,,pending Oct 27 close; beat-and-raise-sold habit on a chased base
 KO,2026-10-27,UP,2.5,0.50,,,pending Oct 27 close; payoff asymmetry (+3.9 / -0.6) as the side rule at a coin flip
