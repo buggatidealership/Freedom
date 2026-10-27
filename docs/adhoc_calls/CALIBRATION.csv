@@ -37,13 +37,14 @@ BE,2026-10-22,DOWN,5.0,0.38,-11.35,HIT,record quarter and third guide raise sold
 WDC,2026-10-22,DOWN,5.0,0.39,-3.05,HIT,Dec guide 16 % above the street on revenue sold -3; AI-capex raises sold 4 of 4 this week
 AXP,2026-10-23,DOWN,2.5,0.40,-3.68,HIT,EPS guide raised to the street and sold -3.7; own habit (1 of 9 up) beat the non-AI relief regime
 VZ,2026-10-26,UP,3.5,0.58,-3.49,MISS,A print (406k net adds, third raise) sold -3.5 on light consolidated revenue and the SpaceX overhang; own-habit rule hurt
-HSBC,2026-10-27,DOWN,2.5,0.46,-5.42,HIT,London close 1291.4p vs 1365.4p (ADR -5.53); revenue light and CET1 under the 14-14.5 range sold despite a $1 B buyback; UK bank peers flat, so the Budget-eve mechanism is not supported
-NOVN,2026-10-27,DOWN,2.0,0.43,1.02,MISS,SIX close 128.78 vs 127.48 (ADR +1.26); core EPS 2.46 vs 2.25 and the FY core operating income guide raised; the PM analog needed a held line and got a raise; own 2026 dip-buy cell was right
+HSBC,2026-10-27,DOWN,2.5,0.46,-5.42,HIT,London close 1291.4p vs 1365.4p (ADR close -5.70); revenue light and CET1 under the 14-14.5 range sold despite a $1 B buyback; UK bank peers flat, so the Budget-eve mechanism is not supported
+NOVN,2026-10-27,DOWN,2.0,0.43,1.02,MISS,SIX close 128.78 vs 127.48 (ADR close +1.95); core EPS 2.46 vs 2.25 and the FY core operating income guide raised; the PM analog needed a held line and got a raise; own 2026 dip-buy cell was right
 PYPL,2026-10-27,DOWN,3.5,0.47,,,pending Oct 27 close; no-lean de-rated fintech, skew as the tie-break
 UPS,2026-10-27,DOWN,4.0,0.41,,,pending Oct 27 close; beat-and-raise-sold habit on a chased base
 KO,2026-10-27,UP,2.5,0.50,,,pending Oct 27 close; payoff asymmetry (+3.9 / -0.6) as the side rule at a coin flip
 GLW,2026-10-27,DOWN,6.0,0.33,,,pending Oct 27 close; AI-optical, four straight sold, halved; options size
 BA,2026-10-27,DOWN,2.5,0.46,,,pending Oct 27 close; October habit 0 of 3, charge tail; de-rated non-AI counter
 SKHYNIX_000660,2026-10-28,DOWN,4.0,0.42,,,pending Oct 28 KRX close vs 1341000 won (Daum, stockanalysis agrees); regime over own 10-of-12 habit inside the AI tape; special dividend is a met line; capex the sold line
-STX,2026-10-27,DOWN,5.0,0.42,,,pending Oct 28 close vs Oct 27 close (ref filled at the day-of update); regime over a 7-of-9 up habit inside the AI tape; WDC sibling sold a week earlier
-HOOD,2026-10-27,DOWN,4.0,0.33,,,pending Oct 28 close vs Oct 27 close (ref filled at the day-of update); 1-of-9 own habit plus the crypto overhang (AXP shape)
+STX,2026-10-27,DOWN,5.0,0.42,,,pending Oct 28 close vs 667.85 (Nasdaq 4 pm; settled row to confirm); regime over a 7-of-9 up habit inside the AI tape; WDC sibling sold a week earlier
+HOOD,2026-10-27,DOWN,4.0,0.33,,,pending Oct 28 close vs 94.56 (Nasdaq 4 pm; settled row to confirm); 1-of-9 own habit plus the crypto overhang (AXP shape)
+GEV,2026-10-28,DOWN,4.5,0.35,,,pending Oct 28 close vs 895.65 (Nasdaq 4 pm; settled row to confirm); AI-power inside the tape, chased +10 pct in two sessions, July miss-over-raise shape
