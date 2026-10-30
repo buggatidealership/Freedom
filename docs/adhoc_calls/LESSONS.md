@@ -533,7 +533,7 @@ Written 2026-10-30 21:20 UTC, graded at the user's note that the market had clos
 
 - **Standing lessons marked (nine calls):** 1 helped ×6 / hurt ×3; 2 helped ×6 / hurt ×3; 3 helped ×3 (INTC, SNDK, AMZN regime), n/a ×6; 4 hurt ×7 (INTC, AMZN, RDDT, SNDK, COIN, MSTR, XOM) / helped ×2 (SBUX, CVX size); 5 held ×7, inverted ×2 (AMZN, SBUX); 6 met ×9; 7 met ×6, weak ×3 (AMZN, SBUX, CVX); 8 helped ×5 (INTC, AMZN, SBUX, MSTR, RDDT-against-me), n/a ×4; 9 regime/own-cell agreed and hit ×5, base rule overrode a live C line and lost ×1 (RDDT), cross-name rules outranked the sector sign and lost ×2 (CVX, XOM), rules hit for an unstated reason ×1 (SBUX); 10 met ×9.
 - **Tallies (D), SAP excluded, counted individually:** pre-release research **42 of 65** (individually 43 of 70); coin 36.5 of 66. Brier running: 65 scored pre-release calls **15.0515 vs the coin's 16.250** (mean 0.2316 vs 0.250). DOWN calls 35 of 53; UP calls 5 of 12; post-release class 1 of 2. Two-day round (Oct 29-30, twenty calls): 11 of 20, coin 9 of 20, mean Brier 0.243 vs 0.250. Coin-distance: P(up) ≤ 0.42 now 13 of 16 (AMZN, COIN hits); 0.43-0.44 band 4 of 7 this week (GOOGL, INTC, SBUX hits; MA, CVX, XOM misses, NOVN earlier); within 0.05 of the coin 9 of 18 (SNDK, MSTR hits; RDDT miss).
-- **Pending:** none locked. Settled stockanalysis rows for the nine Oct 30 closes to be confirmed at the next grading (AMZN read 238.00 unsettled vs the 240.35 official print at grading).
+- **Pending:** none locked. Settled stockanalysis rows for the nine Oct 30 closes confirmed at 22:10 UTC, all within a tick of the graded prints (AMZN's 238.00 was a lagging row; it settled at 240.35).
 
 ## Trust calibration (standing section; updated at every grading)
 
