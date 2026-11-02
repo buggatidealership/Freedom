@@ -28,6 +28,7 @@ While pushes return 403:
 
 - Git history starts at the 2026-10-22 re-import; earlier history is only in the offline bundles.
 - `docs/adhoc_calls/NKE_2026-10-01.md` (the Nike call document) was not re-imported and is lost
-  from the repository; its resolution is in `NKE_resolution_pending.md`.
+  from the repository; its resolution is in `NKE_resolution_pending.md`. Its mechanism is left for
+  the session that made the call.
 - `CCL_2026-09-29.md` and `MU_2026-09-30.md` were restored on 2026-11-02 from the 2026-09-30
   backup; the MU copy predates its grading (the grade is in LESSONS.md).
