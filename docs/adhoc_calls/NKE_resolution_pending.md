@@ -17,3 +17,12 @@ Official closes (Nasdaq historical table, read 2026-10-03 12:01 UTC; stockanalys
 Intraday low 31.97 (-9.0 %). The mechanism (what in the release drove the move, including the item
 2.05 restructuring costs) is still to be read. Running tally of documented calls: 2 of 9 directions
 right (BB, NKE).
+
+## Status (2026-11-02)
+
+The call document `NKE_2026-10-01.md` this note was meant for is not in the repository: it was
+written during the GitHub suspension and was not part of the 2026-10-22 re-import. It may survive
+only in the offline bundles sent to the user in early October. The mechanism behind the move was
+never read; it is not reconstructed here because no source in the repository or the session record
+supports one. To fill it, read the 8-K above (exhibit 99.1 and the item 2.05 text) and update the
+NKE entry in LESSONS.md.
