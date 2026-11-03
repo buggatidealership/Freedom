@@ -30,3 +30,5 @@ Same thresholds as the Opus doc: KS1 revenue ≥ $2.28 B and growth ≥ 93 % (P 
 Same rubric as the Opus doc (right reason = up close with KS1 fired; luck = up close without KS1; reaction miss = KS1 and KS3 fired and a down close; fundamentals miss = KS1 not fired and a down close, then check KS2/KS4). Size right within 3 pt. **Comparison line:** which size (8 vs 10) is nearer |r|, and whether the lower P(up) (0.52 vs 0.53) went the right way. One print cannot separate them; recorded so the series can.
 
 CALL: UP 10.0%
+
+**GRADED 2026-11-03 21:50 UTC (same session; closes provisional, see GRADE_2026-11-03.md): MISS, reaction miss (−1.65 %; same switches; the lower P(up) went the right way by 0.01)**

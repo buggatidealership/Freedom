@@ -30,3 +30,5 @@ Same thresholds as the Opus doc so the two calls grade on the same facts: KS1 De
 Same rubric as the Opus doc (right reason = down close with December GM guide < 47 %; luck = down close with GM ≥ 47 % and growth ≥ 12 %; reaction miss = GM < 47 % and up ≥ +1 %; fundamentals miss = GM ≥ 47 % and up). Size counts as right within 1.5 pt. **Plus one comparison line:** whichever of the two sizes (2.5 vs 3.0) is nearer |r|, and whether the 0.02 probability difference went the right way. Both are too small to mean anything on one print; they are recorded so the question can be answered over several.
 
 CALL: DOWN 3.0%
+
+**GRADED 2026-11-03 21:50 UTC (same session; closes provisional, see GRADE_2026-11-03.md): HIT, right reason (about −2.0 %, provisional; KS1 and KS4 fired, scenario C; the Opus 2.5 size was nearer than 3.0)**
