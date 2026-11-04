@@ -9,6 +9,7 @@ tickers:
   AMAT: {cik: 6951, title: APPLIED MATERIALS INC /DE}
   AMD: {cik: 2488, title: ADVANCED MICRO DEVICES INC}
   AMZN: {cik: 1018724, title: AMAZON COM INC}
+  ANT: {cik: 2130357, title: 'Anthropic, PBC'}
   ARM: {cik: 1973239, title: ARM HOLDINGS PLC /UK}
   ASML: {cik: 937966, title: ASML HOLDING NV}
   AVGO: {cik: 1730168, title: Broadcom Inc.}
@@ -40,6 +41,7 @@ tickers:
   HIMS: {cik: 1773751, title: 'Hims & Hers Health, Inc.'}
   HOOD: {cik: 1783879, title: 'Robinhood Markets, Inc.'}
   IBM: {cik: 51143, title: INTERNATIONAL BUSINESS MACHINES CORP}
+  ICE: {cik: 1571949, title: 'Intercontinental Exchange, Inc.'}
   INTC: {cik: 50863, title: INTEL CORP}
   IONQ: {cik: 1824920, title: 'IonQ, Inc.'}
   IREN: {cik: 1878848, title: IREN Ltd}
