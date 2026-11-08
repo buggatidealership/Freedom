@@ -30,4 +30,8 @@ A Monday open below Friday's close of ₩1,132,000, or Samsung opening red with 
 ## Grading
 Mon Nov 9 KRX settled close (stockanalysis krx-000660, Daum as cross-check) vs ₩1,132,000; sign and |error| vs +4 %; record the open (KS1/KS2) and Samsung's close. TAPE class, separate tally.
 
+
+## Pre-open update
+- **Pre-open note, Sun 2026-11-08 ~15:00 UTC (M/S; observation, the call stands as locked):** a weekend catalyst arrived. Press reports dated Nov 8 (Axios, CNN affiliates) say Nvidia's CEO admitted, in a message to staff, a personal relationship with a person US officials suspect of working for Chinese intelligence; the board has opened an independent-committee investigation and says he continues as CEO; on Nov 6 three House committee chairmen had already asked him to address his interactions with an executive of a company named in the reports, with a reply due Nov 11 and a briefing proposed for Nov 18. The intelligence claim rests on unnamed officials and is not confirmed by the company (S). **Nvidia shares have not yet traded on it; Monday is the first session.** This is the undated exogenous term the document did not carry: it enters the Monday session as a sector-leader shock, sign negative for the AI tape at the open, size unknown. For this call it is KS3's case (a weekend catalyst with US futures likely lower at the Seoul open; stated P 0.15, now realised) → P(up) moves from 0.67 toward 0.52 on the document's own rule; the graded line stays UP ≈ +4 %.
+
 CALL: SK hynix UP ≈ +4 % (P(up) 0.67) — Nov 9 KRX close vs Nov 6 close ₩1,132,000.

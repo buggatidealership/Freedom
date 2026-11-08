@@ -24,4 +24,8 @@ Made 2026-11-08 00:05 UTC (Saturday night US time). TAPE class, second entry (th
 ## Grading
 Item 1: SOXL's Monday Nov 9 official open vs $45.97 (sign; |error| vs +3.3 %). Item 2: SOXX's Friday Nov 13 official close vs $136.53 (sign; |error| vs +2.9 %); record AMAT's Thursday print reaction and the CPI day. TAPE class; counted separately from the earnings tallies.
 
+
+## Pre-open update
+- **Pre-open note, Sun 2026-11-08 ~15:00 UTC (M/S; observation, the call stands as locked):** a weekend catalyst arrived. Press reports dated Nov 8 (Axios, CNN affiliates) say Nvidia's CEO admitted, in a message to staff, a personal relationship with a person US officials suspect of working for Chinese intelligence; the board has opened an independent-committee investigation and says he continues as CEO; on Nov 6 three House committee chairmen had already asked him to address his interactions with an executive of a company named in the reports, with a reply due Nov 11 and a briefing proposed for Nov 18. The intelligence claim rests on unnamed officials and is not confirmed by the company (S). **Nvidia shares have not yet traded on it; Monday is the first session.** This is the undated exogenous term the document did not carry: it enters the Monday session as a sector-leader shock, sign negative for the AI tape at the open, size unknown. For item 1 (SOXL Monday open) it is the disproof condition's named shape — 'the narrative found a weekend catalyst' — arriving in a form the document did not anticipate (a CEO investigation rather than a bill). The graded lines stay as written; the grade will record this as the exogenous term.
+
 CALL: SOXL Monday open UP ≈ +3.3 % (P 0.68); SOXX week UP ≈ +2.9 % to $140.50 (P 0.60) — graded on the Nov 9 open and the Nov 13 close.
