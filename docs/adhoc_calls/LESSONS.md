@@ -652,6 +652,21 @@ Written 2026-11-07 09:25-09:35 UTC. **NET: UP 7.0 % at P(up) 0.53, realised +9.9
 - **Tallies (D), carried from the Nov 6 (Tokyo) entry plus NET, ABNB, DKNG (QCOM, ARM, DDOG re-stamped, no result changed):** pre-release research **50 of 84** (individually 51 of 91); coin 44.5 of 85. Brier running: 84 scored pre-release entries **20.0302 vs the coin's 21.000** (mean 0.2385 vs 0.250). DOWN calls 41 of 65; **UP calls 7 of 19**; post-release class 1 of 2; **TAPE class 1 of 1** (separate). Coin-distance: P(up) ≤ 0.42 19 of 26; 0.43-0.47 band adds a miss (ABNB 0.44); ≥ 0.53 band adds a hit (NET 0.53). De-rated base buys a met line 7 of 9. Raised table outside the tape bought 15 of 17 (NET, ABNB added). Tails ≥ 10 % hold 14 of 16.
 - **Pending:** BRK.B (Sat Nov 7 07:00 CT release; Mon Nov 9 close vs Fri Nov 6) — locked this morning, 21:40 UTC Mon wake; CBOE Nov 6 rows to confirm the Nov 6 closes (provisional by ≤ 0.03 %).
 
+## 2026-11-08 (method) — kill-switch calibration audit across the graded documents
+
+Written 2026-11-08 ~14:30 UTC after the user asked whether the kill conditions could be computed rather than guessed. Every graded document since mid-October carries a KS table with a stated P(fire) per switch and a Resolution that says fired / not fired. Scored as a forecast of the switch itself (n = 195 switch observations on KS1-KS6 across the graded docs; a regex read of the Resolutions, so ±5 % noise):
+
+- **Mean Brier of the stated P(fire): 0.316** — worse than writing 0.5 on every switch (0.25). Switches fired 120 of 195 times against a mean stated probability of 0.30.
+- By stated band: switches given ≤ 0.20 fired 40 % of the time; 0.21-0.30 fired 61 %; 0.31-0.40 fired 80 %; above 0.40 fired 81 %. Every band under-states by a factor of two or more.
+- By switch role: **KS1 (the up / A-scenario line: a raise or a cleared bar) fired 32 of 39 (0.82) against a mean stated 0.35.** KS5 (the after-hours down scan) fired 22 of 29 (0.76) vs 0.28 stated. KS4 (the after-hours up scan) 20 of 33 (0.61) vs 0.27. KS2 (the cut / C line) 13 of 29 (0.45) vs 0.30. KS3 (the named secondary line) 20 of 39 (0.51) vs 0.33. KS6 (the tape term) 13 of 26 (0.50) vs 0.23.
+
+**The lessons.**
+1. *The up-case line fires four times in five and I weight it at one in three.* Companies raise above the line I set far more often than I expect, which is why the A scenario is systematically under-weighted and why so many "B modal" calls (DKNG's maintained, ABNB's decel, Sony's raise cell) met an A print. The failure of UP calls (7 of 19) is then not that A prints are rare; it is that A prints inside the tape are sold. Both halves need their own measured rate.
+2. *Stated P(fire) is a guess dressed as a number.* From the next lock, each switch's P(fire) is set from the measured firing rate of its role (KS1 ≈ 0.8, KS5 ≈ 0.75, KS4 ≈ 0.6, KS2 ≈ 0.45, KS3 ≈ 0.5, KS6 ≈ 0.5 on ≥ 2 % index days) and adjusted only with a stated reason; the scenario weights are then derived from the switch probabilities (P(A) ≈ P(KS1), P(C) ≈ P(KS2), B the remainder) and a second P(up) is computed that way and written next to the gut figure. Both are graded for 30 calls. If the chained figure's Brier beats the gut figure's, it becomes the primary. Disproof: the chained P(up) does worse than the gut over those 30 calls.
+3. *The switch is not the sign.* KS1 firing at 0.82 while UP calls hit 7 of 19 says the map from "line cleared" to "closes up" is where the information is: P(up | KS1 fired) by regime is the number to build next (inside the tape it has been near 0.2; outside near 0.9), and it is computable from the same documents.
+
+What this is not: proof that 90 % direction accuracy is reachable. It is the first measured statement that one layer of the method — the switch probabilities — has been running on priors that the record contradicts by a factor of two, and that the layer can be replaced by counts.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
