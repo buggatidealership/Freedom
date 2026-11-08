@@ -11,3 +11,6 @@ Thursday's 12 % crash was a flow event in its first two sessions, not a re-ratin
 
 ## 2026-11-06 — SOXL, the day after (tape call; graded: +12.5 % realised on a +9 call)
 Up on the day, down from the open: the beaten sector gets bought while the broad tape sits still, the first-hour fade is the holders who could not sell Thursday, and the leveraged funds buy into the close on an up day. SOXX below its pre-market low in the first half hour would have proven me wrong.
+
+## 2026-11-08 — SK hynix, Monday's Seoul close (tape call)
+Two days down 19 % and a Friday that opened 14 % lower but closed four points off the bottom: the forced sellers finished inside the session. In hynix's own history, the day after a drop this size has closed up 8 times in 12, median +3 %, and the US-listed Korea fund rose 4 % Friday after Seoul shut. I call hynix up about 4 % Monday. An open below Friday's close proves me wrong.
