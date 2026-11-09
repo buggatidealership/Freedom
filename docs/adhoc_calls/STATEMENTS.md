@@ -14,3 +14,5 @@ Up on the day, down from the open: the beaten sector gets bought while the broad
 
 ## 2026-11-08 — SK hynix, Monday's Seoul close (tape call)
 Two days down 19 % and a Friday that opened 14 % lower but closed four points off the bottom: the forced sellers finished inside the session. In hynix's own history, the day after a drop this size has closed up 8 times in 12, median +3 %, and the US-listed Korea fund rose 4 % Friday after Seoul shut. I call hynix up about 4 % Monday. An open below Friday's close proves me wrong.
+
+*Graded Nov 9 07:15 UTC: hynix closed +0.35 % (provisional regular close; the after-hours session trades −0.7 %). Right sign by a hair, wrong size by a lot: it touched +5.4 % mid-session and gave it back as Nvidia's weekend news took the afternoon. A no-information outcome; the counted odds gave the sign, the shock took the size.*

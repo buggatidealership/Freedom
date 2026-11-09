@@ -677,6 +677,19 @@ Written 2026-11-08 ~15:10 UTC. On Sunday the user relayed a report that Nvidia's
 3. *The grade must separate the exogenous term from the call's mechanism.* Monday's outcomes for hynix, SOXL and Berkshire will carry this shock. Each Resolution records (a) the realised move, (b) the open's gap attributable to the shock where a clean read exists (the sector leader's own gap), and (c) the residual, so the mechanism is graded on the residual and the sign on the total — the two-miss-type rule applied to a news shock.
 4. *The user's framing was partly wrong and the correction matters:* the shares have not "taken a hit" yet; Monday is the first session. Thursday's crash has three press attributions now (midterm regulation fears, rates and data-centre delays, and this). A multi-attributed crash is itself information: the tape is looking for reasons, which is the condition under which an exogenous headline carries the most weight.
 
+## 2026-11-09 (tape, Seoul) — SK hynix Monday close (TAPE class); regular close provisional
+
+Written 2026-11-09 07:15 UTC. **UP ≈ +4 % at P(up) 0.67 → +0.35 % (₩1,132,000 → ₩1,136,000 regular close, stockanalysis; Naver/Daum show ₩1,124,000 in the KRX after-hours session) → HIT on sign, provisional; a no-information outcome (|r| < 1 %).** Open −0.18 %, low −1.4 %, high +5.4 %, close +0.35 %; Samsung +0.64 %; Advantest +1.3 %, Tokyo Electron +2.8 %. The exogenous term: Nvidia's CEO investigation (Nov 8) had the NVDA perp −3.9 % and SOXL perp −4.3 % at the Seoul open; the Asian semis still closed green.
+
+**The lessons first.**
+1. *Counted switches, first graded use: the sign held, the size did not.* The own conditionals (0.61-0.67 for an up close after a ≤ −7 % day / two down days / a 3-day −15 %) were right on sign; the size medians (+3.0, +3.1) were reached at the high (+5.4) and sold into the close. Rule (n = 1): with a sector-leader shock between lock and open, keep the counted sign and cut the size to the shrink line. Disproof: the next such case closing at or beyond the counted median.
+2. *The buy-back-from-the-open shape appeared and failed for the first time* (Nov 4 and Nov 6 held; Nov 9 gave back 5 points into the close and more after hours). The difference was the leader's perp sitting at −4 to −6 % all session: Asia bought its own chips but would not hold them into the US open. Record: 2 of 3.
+3. *EWY as a Monday-open proxy: 1 of 2 on sign, right on magnitude both times.* Friday's +4.0 % EWY predicted a flat-to-up open; the open was −0.18 %. Use it for size, not sign, and read the Hyperliquid perps (checklist row 9) for the sign.
+4. *Vendor rule for Korea:* stockanalysis serves the 15:30 regular close; Naver and Daum serve the live after-hours single-price session until 18:00 KST with the same open/high/low, so a "close" read before 09:00 UTC from those two is not the close. Re-stamp from a dated daily row.
+
+- **Tallies (D):** earnings tallies unchanged (50 of 84; coin 44.5 of 85; Brier 20.0302/84). **TAPE class 2 of 2 on sign** (SOXL +12.5 on +9; hynix +0.35 on +4), mean absolute size error 3.6 pts.
+- **Pending:** confirm the hynix regular close from a dated row at the 21:40 UTC wake; BRK.B (DOWN 1.5) on the Nov 9 US close; TAPE_SEMIS item 1 (SOXL Monday open) read at the US open; item 2 Friday.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
