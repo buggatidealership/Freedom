@@ -37,3 +37,12 @@ Rocket Lab DOWN 4 %, low conviction. The stock ran 27 % in two days on NASA head
 TAKE: Short, small: the stock ran 27% in two days on NASA headlines, and its results days rarely add much once the news is out.
 THESIS: The Neutron slip to 2027 and the summer's contract wins were announced before tonight. A print that only confirms them gives a two-day rally nothing new. I'm watching the fourth-quarter revenue guide and whether Neutron gets a firm launch date.
 KILL: Third-quarter revenue above $265 million, the top of its own guide.
+
+## 2026-11-09 — Rocket Lab (RKLB) v2, UP 3.0 %, Nov 10 close vs Nov 9 close (revised 19:37 UTC, before the release)
+Rocket Lab UP 3 %, revised before the release after a full read of my lessons file. A stock 61 % below its high with no selling habit has been bought on a met print seven times in nine; my DOWN was a hunch with no count. A fourth-quarter revenue guide below third-quarter revenue proves me wrong.
+
+TAKE: Long, small: I flipped. Stocks this far below their highs were bought on steady results 7 times in 9, and my short was only a hunch.
+THESIS: Rocket Lab is 61% below its high and revenue grew 62% last quarter. In my record, beaten-down stocks that simply met their numbers were bought seven times in nine. I'm watching the fourth-quarter revenue guide and the Neutron launch date.
+KILL: Rocket Lab guides fourth-quarter revenue with a midpoint below its third-quarter revenue.
+
+*Process note, same hour: the three Nov 9 locks were made on a partial read of the lessons file. Take-Two and Hims stand after the full read. Take-Two's "fell after three of four beats" counts the November 2025 delay day; with that day swapped for the prior clean print the count is unchanged, 1 of 4 bought.*
