@@ -46,3 +46,10 @@ THESIS: Rocket Lab is 61% below its high and revenue grew 62% last quarter. In m
 KILL: Rocket Lab guides fourth-quarter revenue with a midpoint below its third-quarter revenue.
 
 *Process note, same hour: the three Nov 9 locks were made on a partial read of the lessons file. Take-Two and Hims stand after the full read. Take-Two's "fell after three of four beats" counts the November 2025 delay day; with that day swapped for the prior clean print the count is unchanged, 1 of 4 bought.*
+
+## 2026-11-09 — USA Rare Earth (USAR), UP 4.0 %, Nov 10 close vs Nov 9 close
+USA Rare Earth UP 4 %. Seventy percent below its high, a fifth of the float short, and the first report with the Serra Verde mine in the numbers; a new chief only has to hold the Stillwater timeline. A Stillwater target moved out of the fourth quarter of 2026 proves me wrong.
+
+TAKE: Long, small: it hit a one-year low four days ago, a fifth of the float is short, and the new CEO only has to hold the timeline.
+THESIS: USA Rare Earth is 70% below its high and this is its first report with the Serra Verde mine included. If the magnet timeline holds, the shorts have nothing new to press. I'm watching the Stillwater capacity target, the cash balance and any word on government funding.
+KILL: USA Rare Earth moves its Stillwater target of 600 metric tons a year of magnet capacity out of the fourth quarter of 2026.
