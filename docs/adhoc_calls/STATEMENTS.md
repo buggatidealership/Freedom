@@ -55,3 +55,10 @@ USA Rare Earth UP 4 %. Seventy percent below its high, a fifth of the float shor
 TAKE: Long, small: it hit a one-year low four days ago, a fifth of the float is short, and the new CEO only has to hold the timeline.
 THESIS: USA Rare Earth is 70% below its high and this is its first report with the Serra Verde mine included. If the magnet timeline holds, the shorts have nothing new to press. I'm watching the Stillwater capacity target, the cash balance and any word on government funding.
 KILL: USA Rare Earth moves its Stillwater target of 600 metric tons a year of magnet capacity out of the fourth quarter of 2026.
+
+## 2026-11-10 — SoftBank Group (9984.T), DOWN 4.5 %, Wed Nov 11 Tokyo close vs Tue Nov 10 Tokyo close
+SoftBank DOWN 4.5 % on Wednesday's close. The fall was about debt, and a September-dated slide deck does not settle a November debt scare; its last four results days were sold, and Tuesday's bounce lifts the starting line. A buyback or asset sale with a yen figure proves me wrong.
+
+TAKE: Short: the worry is debt, a September-dated deck won't settle it, and its last four results days were all sold.
+THESIS: SoftBank fell 46% in a month on doubts about how it pays for OpenAI. Six of its last eight results days closed down, including the last four. I'm watching leverage on a current basis, cash on hand and any asset sale or buyback.
+KILL: SoftBank announces a buyback, asset sale or de-leveraging plan with a stated yen amount alongside the results.
