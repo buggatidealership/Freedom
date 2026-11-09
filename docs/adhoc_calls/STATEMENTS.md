@@ -6,6 +6,8 @@ Format (fixed, so the feed reads the same every time): **the call in one line; t
 Berkshire's Monday crowd has sold nine of the last twelve Saturday releases, and the only line that buys it is a capital-return surprise. I read July's disclosure as about $1.6 B of buybacks and called DOWN 1.5 %. Buybacks of $3 B or more at these prices would prove me wrong.
 *Post-release note (Nov 7, 23:55 UTC): buybacks were $9.6 B — my disproof condition fired. Operating earnings missed at $12.7 B, −5.8 %. The call stands as locked; Monday decides which line the crowd grades.*
 
+*Graded Nov 9 21:50 UTC: Berkshire closed up about 0.7 % (provisional to the cent). Wrong. I said the buyback would be small and it was six times my estimate; the crowd bought that and ignored the operating miss. The stock still lagged a 2.4 % market day by 1.7 points.*
+
 ## 2026-11-08 — Semiconductors, the week of Nov 9-13 (tape call)
 Thursday's 12 % crash was a flow event in its first two sessions, not a re-rating: a third was bought back Friday on a flat index, and nothing dated next week can confirm the "Congress slows capex" story before Nvidia on the 17th. SOXL opens up Monday, SOXX closes the week about 3 % higher. A Monday open below Friday's close proves me wrong.
 
@@ -15,7 +17,7 @@ Up on the day, down from the open: the beaten sector gets bought while the broad
 ## 2026-11-08 — SK hynix, Monday's Seoul close (tape call)
 Two days down 19 % and a Friday that opened 14 % lower but closed four points off the bottom: the forced sellers finished inside the session. In hynix's own history, the day after a drop this size has closed up 8 times in 12, median +3 %, and the US-listed Korea fund rose 4 % Friday after Seoul shut. I call hynix up about 4 % Monday. An open below Friday's close proves me wrong.
 
-*Graded Nov 9 07:15 UTC: hynix closed +0.35 % (provisional regular close; the after-hours session trades −0.7 %). Right sign by a hair, wrong size by a lot: it touched +5.4 % mid-session and gave it back as Nvidia's weekend news took the afternoon. A no-information outcome; the counted odds gave the sign, the shock took the size.*
+*Graded Nov 9 07:15 UTC, confirmed 21:42 UTC on the dated daily row: hynix closed +0.35 % (regular close; the after-hours session trades −0.7 %). Right sign by a hair, wrong size by a lot: it touched +5.4 % mid-session and gave it back as Nvidia's weekend news took the afternoon. A no-information outcome; the counted odds gave the sign, the shock took the size.*
 
 ## 2026-11-09 — Take-Two Interactive (TTWO), DOWN 3.5 %, Nov 10 close vs Nov 9 close
 Take-Two DOWN 3.5 %. Last week's 10 % rally already paid for a strong GTA VI forecast, and this management guides low; three of its last four bookings beats were sold. A fiscal-year bookings range raised with the low end above $8.2 billion proves me wrong.
