@@ -16,3 +16,24 @@ Up on the day, down from the open: the beaten sector gets bought while the broad
 Two days down 19 % and a Friday that opened 14 % lower but closed four points off the bottom: the forced sellers finished inside the session. In hynix's own history, the day after a drop this size has closed up 8 times in 12, median +3 %, and the US-listed Korea fund rose 4 % Friday after Seoul shut. I call hynix up about 4 % Monday. An open below Friday's close proves me wrong.
 
 *Graded Nov 9 07:15 UTC: hynix closed +0.35 % (provisional regular close; the after-hours session trades −0.7 %). Right sign by a hair, wrong size by a lot: it touched +5.4 % mid-session and gave it back as Nvidia's weekend news took the afternoon. A no-information outcome; the counted odds gave the sign, the shock took the size.*
+
+## 2026-11-09 — Take-Two Interactive (TTWO), DOWN 3.5 %, Nov 10 close vs Nov 9 close
+Take-Two DOWN 3.5 %. Last week's 10 % rally already paid for a strong GTA VI forecast, and this management guides low; three of its last four bookings beats were sold. A fiscal-year bookings range raised with the low end above $8.2 billion proves me wrong.
+
+TAKE: Short: last week's rally already paid for a bumper GTA VI forecast, and this management guides low ten days before a launch.
+THESIS: Take-Two beat bookings four quarters running and the stock fell after three of them. The crowd wants a December-quarter bookings guide near $3.4 billion and a raised year. I'm watching that guide and the launch marketing cost.
+KILL: Take-Two raises its fiscal 2027 net bookings guidance so the low end is above $8.2 billion.
+
+## 2026-11-09 — Hims & Hers Health (HIMS), DOWN 5.5 %, Nov 10 close vs Nov 9 close
+Hims & Hers DOWN 5.5 %. Seven of its last eight reports were sold, gross margin has fallen twelve points in a year, and the stock dropped 11 % today with no news I could find. A 2026 adjusted EBITDA midpoint raised above $300 million proves me wrong.
+
+TAKE: Short: seven of its last eight reports were sold, margins are shrinking, and today's 11% drop came with no news to explain it.
+THESIS: Hims is trading cheap compounded drugs for branded Lilly pills at lower margin. Gross margin fell to 64% from 76% and cash flow turned negative. I'm watching gross margin, the fourth-quarter revenue guide and the 2026 EBITDA range.
+KILL: Hims raises the midpoint of its 2026 adjusted EBITDA guidance above $300 million.
+
+## 2026-11-09 — Rocket Lab (RKLB), DOWN 4.0 %, Nov 10 close vs Nov 9 close
+Rocket Lab DOWN 4 %, low conviction. The stock ran 27 % in two days on NASA headlines, and its results days rarely move it when the news is already out. Third-quarter revenue above $265 million proves me wrong. My counted switches say UP 0.59; I am keeping the gut and grading both.
+
+TAKE: Short, small: the stock ran 27% in two days on NASA headlines, and its results days rarely add much once the news is out.
+THESIS: The Neutron slip to 2027 and the summer's contract wins were announced before tonight. A print that only confirms them gives a two-day rally nothing new. I'm watching the fourth-quarter revenue guide and whether Neutron gets a firm launch date.
+KILL: Third-quarter revenue above $265 million, the top of its own guide.
