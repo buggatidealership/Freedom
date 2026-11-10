@@ -6,7 +6,7 @@ Format (fixed, so the feed reads the same every time): **the call in one line; t
 Berkshire's Monday crowd has sold nine of the last twelve Saturday releases, and the only line that buys it is a capital-return surprise. I read July's disclosure as about $1.6 B of buybacks and called DOWN 1.5 %. Buybacks of $3 B or more at these prices would prove me wrong.
 *Post-release note (Nov 7, 23:55 UTC): buybacks were $9.6 B — my disproof condition fired. Operating earnings missed at $12.7 B, −5.8 %. The call stands as locked; Monday decides which line the crowd grades.*
 
-*Graded Nov 9 21:50 UTC: Berkshire closed up about 0.7 % (provisional to the cent). Wrong. I said the buyback would be small and it was six times my estimate; the crowd bought that and ignored the operating miss. The stock still lagged a 2.4 % market day by 1.7 points.*
+*Graded Nov 9 21:50 UTC, final Nov 10: Berkshire closed up 0.76 % (570.89 to 575.25, three sources agree). Wrong. I said the buyback would be small and it was six times my estimate; the crowd bought that and ignored the operating miss. The stock still lagged a 2.4 % market day by 1.7 points.*
 
 ## 2026-11-08 — Semiconductors, the week of Nov 9-13 (tape call)
 Thursday's 12 % crash was a flow event in its first two sessions, not a re-rating: a third was bought back Friday on a flat index, and nothing dated next week can confirm the "Congress slows capex" story before Nvidia on the 17th. SOXL opens up Monday, SOXX closes the week about 3 % higher. A Monday open below Friday's close proves me wrong.
