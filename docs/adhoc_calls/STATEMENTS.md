@@ -26,6 +26,8 @@ TAKE: Short: last week's rally already paid for a bumper GTA VI forecast, and th
 THESIS: Take-Two beat bookings four quarters running and the stock fell after three of them. The crowd wants a December-quarter bookings guide near $3.4 billion and a raised year. I'm watching that guide and the launch marketing cost.
 KILL: Take-Two raises its fiscal 2027 net bookings guidance so the low end is above $8.2 billion.
 
+*Graded Nov 10: Take-Two closed up 8.3 %. Wrong. The quarter missed and the year was only reiterated, but the holiday-quarter guide came in above my own line with record pre-orders, and that was the scenario I had given one chance in four. My kill line named the wrong leg.*
+
 ## 2026-11-09 — Hims & Hers Health (HIMS), DOWN 5.5 %, Nov 10 close vs Nov 9 close
 Hims & Hers DOWN 5.5 %. Seven of its last eight reports were sold, gross margin has fallen twelve points in a year, and the stock dropped 11 % today with no news I could find. A 2026 adjusted EBITDA midpoint raised above $300 million proves me wrong.
 
@@ -33,12 +35,16 @@ TAKE: Short: seven of its last eight reports were sold, margins are shrinking, a
 THESIS: Hims is trading cheap compounded drugs for branded Lilly pills at lower margin. Gross margin fell to 64% from 76% and cash flow turned negative. I'm watching gross margin, the fourth-quarter revenue guide and the 2026 EBITDA range.
 KILL: Hims raises the midpoint of its 2026 adjusted EBITDA guidance above $300 million.
 
+*Graded Nov 10: Hims closed down 16.6 %. Right, for the stated reason: the profit guide was cut, gross margin fell to 57 % and subscribers shrank. The size was three times my number.*
+
 ## 2026-11-09 — Rocket Lab (RKLB), DOWN 4.0 %, Nov 10 close vs Nov 9 close
 Rocket Lab DOWN 4 %, low conviction. The stock ran 27 % in two days on NASA headlines, and its results days rarely move it when the news is already out. Third-quarter revenue above $265 million proves me wrong. My counted switches say UP 0.59; I am keeping the gut and grading both.
 
 TAKE: Short, small: the stock ran 27% in two days on NASA headlines, and its results days rarely add much once the news is out.
 THESIS: The Neutron slip to 2027 and the summer's contract wins were announced before tonight. A print that only confirms them gives a two-day rally nothing new. I'm watching the fourth-quarter revenue guide and whether Neutron gets a firm launch date.
 KILL: Third-quarter revenue above $265 million, the top of its own guide.
+
+*Graded Nov 10: Rocket Lab closed up 6.5 %. This first lock was wrong and its own kill line fired; see the revision below.*
 
 ## 2026-11-09 — Rocket Lab (RKLB) v2, UP 3.0 %, Nov 10 close vs Nov 9 close (revised 19:37 UTC, before the release)
 Rocket Lab UP 3 %, revised before the release after a full read of my lessons file. A stock 61 % below its high with no selling habit has been bought on a met print seven times in nine; my DOWN was a hunch with no count. A fourth-quarter revenue guide below third-quarter revenue proves me wrong.
@@ -49,12 +55,16 @@ KILL: Rocket Lab guides fourth-quarter revenue with a midpoint below its third-q
 
 *Process note, same hour: the three Nov 9 locks were made on a partial read of the lessons file. Take-Two and Hims stand after the full read. Take-Two's "fell after three of four beats" counts the November 2025 delay day; with that day swapped for the prior clean print the count is unchanged, 1 of 4 bought.*
 
+*Graded Nov 10: Rocket Lab closed up 6.5 % after opening 6.6 % lower. The revised call was right for the stated reason. The two versions count once in my tallies, as half a hit.*
+
 ## 2026-11-09 — USA Rare Earth (USAR), UP 4.0 %, Nov 10 close vs Nov 9 close
 USA Rare Earth UP 4 %. Seventy percent below its high, a fifth of the float short, and the first report with the Serra Verde mine in the numbers; a new chief only has to hold the Stillwater timeline. A Stillwater target moved out of the fourth quarter of 2026 proves me wrong.
 
 TAKE: Long, small: it hit a one-year low four days ago, a fifth of the float is short, and the new CEO only has to hold the timeline.
 THESIS: USA Rare Earth is 70% below its high and this is its first report with the Serra Verde mine included. If the magnet timeline holds, the shorts have nothing new to press. I'm watching the Stillwater capacity target, the cash balance and any word on government funding.
 KILL: USA Rare Earth moves its Stillwater target of 600 metric tons a year of magnet capacity out of the fourth quarter of 2026.
+
+*Graded Nov 10: USA Rare Earth closed down 9.6 %. Wrong. The new chief executive replaced the milestone list, a key study moved three quarters and the loss was far wider than expected. My kill line was badly worded and I score it against myself.*
 
 ## 2026-11-10 — SoftBank Group (9984.T), DOWN 4.5 %, Wed Nov 11 Tokyo close vs Tue Nov 10 Tokyo close
 SoftBank DOWN 4.5 % on Wednesday's close. The fall was about debt, and a September-dated slide deck does not settle a November debt scare; its last four results days were sold, and Tuesday's bounce lifts the starting line. A buyback or asset sale with a yen figure proves me wrong.
