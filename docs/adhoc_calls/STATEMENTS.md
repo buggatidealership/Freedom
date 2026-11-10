@@ -62,3 +62,10 @@ SoftBank DOWN 4.5 % on Wednesday's close. The fall was about debt, and a Septemb
 TAKE: Short: the worry is debt, a September-dated deck won't settle it, and its last four results days were all sold.
 THESIS: SoftBank fell 46% in a month on doubts about how it pays for OpenAI. Six of its last eight results days closed down, including the last four. I'm watching leverage on a current basis, cash on hand and any asset sale or buyback.
 KILL: SoftBank announces a buyback, asset sale or de-leveraging plan with a stated yen amount alongside the results.
+
+## 2026-11-10 — CoreWeave (CRWV), DOWN 12.0 %, Nov 11 close vs Nov 10 close
+CoreWeave DOWN 12 %. Three of its four reports were sold by 11 to 19 %, the business runs on borrowed money on a day inflation data revived rate-hike talk, and the year's guide needs a fourth quarter about 30 % above the third. A 2026 revenue midpoint raised above $12.8 billion proves me wrong.
+
+TAKE: Short: three of its four reports were sold hard, money just got dearer, and the year's guide needs a 30% jump in one quarter.
+THESIS: CoreWeave funds $35-39 billion of spending with debt, and today's inflation data put rate hikes back on the table. Its full-year guide implies a fourth quarter about 30% above the third. I'm watching the full-year revenue range, the spending range and any word of site delays.
+KILL: CoreWeave raises the midpoint of its 2026 revenue guidance above $12.8 billion.
