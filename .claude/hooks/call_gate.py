@@ -242,9 +242,14 @@ def cmd_prep(argv):
     req = urllib.request.Request("https://data.sec.gov/submissions/CIK%010d.json" % cik, headers={"User-Agent": "Freedom research noreply@anthropic.com"})
     d = json.loads(urllib.request.urlopen(req, timeout=40).read())["filings"]["recent"]
     filings = []; last = "none found"
+    # Foreign private issuers report results on a 6-K, which carries no item numbers.
+    # "--results-6k YYYY-MM-DD" names the date of the last results 6-K; filings after it are listed.
+    fpi = argv[argv.index("--results-6k") + 1] if "--results-6k" in argv else None
     for i in range(len(d["form"])):
         if d["form"][i] == "8-K" and "2.02" in d["items"][i]:
             last = d["filingDate"][i]; break
+        if fpi and d["filingDate"][i] <= fpi:
+            last = "6-K " + fpi; break
         if d["form"][i] in ("8-K", "8-K/A", "10-Q", "10-K", "424B5", "424B3", "424B2", "S-3", "S-3ASR", "S-1", "SC 13D", "SCHEDULE 13D", "425", "6-K"):
             filings.append({"accession": d["accessionNumber"][i], "form": d["form"][i], "date": d["filingDate"][i], "items": d["items"][i], "doc": d["primaryDocument"][i]})
     os.makedirs(GATES, exist_ok=True)

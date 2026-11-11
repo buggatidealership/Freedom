@@ -81,3 +81,10 @@ CoreWeave DOWN 12 %. Three of its four reports were sold by 11 to 19 %, the busi
 TAKE: Short: three of its four reports were sold hard, money just got dearer, and the year's guide needs a 30% jump in one quarter.
 THESIS: CoreWeave funds $35-39 billion of spending with debt, and today's inflation data put rate hikes back on the table. Its full-year guide implies a fourth quarter about 30% above the third. I'm watching the full-year revenue range, the spending range and any word of site delays.
 KILL: CoreWeave raises the midpoint of its 2026 revenue guidance above $12.8 billion.
+
+## 2026-11-12 — Nebius (NBIS), DOWN 8.0 %, Nov 12 close vs Nov 11 close
+Nebius DOWN 8 %. It rose about 18 % the day before its report on CoreWeave's results, Microsoft tightened oversight of its projects a week ago, and its year-end run-rate target is more than double June's level. Revenue of $905 million or more with the $7-9 billion target kept proves me wrong.
+
+TAKE: Short: it jumped 18% on CoreWeave's numbers, the Microsoft delivery question is still open, and matching the rival won't be enough.
+THESIS: Nebius ran about 18% the day before its own report, so a good quarter is already paid for. Its biggest customer, Microsoft, tightened oversight of its projects last week, and the year-end run-rate target is more than double June's level. I'm watching third-quarter revenue against $905 million, the $7-9 billion run-rate target and any word on the New Jersey site.
+KILL: Nebius reports third-quarter revenue of at least $905 million and keeps or raises its $7-9 billion year-end run-rate target.
