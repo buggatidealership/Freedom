@@ -730,7 +730,7 @@ Written 2026-11-10 21:25-21:50 UTC, at the user's prompt, ahead of the scheduled
 - **Settled-source check, Nov 10 22:36 UTC (M):** stockanalysis settled rows: TTWO 224.66 (+8.32 %), HIMS 19.13 (−16.61 %), RKLB 62.715 (+6.55 %), USAR 7.915 (−9.65 %); Nasdaq historical and CBOE rows for Nov 10 not yet posted. Cents only; no grade, Brier or tally changes.
 - **Pending:** SoftBank (DOWN 4.5) on the Nov 11 Tokyo close, a C print by the letter; CoreWeave (DOWN 12.0) on the Nov 11 close, an A print with its KILL line fired; settled Nov 10 rows for these four to re-stamp; TAPE item 2 on Nov 13.
 
-## 2026-11-11 (Tokyo) — SoftBank Group 9984 (Nov 11 Tokyo close vs Nov 10; release at 15:30 JST Nov 10); closes on one source, provisional
+## 2026-11-11 (Tokyo) — SoftBank Group 9984 (Nov 11 Tokyo close vs Nov 10; release at 15:30 JST Nov 10); closes final on three sources (Nov 11 12:15 UTC)
 
 Written 2026-11-11 07:20-07:40 UTC. **What was read of this file before writing: the tallies line of the Nov 10 (US) entry and nothing else today. The file was last read in full on Nov 9 at 19:34 UTC in this session; the lessons-guard receipt is not valid, and the wake's instruction to read it in full was not followed. A full read now would be dropped at the next compaction and must be repeated before the next prediction in any case.** **SoftBank: DOWN 4.5 % at P(up) 0.41 → −0.44 % (3,872 → 3,855), HIT on the sheet, no-information outcome; coin DOWN hit; Brier 0.1681.** Open −7.2 %, low −10.5 %, close −0.4 %. Tokyo chip names up 3-6 % the same day. Cost: one row pull, the company's financial report read from the PDF the day before, two searches.
 
