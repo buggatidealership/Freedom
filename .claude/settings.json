@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/lessons_guard.py\" hook",
-            "timeout": 30,
-            "statusMessage": "Checking the lessons receipt..."
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/call_gate.py\" hook",
+            "timeout": 45,
+            "statusMessage": "Running the call gate..."
           }
         ]
       }
@@ -42,6 +42,17 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/lessons_guard.py\" invalidate",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/call_gate.py\" stop",
+            "timeout": 30
           }
         ]
       }
