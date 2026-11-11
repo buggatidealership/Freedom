@@ -73,6 +73,8 @@ TAKE: Short: the worry is debt, a September-dated deck won't settle it, and its 
 THESIS: SoftBank fell 46% in a month on doubts about how it pays for OpenAI. Six of its last eight results days closed down, including the last four. I'm watching leverage on a current basis, cash on hand and any asset sale or buyback.
 KILL: SoftBank announces a buyback, asset sale or de-leveraging plan with a stated yen amount alongside the results.
 
+*Graded Nov 11: SoftBank closed down 0.4 % (provisional, one source) after opening 7 % lower and touching −10.5 %. Right side by a hair, wrong size by a lot. The loss was far worse than expected and no buyback or asset sale came, but the finance chief said now is not the time to invest aggressively, and the afternoon bought that.*
+
 ## 2026-11-10 — CoreWeave (CRWV), DOWN 12.0 %, Nov 11 close vs Nov 10 close
 CoreWeave DOWN 12 %. Three of its four reports were sold by 11 to 19 %, the business runs on borrowed money on a day inflation data revived rate-hike talk, and the year's guide needs a fourth quarter about 30 % above the third. A 2026 revenue midpoint raised above $12.8 billion proves me wrong.
 
