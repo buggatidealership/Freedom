@@ -82,6 +82,8 @@ TAKE: Short: three of its four reports were sold hard, money just got dearer, an
 THESIS: CoreWeave funds $35-39 billion of spending with debt, and today's inflation data put rate hikes back on the table. Its full-year guide implies a fourth quarter about 30% above the third. I'm watching the full-year revenue range, the spending range and any word of site delays.
 KILL: CoreWeave raises the midpoint of its 2026 revenue guidance above $12.8 billion.
 
+*Graded Nov 11: CoreWeave closed up 24.7 % (48.73 to 60.77). Wrong side, and wrong on the reason. The kill line fired the same evening: the 2026 revenue guide went to $13.0-13.3 billion, the quarter beat the top of its range and the spending ceiling held. The chip index rose 6 % the same day; the stock beat it by almost 19 points.*
+
 ## 2026-11-12 — Nebius (NBIS), DOWN 8.0 %, Nov 12 close vs Nov 11 close
 Nebius DOWN 8 %. It rose about 18 % the day before its report on CoreWeave's results, Microsoft tightened oversight of its projects a week ago, and its year-end run-rate target is more than double June's level. Revenue of $905 million or more with the $7-9 billion target kept proves me wrong.
 
