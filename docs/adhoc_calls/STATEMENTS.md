@@ -88,3 +88,10 @@ Nebius DOWN 8 %. It rose about 18 % the day before its report on CoreWeave's res
 TAKE: Short: it jumped 18% on CoreWeave's numbers, the Microsoft delivery question is still open, and matching the rival won't be enough.
 THESIS: Nebius ran about 18% the day before its own report, so a good quarter is already paid for. Its biggest customer, Microsoft, tightened oversight of its projects last week, and the year-end run-rate target is more than double June's level. I'm watching third-quarter revenue against $905 million, the $7-9 billion run-rate target and any word on the New Jersey site.
 KILL: Nebius reports third-quarter revenue of at least $905 million and keeps or raises its $7-9 billion year-end run-rate target.
+
+## 2026-11-12 — Siemens (SIE), DOWN 4.5 %, Nov 12 Xetra close vs Nov 11 close
+Siemens DOWN 4.5 %. The street expects earnings to grow 14 % next year, Siemens opens each year with a cautious range, and last November a range 7 % under the street cost the stock 9 %. A 2027 midpoint of at least 10.35 euros without Healthineers, or 12.95 with it, proves me wrong.
+
+TAKE: Short: the street wants 14% profit growth next year and Siemens opens every year with a cautious range; last November that cost 9%.
+THESIS: Analysts expect fiscal 2027 earnings per share to grow about 14%, to 13.34 euros with Healthineers or 10.68 without. Siemens' opening ranges have sat under the street, and its raise in August was still sold. I'm watching the 2027 earnings range, fourth-quarter orders against 27.5 billion euros and free cash flow.
+KILL: Siemens guides fiscal 2027 earnings per share before PPA with a midpoint of at least 10.35 euros excluding Healthineers, or 12.95 including it.
