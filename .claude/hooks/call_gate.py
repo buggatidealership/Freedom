@@ -77,9 +77,21 @@ def check_doc(path):
     try:
         rel = parse_utc(g["release"]["utc"]); lock = parse_utc(g["doc_lock_utc"]); now = dt.datetime.now(dt.timezone.utc)
         src = str(g["release"].get("source_url", ""))
-        ok = src.startswith("http") and lock < rel and lock <= now + dt.timedelta(minutes=5) and lock >= now - dt.timedelta(hours=6)
-        add("G02 release time sourced; lock before release; lock within 6 h of the clock and not ahead of it", ok,
-            "release.source_url must be a URL; need doc_lock_utc < release.utc and now-6h <= doc_lock_utc <= now+5m")
+        if g.get("call_class") == "post_release":
+            # Post-release class (approved by the user on 2026-11-12): the release is out and the call is on
+            # the next close against a stated price. Tallied apart from pre-release calls. The price must be
+            # sourced and stamped within 20 minutes before the lock.
+            ref = g.get("reference") or {}
+            rts = parse_utc(ref.get("utc"))
+            ok = (src.startswith("http") and rel <= lock and lock <= now + dt.timedelta(minutes=5) and lock >= now - dt.timedelta(hours=6)
+                  and isinstance(ref.get("price"), (int, float)) and ref["price"] > 0 and len(str(ref.get("source", ""))) >= 8
+                  and rts <= lock and lock - rts <= dt.timedelta(minutes=20))
+            add("G02 post-release class: release sourced and before the lock; reference price sourced and stamped within 20 min of the lock", ok,
+                "call_class post_release needs release.utc <= doc_lock_utc and reference{price, utc, source} with utc within 20 min before the lock")
+        else:
+            ok = src.startswith("http") and lock < rel and lock <= now + dt.timedelta(minutes=5) and lock >= now - dt.timedelta(hours=6)
+            add("G02 release time sourced; lock before release; lock within 6 h of the clock and not ahead of it", ok,
+                "release.source_url must be a URL; need doc_lock_utc < release.utc and now-6h <= doc_lock_utc <= now+5m")
     except Exception as e:
         add("G02 release time sourced; lock before release", False, "release.utc / doc_lock_utc as YYYY-MM-DDTHH:MMZ (%s)" % e)
 

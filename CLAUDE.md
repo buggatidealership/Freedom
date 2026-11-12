@@ -45,4 +45,6 @@ words, no hashtags or emojis. No model names. Ledger rows written.
 
 Do not work around a block. Do the work the failed check names.
 
+**Post-release class.** When the user asks for a call after a release, the Gate block carries `"call_class": "post_release"` and a `reference` object (price, time, source). The gate then requires the release to be before the lock and the reference price to be stamped within 20 minutes of it. These calls are tallied apart from pre-release calls. Approved by the user on 2026-11-12.
+
 Grading follows `GRADING_PROTOCOL.md` and is not gated.

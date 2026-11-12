@@ -115,3 +115,10 @@ Applied Materials UP 4 %. It is 47 % below its high while estimates rose, it has
 TAKE: Long: it is 47% below its high while estimates rose, it beat four quarters running, and beaten-down chip names that raise get bought.
 THESIS: Applied is 47% below its June high after a month of export-rule fears, while earnings estimates rose about 10%. In my record, chip-related stocks this far down that raised were bought five times of six; the miss was Applied itself in August. I'm watching the January-quarter revenue guide against $10.83 billion, China's share of sales and any shipment limits from part shortages.
 KILL: Applied guides January-quarter revenue with a midpoint below $10.7 billion, or discloses a new China export restriction that cuts revenue.
+
+## 2026-11-12 — Cerebras (CBRS), UP 4.0 % from $110.81 after hours, Nov 13 close (post-release class)
+Cerebras UP 4 % from $110.81 after hours, called after the release. It beat its own guide by 7 %, raised the year and expects revenue to triple in 2027, and it sits about 64 % below its first-day close even after tonight's jump. A share sale, or a 2027 revenue figure under $2.8 billion, proves me wrong.
+
+TAKE: Long from $111: it beat its guide by 7%, raised the year, says revenue triples in 2027, and its main rival just lost its chief. Thin edge.
+THESIS: Cerebras beat its own guide by 7%, lifted 2026 core revenue to $940-960 million and reported $26.1 billion of contracted backlog, from 69% below its first-day close. Its main rival lost its chief executive today. I'm watching the 5 pm call for a dollar figure on 2027, any share sale, and selling by holders whose lock-up ended Monday.
+KILL: Cerebras announces an equity or convertible offering by Friday's close, or on its call puts 2027 revenue below $2.8 billion.
