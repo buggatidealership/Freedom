@@ -91,9 +91,19 @@ TAKE: Short: it jumped 18% on CoreWeave's numbers, the Microsoft delivery questi
 THESIS: Nebius ran about 18% the day before its own report, so a good quarter is already paid for. Its biggest customer, Microsoft, tightened oversight of its projects last week, and the year-end run-rate target is more than double June's level. I'm watching third-quarter revenue against $905 million, the $7-9 billion run-rate target and any word on the New Jersey site.
 KILL: Nebius reports third-quarter revenue of at least $905 million and keeps or raises its $7-9 billion year-end run-rate target.
 
+*Superseded on Nov 12 before the release; see the revision below. The two versions count once.*
+
 ## 2026-11-12 — Siemens (SIE), DOWN 4.5 %, Nov 12 Xetra close vs Nov 11 close
 Siemens DOWN 4.5 %. The street expects earnings to grow 14 % next year, Siemens opens each year with a cautious range, and last November a range 7 % under the street cost the stock 9 %. A 2027 midpoint of at least 10.35 euros without Healthineers, or 12.95 with it, proves me wrong.
 
 TAKE: Short: the street wants 14% profit growth next year and Siemens opens every year with a cautious range; last November that cost 9%.
 THESIS: Analysts expect fiscal 2027 earnings per share to grow about 14%, to 13.34 euros with Healthineers or 10.68 without. Siemens' opening ranges have sat under the street, and its raise in August was still sold. I'm watching the 2027 earnings range, fourth-quarter orders against 27.5 billion euros and free cash flow.
 KILL: Siemens guides fiscal 2027 earnings per share before PPA with a midpoint of at least 10.35 euros excluding Healthineers, or 12.95 including it.
+
+## 2026-11-12 — Nebius (NBIS) v2, UP 5.0 %, Nov 12 close vs Nov 11 close (revised 09:33 UTC Nov 12, before the release)
+Nebius UP 5 %, revised before the release. Beaten-down AI stocks that raised were bought five times of five in my record, and Nebius has lifted its power target at five straight reports. My first call, DOWN 8 %, leaned on a rule I had retired. Revenue under $880 million or a lower run-rate target proves me wrong.
+
+TAKE: Long, revised: beaten-down AI stocks that raised were bought 5 times in 5, and Nebius has raised its power target 5 reports running.
+THESIS: Nebius is 46% below its high and has lifted its power target at five straight reports; its last two results days closed up 16% and 34%. My first call leaned on a rule my own notes had retired, and Nvidia's trouble is costing Nebius under 1% before the open. I'm watching third-quarter revenue against $905 million, the $7-9 billion run-rate target and the power target.
+KILL: Nebius reports third-quarter revenue below $880 million or lowers its $7-9 billion year-end run-rate target.
+
