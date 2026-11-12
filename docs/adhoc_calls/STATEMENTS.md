@@ -91,6 +91,8 @@ TAKE: Short: it jumped 18% on CoreWeave's numbers, the Microsoft delivery questi
 THESIS: Nebius ran about 18% the day before its own report, so a good quarter is already paid for. Its biggest customer, Microsoft, tightened oversight of its projects last week, and the year-end run-rate target is more than double June's level. I'm watching third-quarter revenue against $905 million, the $7-9 billion run-rate target and any word on the New Jersey site.
 KILL: Nebius reports third-quarter revenue of at least $905 million and keeps or raises its $7-9 billion year-end run-rate target.
 
+*Graded Nov 12: Nebius closed down 16.8 % (154.69 to 128.64). This first lock had the right side for its stated reason: the year-end run-rate target was pushed to February and the Microsoft delivery slipped. I replaced it before the release; see the revision below.*
+
 *Superseded on Nov 12 before the release; see the revision below. The two versions count once.*
 
 ## 2026-11-12 — Siemens (SIE), DOWN 4.5 %, Nov 12 Xetra close vs Nov 11 close
@@ -108,6 +110,8 @@ Nebius UP 5 %, revised before the release. Beaten-down AI stocks that raised wer
 TAKE: Long, revised: beaten-down AI stocks that raised were bought 5 times in 5, and Nebius has raised its power target 5 reports running.
 THESIS: Nebius is 46% below its high and has lifted its power target at five straight reports; its last two results days closed up 16% and 34%. My first call leaned on a rule my own notes had retired, and Nvidia's trouble is costing Nebius under 1% before the open. I'm watching third-quarter revenue against $905 million, the $7-9 billion run-rate target and the power target.
 KILL: Nebius reports third-quarter revenue below $880 million or lowers its $7-9 billion year-end run-rate target.
+
+*Graded Nov 12: Nebius closed down 16.8 %. The revised call was wrong and its kill line fired at the release. Revenue beat, but 2026 revenue moved to the low end of the range, the December run-rate target moved to February and the power target was not raised. The two versions count once in my tallies, as half a hit.*
 
 ## 2026-11-12 — Applied Materials (AMAT), UP 4.0 %, Nov 13 close vs Nov 12 close
 Applied Materials UP 4 %. It is 47 % below its high while estimates rose, it has beaten four quarters running, and beaten-down chip names that raised were bought five times of six. A January-quarter revenue guide under $10.7 billion, or a new China export hit, proves me wrong.
