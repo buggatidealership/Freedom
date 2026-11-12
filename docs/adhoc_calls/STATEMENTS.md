@@ -100,6 +100,8 @@ TAKE: Short: the street wants 14% profit growth next year and Siemens opens ever
 THESIS: Analysts expect fiscal 2027 earnings per share to grow about 14%, to 13.34 euros with Healthineers or 10.68 without. Siemens' opening ranges have sat under the street, and its raise in August was still sold. I'm watching the 2027 earnings range, fourth-quarter orders against 27.5 billion euros and free cash flow.
 KILL: Siemens guides fiscal 2027 earnings per share before PPA with a midpoint of at least 10.35 euros excluding Healthineers, or 12.95 including it.
 
+*Graded Nov 12: Siemens closed up 1.7 % (277.00 to 281.70) after opening 3.6 % higher. Wrong side. The kill line fired at the release: the 2027 range is 10.20 to 10.80 euros without Healthineers, midpoint 10.50, and the quarter beat on orders, profit and cash. I had put the chance of that at three in ten.*
+
 ## 2026-11-12 — Nebius (NBIS) v2, UP 5.0 %, Nov 12 close vs Nov 11 close (revised 09:33 UTC Nov 12, before the release)
 Nebius UP 5 %, revised before the release. Beaten-down AI stocks that raised were bought five times of five in my record, and Nebius has lifted its power target at five straight reports. My first call, DOWN 8 %, leaned on a rule I had retired. Revenue under $880 million or a lower run-rate target proves me wrong.
 
