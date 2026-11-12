@@ -31,7 +31,8 @@ CALLS = LG.CALLS
 GATES = os.path.join(LG.STATE_DIR, "gates")
 STOP_STATE = os.path.join(LG.STATE_DIR, "stop.json")
 ROWS = ["1_bar", "2_documents", "3_unnumbered_language", "4_sell_side", "5_people_regulators",
-        "6_index_events", "7_sibling", "8_social", "9_perps", "10_counterparties", "11_inter_print"]
+        "6_index_events", "7_sibling", "8_social", "9_perps", "10_counterparties", "11_inter_print",
+        "12_macro_ai"]
 MODEL_WORDS = re.compile(r"\b(fable|opus|sonnet|haiku|claude|gemini|grok|gpt-?\d)\b", re.I)
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿]")
 TOL = 0.006
@@ -179,6 +180,10 @@ def check_doc(path):
             ok = stt in ("read", "none_found", "not_reachable")
         elif row == "9_perps":
             ok = stt in ("read", "none_found") and len(ev) >= 1 or (stt == "not_needed" and len(str(r.get("reason", ""))) >= 10)
+        elif row == "12_macro_ai":
+            # macro and AI-tape news searched on the day of the lock: rates or data, the AI leader, the index.
+            # "none_found" is not accepted: there is always a level to write down.
+            ok = stt == "read" and len(ev) >= 3 and all(len(str(x)) >= 20 for x in ev) and str(r.get("searched_utc", ""))[:10] == str(g.get("doc_lock_utc", ""))[:10]
         else:
             ok = stt in ("read", "none_found") and len(ev) >= 1 and all(len(str(x)) >= 8 for x in ev)
         add("G13 checklist row %s done with evidence" % row, ok, "status read or none_found with at least one source in evidence")

@@ -19,7 +19,7 @@ Two harness hooks make the method a precondition of the output, not something to
    refreshes a receipt when only the file changed.
 2. `python3 .claude/hooks/call_gate.py prep TICKER CIK` (US filers). Open every filing it
    lists and label each raise, cut or neutral. Read the company's own news page as well.
-3. Do the research in `SEARCH_CHECKLIST.md`, rows 1 to 11. "Not read" is not an accepted
+3. Do the research in `SEARCH_CHECKLIST.md`, rows 1 to 12. Row 12 is the macro and AI-tape news sweep, run on the day of the lock; the gate refuses "none found" for it. "Not read" is not an accepted
    status for any row except social feeds (not reachable) and perps (not needed, with a reason).
 4. `python3 .claude/hooks/call_gate.py template TICKER` prints the Gate block. Fill it from
    measured numbers. The gate recomputes the base label, the habit label, the coin, the
@@ -28,7 +28,7 @@ Two harness hooks make the method a precondition of the output, not something to
    `python3 .claude/hooks/call_gate.py check <doc>` until every check passes; commit; push;
    only then give the prediction to the user.
 
-### What the gate checks (38 binary checks)
+### What the gate checks (39 binary checks)
 
 Lessons receipt current and quoted. Release time sourced, lock before release and not ahead
 of the clock. Grade window. Coin recomputed. Base label and habit label equal to what the
@@ -38,7 +38,7 @@ arithmetic exact. Chained figure exact, the up-line switch at the counted rate o
 written reason. Side consistent with the probability and with the `CALL` line. Outside the
 AI tape a DOWN call names the line that will be cut and its source. Inside the tape a
 residual call against a named basket. A call against the fitting cell needs an override
-cell with n of at least 3. All eleven checklist rows done with evidence; every filing since
+cell with n of at least 3. All twelve checklist rows done with evidence, the macro and AI sweep dated the day of the lock; every filing since
 the last results 8-K labelled. KILL line with a number, tied to the scenario that defeats
 the call. TAKE at most 140 characters, THESIS at most three sentences, Statement under 60
 words, no hashtags or emojis. No model names. Ledger rows written.
