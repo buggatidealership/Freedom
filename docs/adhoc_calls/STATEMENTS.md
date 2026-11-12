@@ -109,3 +109,9 @@ TAKE: Long, revised: beaten-down AI stocks that raised were bought 5 times in 5,
 THESIS: Nebius is 46% below its high and has lifted its power target at five straight reports; its last two results days closed up 16% and 34%. My first call leaned on a rule my own notes had retired, and Nvidia's trouble is costing Nebius under 1% before the open. I'm watching third-quarter revenue against $905 million, the $7-9 billion run-rate target and the power target.
 KILL: Nebius reports third-quarter revenue below $880 million or lowers its $7-9 billion year-end run-rate target.
 
+## 2026-11-12 — Applied Materials (AMAT), UP 4.0 %, Nov 13 close vs Nov 12 close
+Applied Materials UP 4 %. It is 47 % below its high while estimates rose, it has beaten four quarters running, and beaten-down chip names that raised were bought five times of six. A January-quarter revenue guide under $10.7 billion, or a new China export hit, proves me wrong.
+
+TAKE: Long: it is 47% below its high while estimates rose, it beat four quarters running, and beaten-down chip names that raise get bought.
+THESIS: Applied is 47% below its June high after a month of export-rule fears, while earnings estimates rose about 10%. In my record, chip-related stocks this far down that raised were bought five times of six; the miss was Applied itself in August. I'm watching the January-quarter revenue guide against $10.83 billion, China's share of sales and any shipment limits from part shortages.
+KILL: Applied guides January-quarter revenue with a midpoint below $10.7 billion, or discloses a new China export restriction that cuts revenue.
