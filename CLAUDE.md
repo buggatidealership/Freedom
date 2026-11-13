@@ -1,5 +1,25 @@
 # Working rules for this repository
 
+## Operating core
+
+This block is the part that must survive. It reaches the conversation by three routes that do not
+depend on any summary: this file is loaded from disk at every session start and after every
+compaction; `.claude/hooks/lessons_guard.py prompt` re-sends the block with every user prompt; and
+the same script sends it at session start. Change the rules here, between the markers, and nowhere else.
+
+<!-- core:start -->
+1. **Translate first.** Before any work, restate the request with every vague word replaced by a number, a named source or a pass/fail test, and show that translation at the top of the reply. The user's words are leads, not orders. Name a wrong premise before building on it.
+2. **Verify, never assume.** A number goes in a reply only if it was opened from a source in this context. Tag it measured, derived, secondary or hypothesis. A recalled figure is a hypothesis. Work that was not done is reported as not done.
+3. **A summary is a claim, not a record.** After a compaction or in a new session, state comes from files: `docs/adhoc_calls/LESSONS.md` (trust section first), the call document, `CALIBRATION.csv`, `git log`. "Read" means printed in full in this context; the lessons receipt is the proof.
+4. **Lessons before any prediction.** The order of work below is enforced by the gate. Name the fitting evidence cell and its count before choosing a side. No side on a gut override; no weight on a recalled count.
+5. **A locked call is not revised.** After the lock, record only. A first reaction (after-hours scan, open, pre-market) is never reported as a result.
+6. **Every finding carries its disproof**, the assumptions it shares with its alternatives, and one alternative reading.
+7. **Reply form.** Outcome first, then what is wrong or incomplete. Short sentences; numbers in tables. After a prediction, exactly three lines: TAKE, THESIS, KILL.
+8. **Never:** print a secret value; use FMP, Finnhub or Alpha Vantage in ad hoc work; commit vendor-derived or Hyperliquid data; put a model name in a file or a commit; open a pull request unasked; force-push; run `freedom evaluate --final`; work around a hook.
+9. **Commit form.** `git pull` before every write. Identity `Claude <noreply@anthropic.com>`. Trailers `Co-Authored-By: Claude <noreply@anthropic.com>` and the `Claude-Session` line.
+10. **Write down what was learned** in `LESSONS.md` at every grade, as a rule with a count and a disproof.
+<!-- core:end -->
+
 ## Ad hoc prediction calls (`docs/adhoc_calls/`)
 
 Two harness hooks make the method a precondition of the output, not something to remember.

@@ -209,16 +209,36 @@ def cmd_hook(_argv):
     return 0
 
 
+def core_text():
+    """The Operating core block of CLAUDE.md, between its markers; empty on any error."""
+    try:
+        root = os.environ.get("CLAUDE_PROJECT_DIR") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        with open(os.path.join(root, "CLAUDE.md"), encoding="utf-8") as fh:
+            c = fh.read()
+        a = c.index("<!-- core:start -->") + len("<!-- core:start -->"); b = c.index("<!-- core:end -->")
+        return "Operating core (from CLAUDE.md; re-sent with every prompt so it survives compaction):\n" + c[a:b].strip()
+    except Exception:
+        return ""
+
+
+def emit(event, msg):
+    if msg:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": msg}}))
+
+
 def cmd_prompt(_argv):
     try:
         data = json.load(sys.stdin)
     except Exception:
         return 0
+    core = core_text()
     if not PROMPT_RE.search(data.get("prompt", "") or ""):
+        emit("UserPromptSubmit", core)
         return 0
     try:
         s = text(); st = load(); prob = receipt_problem(st, sha(s)); n = len(parts(s))
     except Exception:
+        emit("UserPromptSubmit", core)
         return 0
     if prob:
         msg = ("Lessons guard: this prompt looks like a prediction request and %s. Before deciding any side, run "
@@ -228,7 +248,7 @@ def cmd_prompt(_argv):
     else:
         msg = ("Lessons guard: receipt valid (%s). If LESSONS.md changes before the lock, run "
                "`python3 .claude/hooks/lessons_guard.py read --changes`." % receipt_line(st))
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": msg}}))
+    emit("UserPromptSubmit", (core + "\n\n" if core else "") + msg)
     return 0
 
 
@@ -245,6 +265,8 @@ def cmd_invalidate(_argv):
             os.remove(STATE)
     except Exception:
         pass
+    if data.get("hook_event_name") == "SessionStart":
+        emit("SessionStart", core_text())
     return 0
 
 
