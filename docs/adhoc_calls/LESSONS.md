@@ -827,6 +827,25 @@ Written 2026-11-13 22:05 UTC. **SOXX +9.35 % on the week (136.53 → 149.30) aga
 - **Tallies (D), carried from the Nov 12 (US) entry plus Applied Materials:** pre-release research **53.0 of 94**; coin 48.5 of 95. Brier running: 94 scored entries **22.9795 vs the coin's 23.500** (mean 0.2445 vs 0.250). DOWN calls 43 of 71; **UP calls 7 of 21**; **post-release class 1 of 3**; **TAPE class 4 of 4 on sign**. Coin-distance: P(up) ≤ 0.42 21 of 32. First reactions mis-stated the close 9 of 9. Kill lines missing a leg: 4.
 - **Pending:** none locked. Owed: a full read of this file before the next prediction; a second Xetra source for Siemens's 281.70; settled exchange rows for the four Nov 10 names; CBOE rows for Nov 13 if not yet posted.
 
+## 2026-11-14 (method) — what not to look at: testing indicators before using them
+
+Written 2026-11-14 about 21:10 UTC, after the user asked for a view on the S&P 500 and bitcoin and said the work is less about what to look at than what not to. **What was read of this file before writing: it was not reprinted; I searched it for retired rules. The last full read was Nov 12 at 21:21 UTC in this same context and the receipt has lapsed.** No call was locked; nothing here is graded.
+
+**The method.** Define the set-up as a rule a script can apply, list every past case, split the cases by what happened next, and score each candidate indicator by how well it separated the two groups (AUC: 0.5 is no information). Only then look at today's value. Set-up tested: S&P fund 1-5 % under a record made 5-40 sessions earlier, after a dip of 4.5 % or more and a rebound of half or more that failed, above its 200-day average. 18 cases since 2005 (price-only fund data); 5 broke the dip low before a new high and 4 of those reached −10 %; 13 held and none did.
+
+**What separated the cases (keep).** The 63-session return of the 7-10 year Treasury fund, AUC 0.83: with bonds falling 4 of 8 broke, with bonds rising 1 of 10. The equal-weight fund's distance from its own high, AUC 0.81: within 3 % of its high, 0 of 6 broke. The junk-bond fund against its 50-day average, AUC 0.73. The dip low itself as the level.
+
+**What did not (drop).** The size of the prior run pointed the wrong way: breakers had gained 14 % from their 180-session low and holders 23 %, so "it ran a lot, it is due" is not evidence. The depth of the dip (0.63), the share retraced (0.62), the Nasdaq fund's own drawdown (0.62), bitcoin's 21-day return (0.52). Weekend bitcoin against Monday's S&P fund, 513 weekends: correlation 0.08; after a weekend fall of 5 % or more the fund was down on Monday 14 of 32, against 210 of 513 for all Mondays. An average of two analogs that went opposite ways (bitcoin after the 2015 and 2022 first hikes: 1.71 and 0.61 at one year) describes neither.
+
+**Bitcoin's own tests (2015-2026, daily).** Below its 200-day average the 90-day outcome is a coin (27 of 50 up, median +3.8 %) against 46 of 72 and +15.1 % above it. Drawdown depth does not sort outcomes: every bucket was up about 60 % of the time at 90 days. After a two-day fall of 8 % or more, the bounce exists only above the 200-day average (25 of 41 up after a week); below it, 14 of 34.
+
+**Rules.**
+1. *An indicator earns a place by a count, not by a story.* Before a narrative item goes into a view on an index, it is tested on the listed cases or it is labelled untested.
+2. *Never average analogs.* Show each case; if they disagree, the count is what is known.
+3. *"Due" is not a variable.* A long run without a correction did not raise the odds of one in this set-up.
+4. *When the two best indicators disagree, say so and name the level that resolves it.* On Nov 14 bonds said break and breadth said hold; one earlier case had both (March 2011, held).
+Disproof of the method: the kept indicators failing to separate the next five set-ups any better than the dropped ones.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
