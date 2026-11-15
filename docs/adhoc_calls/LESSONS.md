@@ -850,6 +850,20 @@ Disproof of the method: the kept indicators failing to separate the next five se
 
 **Addendum, 2026-11-15 about 01:10 UTC: when a claim is "it always happens", pull the whole history before accepting or dismissing it.** I had verified the realized-price rule for one cycle and called the rest unverified. The user asked for the full record. Realized price was rebuilt from a free series of price and its ratio to realized value, 2010 to 2026, and matched a second source within 0.1 % on four dates. Result: bitcoin closed under its realized price in every cycle since 2011, five of five (2011, 2014, 2018, March 2020, 2022), for 6 to 304 days, 12 % to 61 % under at the deepest. The first close under was the low once in five; in the other four the price fell a further 29 % to 58 %. Each of the four earlier times price first came within 20 % of the line after a bull run, it closed under it 33 to 177 days later; this cycle is at 281 days without doing so. On weekends: since 2017 a fall of 5 % or more was followed by a down week 12 times of 28, no edge; in today's narrower state (a down week of 5 % or more, then such a weekend, under the 200-day average) the week after was lower 3 times of 6 but fell a further 5 % or more at some close 5 times of 6. US spot funds did not exist before January 2024; the regulator's weekly futures report since April 2018 stands in, and asset managers cut positions after a bad weekend 8 times of 20, against 215 of 433 in all weeks. **Rule: "unverified" is a to-do, not a finding. Before leaning on or against an "always" claim, find a second route to the data; a ratio series plus a price series can rebuild a level that is paywalled.**
 
+## 2026-11-15 (method) — large listings: when the first-ten-session peak comes, and what a first day tells you
+
+Written while answering a question about a two to three day hold of a new listing. No call was locked. Prices are exchange daily rows; membership of the set is a list named from memory, so it is not a census.
+
+- **Set.** 56 underwritten US listings, 2012 to June 2026, first session taken as the first exchange row of the listing. Direct listings left out. Ticker-reuse rows removed by checking the gap before the listing row.
+- **Peak close in the first ten sessions:** session 1 in 17 of 56, sessions 2 to 3 in 14, session 4 or later in 25. **Peak intraday high:** session 1 in 25, sessions 2 to 3 in 9, later in 22. Among the 12 with the largest first-day dollar volume the peak close was session 1 in 5.
+- **Buy the first close, sell the close of session 2 or 3:** 30 of 56 each time, median +0.8 % and +1.6 %. That is a coin.
+- **Buy the first open, sell the close of session 2 or 3:** 24 and 26 of 56, median minus 2.9 % and minus 0.9 %. Buying the open has lost more often than it won.
+- **What not to look at:** whether day one closed above its open. After an up first day the next two sessions closed higher 10 of 19; after a down first day 20 of 37. No power.
+- **Rule with a count:** after an up first day and an up second session, the close two sessions later was lower in 7 of 10. Two up days are a reason to sell, not to add.
+- **One analog is one case.** SpaceX peaked on session 3, but that was the day it announced a $60 billion all-stock acquisition; its float was 4.9 % with no holder released before the second day after first results. Cerebras peaked on session 1. Neither is a base rate.
+- **Supply is read from the prospectus table, never from the press float figure.** The row "first trading day" exists in some lock-ups and not in others.
+- **Disproof:** a census of listings above a stated size, with offer prices, that shows a different split for the peak session or a first-day signal with a hit rate above 65 % on at least 20 cases.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
