@@ -888,6 +888,17 @@ Written while answering a question, no call locked. Weekly closes Friday to Frid
 - **An estimate without a count is retracted when the count arrives.** On Nov 15 I said 65 % for a further 5 % fall within a week; the fitting cell's median further low was 4.1 %, which is nearer 45 %.
 - **Disproof:** the next five chip-fund weeks of minus 5 % or worse all coincide with bitcoin weeks of minus 5 % or worse.
 
+## 2026-11-16 (method, third note) — who buys bitcoin: stablecoins, miners, corporate buyers
+
+Written while closing a "not done" list, no call locked. Sources: a public stablecoin supply series from 2017, free network series for hash rate, issuance and fees, and the companies' own SEC filings.
+
+- **Stablecoin supply shrinking 3 % or more in 30 days has happened in five earlier episodes since 2019** (Feb 2019, May 2022, Oct 2022, Nov 2022, Mar 2023). Bitcoin was higher 30 days after the first day in 2 of 5 and 90 days after in 3 of 5. The sixth began Nov 2 2026.
+- **As a general signal it is weak:** 30-day supply growth against bitcoin's next 30 days, correlation 0.21 on 95 blocks; up 51 % of the time after shrinking supply against 60 % after growth of 2 % or more.
+- **What not to look at:** the hash-rate ribbon (30-day average under the 60-day). Bitcoin rose 52 % of the time over the next 30 days in that state against 55 % otherwise, and 58 % against 58 % over 90 days.
+- **Read sellers and buyers from filings, in units, before calling one side "missing".** In autumn 2026 two listed miners had sold about 47,000 bitcoin in nine months and one sold a further 13,600 after the quarter; the largest corporate buyer bought about 9,900 in twelve weeks; the funds sold about 33,300 in 21 sessions.
+- **A premise can die in the week it is stated.** "AI falls, bitcoin falls" was put to me on the Monday after a week in which the chip fund rose 9.4 % and bitcoin fell 10.2 %.
+- **Disproof:** two further episodes of a 3 % 30-day stablecoin shrink that are both followed by a higher bitcoin price at 30 and 90 days would leave the episode count at 4 of 7 and 5 of 7 and remove any lean.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
