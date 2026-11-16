@@ -864,6 +864,18 @@ Written while answering a question about a two to three day hold of a new listin
 - **Supply is read from the prospectus table, never from the press float figure.** The row "first trading day" exists in some lock-ups and not in others.
 - **Disproof:** a census of listings above a stated size, with offer prices, that shows a different split for the peak session or a first-day signal with a hit rate above 65 % on at least 20 cases.
 
+## 2026-11-16 (method) — bitcoin and Fed hikes: the hike day is not the variable, the two-year yield is
+
+Written while answering a question, no call locked. Sources: the Fed's table of target-rate changes, Treasury daily par yields, daily bitcoin closes from 2014.
+
+- **Two prior first hikes only** (Dec 16 2015, Mar 16 2022). Both were lower at day 60 (minus 10.6 %, minus 24.1 %); the third (Sep 16 2026) was minus 14.2 % at day 60. After that they split: plus 55 % and minus 46 % at day 180. Two cases are not a base rate.
+- **What split them:** the two-year yield fell 31 bp in the 60 days after the 2015 hike and rose 66 bp after the 2022 hike.
+- **Whole hiking phases:** plus 714 % (2015 to 2018) and minus 29 % with a low of minus 62 % (2022 to 2023). "Hikes are always negative" is false over a cycle.
+- **A horizon artifact, recorded so it is not reused:** 30 days after a hike bitcoin was up 4 of 21. At 21 days it was 10 of 21 and at 45 days 11 of 21. Test neighbouring horizons before quoting one.
+- **Rule with a count:** after a 91-day block in which the two-year yield rose 25 bp or more, bitcoin rose in the next block in 41 % of cases pooled over seven block shifts (range 3 of 15 to 8 of 12). After a fall of 25 bp or more: 75 % (range 5 of 8 to 7 of 8). In between: 60 %. Same-block correlation is minus 0.05, so the effect is lagged, not coincident.
+- **What not to look at:** the weekly correlation of yield changes and bitcoin (minus 0.04 on 671 weeks, sign flips by era).
+- **Disproof:** the two-year yield rises 25 bp or more over a block and bitcoin rises in the following block in more than 60 % of the next ten such cases.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
