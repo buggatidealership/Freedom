@@ -899,6 +899,18 @@ Written while closing a "not done" list, no call locked. Sources: a public stabl
 - **A premise can die in the week it is stated.** "AI falls, bitcoin falls" was put to me on the Monday after a week in which the chip fund rose 9.4 % and bitcoin fell 10.2 %.
 - **Disproof:** two further episodes of a 3 % 30-day stablecoin shrink that are both followed by a higher bitcoin price at 30 and 90 days would leave the episode count at 4 of 7 and 5 of 7 and remove any lean.
 
+## 2026-11-16 (method, fourth note) — chip-sector falls: depth, what was left after minus 30 %, and how far earnings fell
+
+Written while answering a question, no call locked. Fund closes from 2004 (one fund) and 2010 (a second); net income from SEC data for nine US chip companies.
+
+- **Six completed falls of 20 % or more since 2004:** 68 %, 24 %, 28 %, 34 %, 45 %, 36 %. Median 35 %.
+- **After the first close 30 % under the peak (five distinct cases across the two funds):** a further fall of under 10 % in three (2011, 2020, 2025), 22 % in one (2022) and 54 % in one (2004 to 2008). The two large ones were earnings recessions.
+- **Earnings in the two recent sector downturns:** aggregate trailing net income fell 41 % (2018 to 2020, without Intel) and 33 % to 54 % (2022 to 2023, without and with Intel). Nvidia alone fell 49 % and 55 %.
+- **Decompose a multiple before calling it cheap.** In autumn 2026 the median forward multiple fell from 29.9 to 23.2 with reported earnings up; a 22 % cut to estimates would put it back at 29.9. A low multiple on earnings that have nearly quadrupled in two years is a statement of disbelief, not a floor.
+- **Clean the price file first.** Two holiday rows with impossible prices produced two fake crashes of 55 % and 66 % in the first pass.
+- **I answered "no news" too early the same day.** A Commerce Department rule on chip exports was issued that Monday; two searches had not surfaced it. "None found" is not "none".
+- **Disproof:** the next two falls that reach minus 30 % both go on to lose a further 20 % or more without an earnings decline.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
