@@ -876,6 +876,18 @@ Written while answering a question, no call locked. Sources: the Fed's table of 
 - **What not to look at:** the weekly correlation of yield changes and bitcoin (minus 0.04 on 671 weeks, sign flips by era).
 - **Disproof:** the two-year yield rises 25 bp or more over a block and bitcoin rises in the following block in more than 60 % of the next ten such cases.
 
+## 2026-11-16 (method, second note) — bitcoin against the AI trade, the ten-year yield, sharp falls and fund outflow streaks
+
+Written while answering a question, no call locked. Weekly closes Friday to Friday; fund flows daily since January 2024.
+
+- **The AI link runs one way.** In bitcoin's eight weeks of minus 8 % or worse since 2024, the chip fund fell in 6 and the Nasdaq fund in 7. But in the 19 weeks the chip fund fell 5 % or more, bitcoin fell in 13 with a median of minus 1.7 %, and the week after it fell in 8 of 18. Chips lost 11.8 % and 13.1 % in two weeks of autumn 2026 and bitcoin lost 1.2 % and 1.7 %. A bad AI week is neither necessary warning nor sufficient cause.
+- **The ten-year yield gives the same lagged result as the two-year.** After a 91-day block with a rise of 25 bp or more, bitcoin rose in the next block 44 % of the time (39 of 88 pooled over seven starts); after a fall of 25 bp or more, 70 %.
+- **Sharp fall while tightening:** after a five-day fall of 10 % or more, under the 200-day average, with the two-year up 25 bp or more over 91 days: higher after 7 days in 5 of 15, after 14 days in 5 of 15, after 30 days in 8 of 15. Two of the 15 lost 18 % or more in the next week.
+- **Outflow streaks pointed the other way.** After seven straight days of fund outflows, bitcoin was higher a week later in 6 of 7 and a month later in 6 of 7. The exception was late May 2026.
+- **Rule:** when two counted cells disagree (5 of 15 against 6 of 7), give both, weight neither as settled, and name the price that resolves it.
+- **An estimate without a count is retracted when the count arrives.** On Nov 15 I said 65 % for a further 5 % fall within a week; the fitting cell's median further low was 4.1 %, which is nearer 45 %.
+- **Disproof:** the next five chip-fund weeks of minus 5 % or worse all coincide with bitcoin weeks of minus 5 % or worse.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
