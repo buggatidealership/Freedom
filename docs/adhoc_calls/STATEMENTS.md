@@ -132,3 +132,17 @@ KILL: Cerebras announces an equity or convertible offering by Friday's close, or
 *Graded Nov 13: Cerebras closed at 108.72, down 1.9 % from my $110.81 reference and up 11.2 % from Thursday's close. Wrong side on the sheet. Against AMD, Broadcom and Micron it did 3.5 points better, close to the 3 I called, on a day the chip index fell 3.7 %. The kill line did not fire. Post-release calls are now 1 of 3.*
 
 *Graded Nov 13, semis week (tape class): SOXX closed the week at 149.30, up 9.4 % from 136.53; I had called up 2.9 %. Right side, far too small. Monday's open is re-stamped to 47.84 on the exchange row. Tape calls are 4 of 4 on sign.*
+
+## 2026-11-17 — Home Depot (HD), DOWN 1.5 %, Nov 17 close vs Nov 16 close
+Home Depot DOWN 1.5 %. The stock is up 12 % in a month, and after runs that size it fell on results day five times of six. Last quarter's tariff refund is gone and costs are rising. A higher midpoint on any line of the 2026 guide proves me wrong.
+
+TAKE: Short, small: up 12% in a month into the report, last quarter leaned on a one-time tariff refund, and the CFO saw no demand inflection.
+THESIS: Home Depot gained 12% in 21 sessions, and after runs that large it closed lower on results day five times of six. Last quarter's $685 million tariff refund is gone while fuel, energy and material costs run through this quarter, and in September the CFO said he saw no inflection in demand. I'm watching gross margin, comparable sales after October's hurricane, and whether the full-year guide is kept.
+KILL: Home Depot lifts the midpoint of any fiscal 2026 guidance line: sales growth above 3.5%, comparable sales above 1.0%, or diluted EPS growth above 2%.
+
+## 2026-11-17 — Walt Disney (DIS), UP 3.5 %, Nov 17 close vs Nov 16 close
+Disney UP 3.5 %. It beat its own guide two quarters running and promised double-digit 2027 growth three times. Fourth-quarter operating income under $4.8 billion, 2027 growth guided under 10 %, or a first-quarter guide at or under $4.6 billion proves me wrong.
+
+TAKE: Long, small: Disney beat its own profit guide twice running, promised double-digit 2027 growth three times and keeps lifting buybacks.
+THESIS: Disney guided $4.9 billion of fourth-quarter segment operating income and has said three times that fiscal 2027 adjusted EPS will grow by double digits. Outside the AI trade, companies that beat or raised were bought 17 times of 19 in my record, even from highs. I'm watching the 2027 growth number, the first-quarter guide against last year's $4.6 billion, and the new buyback target.
+KILL: Disney reports fourth-quarter segment operating income under $4.8 billion, or guides fiscal 2027 adjusted EPS growth under 10%, or guides first-quarter segment operating income at or under $4.6 billion.
