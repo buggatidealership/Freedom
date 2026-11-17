@@ -911,6 +911,20 @@ Written while answering a question, no call locked. Fund closes from 2004 (one f
 - **I answered "no news" too early the same day.** A Commerce Department rule on chip exports was issued that Monday; two searches had not surfaced it. "None found" is not "none".
 - **Disproof:** the next two falls that reach minus 30 % both go on to lose a further 20 % or more without an earnings decline.
 
+## 2026-11-17 (method) — first pass over the captured perp bars: what repeats and what does not
+
+Written while answering a question, no call locked. Hourly bars for 35 US stock contracts and two index contracts on one venue, Apr 11 to Nov 17 2026 (5,289 hours, 31 weekends), with hourly funding. Ten tests were stated before the counts were read; all ten are reported here so the nulls are kept.
+
+- **Stock contracts rose over the weekend:** Fri 20:00 ET to Sun 18:00 ET, equal-weight mean plus 0.40 %, up 25 of 31, on 4.3 % of dollar volume. It is fading: 14 of 15 in the first half, 11 of 16 in the second. Weekday nights as a control: 65 of 125, nothing. The S&P contract alone: 19 of 31, not distinguishable.
+- **The Sunday open is a coin.** Sun 18:00 ET to Mon 09:00 ET: S&P contract up 17 of 31, stocks 15 of 31, and for stocks the sign was opposite to the weekend move 19 of 31.
+- **Off-hours spikes reverse, cash-hour spikes do not.** After a two-sigma hour the next hour reversed 63 % of the time on weekends (2,331 cases), 55 % on weekday off-hours (4,058), 51 % in cash hours (1,652). Mean size 0.13 %, about the cost of trading, and partly bid-ask bounce.
+- **Large hours come in US hours.** S&P contract hours of 0.5 % or more: 7.1 % of open-hour bars, 3.4 % of cash bars, 0.1 % of overnight bars (1 of 1,256), 0.3 % of weekend bars.
+- **Longs pay, and it is not a signal.** Funding on stock contracts was positive in 84 % of hours, mean 9.9 % a year; the S&P contract near zero. Top-5 % funding and top-decile premium predicted nothing at 1 to 72 hours (lower in 16 to 24 of 37 markets).
+- **What not to look at:** yesterday's five best against five worst (the spread flipped sign between halves, minus 0.57 then plus 0.55); the overnight move as a guide to the day session (same sign 45.9 % of 4,334 stock-days; 52 % after a 2 % move).
+- **Weak, kept as a hypothesis:** the S&P contract made 12.0 points of log return outside 10:00 to 16:00 ET and lost 4.4 inside it; pre-market and post-market were positive in both halves, cash hours negative only in the second.
+- **Rule:** ten tests on seven months will produce one result near t = 2 by chance. A pattern from this file counts only after it repeats on bars captured after the day it was written down.
+- **Disproof of the weekend drift:** stock contracts up in five or fewer of the next ten weekends.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
