@@ -146,3 +146,10 @@ Disney UP 3.5 %. It beat its own guide two quarters running and promised double-
 TAKE: Long, small: Disney beat its own profit guide twice running, promised double-digit 2027 growth three times and keeps lifting buybacks.
 THESIS: Disney guided $4.9 billion of fourth-quarter segment operating income and has said three times that fiscal 2027 adjusted EPS will grow by double digits. Outside the AI trade, companies that beat or raised were bought 17 times of 19 in my record, even from highs. I'm watching the 2027 growth number, the first-quarter guide against last year's $4.6 billion, and the new buyback target.
 KILL: Disney reports fourth-quarter segment operating income under $4.8 billion, or guides fiscal 2027 adjusted EPS growth under 10%, or guides first-quarter segment operating income at or under $4.6 billion.
+
+## 2026-11-17 — Nvidia (NVDA), UP 4.5 %, Nov 18 close vs Nov 17 close
+Nvidia UP 4.5 %. It beat its own guide three quarters running, and the stock is 35 % under its high on a leadership scandal, not on numbers. A fourth-quarter guide under $123.5 billion, no guide, a $2 billion export-rule hit or a margin guide under 73 % proves me wrong.
+
+TAKE: Long, small: a 35% fall on a CEO scandal priced a fear the numbers should not confirm, and the CFO who wrote every guide is reporting.
+THESIS: Nvidia beat its own revenue guide by 4.6% to 5.7% in each of the last three quarters and guided the next quarter 12% to 14% higher each time, which points to a guide near $127 billion against a street at about $125 billion. The stock is 35% below its October high after the chief executive resigned, and in my record a raised guide from that deep a fall was bought five times of six in AI names. I'm watching the fourth-quarter revenue guide, any dollar figure put on the new export rule, and gross margin.
+KILL: Nvidia guides fourth-quarter revenue under $123.5 billion at the midpoint, or gives no revenue number, or states an export-rule hit of $2 billion or more a quarter, or guides gross margin under 73%.
