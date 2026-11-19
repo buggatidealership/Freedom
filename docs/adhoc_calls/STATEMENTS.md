@@ -155,3 +155,10 @@ THESIS: Nvidia beat its own revenue guide by 4.6% to 5.7% in each of the last th
 KILL: Nvidia guides fourth-quarter revenue under $123.5 billion at the midpoint, or gives no revenue number, or states an export-rule hit of $2 billion or more a quarter, or guides gross margin under 73%.
 
 *Graded Nov 18 22:25 UTC: Nvidia closed minus 2.89 % (155.46 to 150.96) while AMD, Broadcom, TSMC and Micron averaged plus 2.19 %. Wrong side. The revenue guide came in 4 % over the street and was sold; the open, plus 2.4 %, was the high. My own alternative paragraph had described that day and I called against it.*
+
+## 2026-11-19 — Alibaba (BABA), DOWN 5.0 %, Nov 19 close vs Nov 18 close
+Alibaba DOWN 5.0 %. Profit has missed the street for five quarters, Tencent's miss was sold 6 % today, and the US chip rule aimed at rented compute is published this morning. Cloud growth of 50 % with adjusted earnings of RMB 10.9 per ADS and no stated hit from the rule proves me wrong.
+
+TAKE: Short: Alibaba sits at a one-year low on a chip rule that lands today, profit has missed five times, and Tencent's miss was just sold 6%.
+THESIS: Alibaba's last quarter missed the street's adjusted profit by about 18%, and Tencent missed on the same AI spending yesterday and lost 6%. The US rule that restricts Chinese firms renting advanced chips abroad is published today, and Alibaba has never said how much of its compute is rented. I'm watching cloud growth against 50%, adjusted earnings per ADS against RMB 11, and what management says about the rule on the 7 am call.
+KILL: Alibaba reports cloud revenue growth of 50% or more and non-GAAP earnings of RMB 10.9 or more per ADS, and does not say the chip rule will cut cloud growth.
