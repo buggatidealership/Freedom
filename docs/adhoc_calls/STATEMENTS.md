@@ -169,3 +169,10 @@ Walmart DOWN 3.5 %. It gained 23 % in three months and trades at 45 times earnin
 TAKE: Short, small: Walmart ran 23% in three months to 45 times earnings, and it fell after 13 of 18 reports that followed a run like this.
 THESIS: Walmart has closed lower on six of its last eight results days, including after raising its outlook in August, and on 13 of 18 that followed a 21-session gain of 5% or more. The street already sits above the top of the company's full-year EPS range, and the company says its tariff refunds go into price cuts through the fiscal year. I'm watching US comparable sales against about 3%, the full-year EPS range against $2.88, and third-quarter EPS against $0.64.
 KILL: Walmart reports U.S. comparable sales growth of 3.5% or more and third-quarter adjusted EPS of $0.63 or more, and raises the top of its full-year adjusted EPS range above $2.87 with no full-year line lowered.
+
+## 2026-11-19 — Intuit (INTU), DOWN 4.0 %, Nov 20 close vs Nov 19 close
+Intuit DOWN 4.0 %. Its own guide has growth slowing to 11 % from 14 %, its last two slower quarters were both sold, and application software has fallen three days running. Business-segment growth of 15 % with revenue above $4.313 billion and a second-quarter EPS guide at $3.66 or better proves me wrong.
+
+TAKE: Short, small: Intuit's own guide says growth slows again tonight, its last two slower quarters were sold, and app software keeps falling.
+THESIS: Intuit's last four results days split cleanly: up about 4% twice when online growth held at 25%, down 20% and 3% when it slowed to 22% and 17%. Its own guide has revenue growth at 11% this quarter against 14% last quarter, and application software has fallen three days running on fear of AI agents. I'm watching Global Business Solutions growth against 15%, first-quarter revenue against $4.31 billion, and the second-quarter EPS guide against $3.70.
+KILL: Intuit reports Global Business Solutions growth of 15% or more and first-quarter revenue of $4.313 billion or more, guides second-quarter non-GAAP EPS to a midpoint of $3.66 or more, and lowers no fiscal 2027 line.
