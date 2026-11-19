@@ -163,12 +163,16 @@ TAKE: Short: Alibaba sits at a one-year low on a chip rule that lands today, pro
 THESIS: Alibaba's last quarter missed the street's adjusted profit by about 18%, and Tencent missed on the same AI spending yesterday and lost 6%. The US rule that restricts Chinese firms renting advanced chips abroad is published today, and Alibaba has never said how much of its compute is rented. I'm watching cloud growth against 50%, adjusted earnings per ADS against RMB 11, and what management says about the rule on the 7 am call.
 KILL: Alibaba reports cloud revenue growth of 50% or more and non-GAAP earnings of RMB 10.9 or more per ADS, and does not say the chip rule will cut cloud growth.
 
+*Graded Nov 19 22:10 UTC: Alibaba closed minus 1.26 % (84.37 to 83.31). Right side, for the profit line: earnings per ADS were RMB 8.10 against a street near 11.2, a sixth miss, with cloud growth at 53 %. The stock traded 4.5 % higher at its best and closed on its low. The fall is the size of the index's, and my size was four times too big. The chip-rule part of the thesis is unscored: I did not read the call.*
+
 ## 2026-11-19 — Walmart (WMT), DOWN 3.5 %, Nov 19 close vs Nov 18 close
 Walmart DOWN 3.5 %. It gained 23 % in three months and trades at 45 times earnings; it fell after 13 of 18 reports that followed such a run, and the street already sits above the top of its EPS range. U.S. comps of 3.5 % with the top of that range raised above $2.87 proves me wrong.
 
 TAKE: Short, small: Walmart ran 23% in three months to 45 times earnings, and it fell after 13 of 18 reports that followed a run like this.
 THESIS: Walmart has closed lower on six of its last eight results days, including after raising its outlook in August, and on 13 of 18 that followed a 21-session gain of 5% or more. The street already sits above the top of the company's full-year EPS range, and the company says its tariff refunds go into price cuts through the fiscal year. I'm watching US comparable sales against about 3%, the full-year EPS range against $2.88, and third-quarter EPS against $0.64.
 KILL: Walmart reports U.S. comparable sales growth of 3.5% or more and third-quarter adjusted EPS of $0.63 or more, and raises the top of its full-year adjusted EPS range above $2.87 with no full-year line lowered.
+
+*Graded Nov 19 22:10 UTC: Walmart closed minus 1.04 % (127.36 to 126.04). Right side, and the tape did it: the S&P fund lost 1.33 % and the staples fund 1.45 %, so Walmart beat its sector. The company raised every line; US comparable sales came in at 2.9 %, the street's low, and the new EPS range still implies a fourth quarter under the street. It opened 2.9 % lower and bought two thirds of that back.*
 
 ## 2026-11-19 — Intuit (INTU), DOWN 4.0 %, Nov 20 close vs Nov 19 close
 Intuit DOWN 4.0 %. Its own guide has growth slowing to 11 % from 14 %, its last two slower quarters were both sold, and application software has fallen three days running. Business-segment growth of 15 % with revenue above $4.313 billion and a second-quarter EPS guide at $3.66 or better proves me wrong.
