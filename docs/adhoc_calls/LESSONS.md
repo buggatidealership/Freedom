@@ -964,6 +964,18 @@ Written 2026-11-18 22:25 UTC. **What was read of this file before writing: all 1
 - **Re-stamps:** Home Depot 339.01 and Disney 116.94 confirmed on the CBOE Nov 17 rows; no change.
 - **Pending:** none locked. Owed: the CBOE Nov 18 row for 150.96; the Nvidia call transcript and 10-Q.
 
+## 2026-11-19 (method) — bitcoin over US Thanksgiving, by market state
+
+Written while answering a question, no call locked. Daily closes on the UTC day from a free reference-rate series, 2010 to Nov 18 2026. Definitions fixed before the counts were read: bear state means the Wednesday close is under its 200-day average and 30 % or more under the highest close of the prior 365 days. Windows: Wednesday close to Thursday close, to Sunday close, to the next Wednesday, and 30 days on.
+
+- **Five bear-state Thanksgivings** (2011, 2014, 2018, 2019, 2022). Thursday: up 3 of 5, each within 1.2 % except 2011 (plus 4.7 % at a price near $2) and 2018 (minus 5.4 %). Wednesday to Sunday: up 2 of 5; plus 6.3, plus 3.0, minus 13.2, minus 1.4, minus 0.8 %. To the next Wednesday: up 3 of 5. Thirty days on: up 2 of 5.
+- **Control.** Every four-day window that starts in the same state: up 51 % of 1,888; from a Wednesday, 137 of 270. The holiday adds nothing that five cases can show.
+- **The one large move** was 2018: minus 13.2 % over the long weekend after minus 18.4 % in the week before. It was the middle of a fall already under way, not a holiday effect.
+- **The week after Thanksgiving was up 13 of 15 in all years**, and 9 of 9 when bitcoin was above its 200-day average. In bear state it was 3 of 5 against a control of 50 %. The pattern belongs to bull years.
+- **Market structure changed in 2024.** US spot funds do not trade on the Thursday and close early on the Friday. No bear-state Thanksgiving has happened with them. 2025 was the nearest (under the 200-day average, 27.5 % under the high): plus 1.0 % on the day, plus 0.2 % to Sunday.
+- **Rule:** a calendar label earns weight only against a control drawn from the same state. Show the cases one by one; four windows on five cases will produce one that looks like a pattern.
+- **Disproof:** the next three bear-state Thanksgivings all moving 5 % or more the same way between Wednesday and Sunday.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
