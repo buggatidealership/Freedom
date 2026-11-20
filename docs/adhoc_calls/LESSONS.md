@@ -994,6 +994,17 @@ Written 2026-11-19 22:10 UTC. **What was read of this file before writing: all 1
 - **Tallies (D), carried from the Nov 18 (US) entry plus these two:** pre-release research **56.0 of 99**; coin 49.5 of 100. Brier running: 99 scored entries **23.9845 vs the coin's 24.750** (mean 0.2423 vs 0.250). DOWN calls **46 of 74**; UP calls 7 of 23; post-release class 1 of 3; TAPE class 4 of 4 on sign. P(up) at or under 0.42: 23 of 34. Season two: 2 of 2 on direction, coin 1 of 2, mean Brier 0.119, mean size error 3.1 points.
 - **Pending:** Intuit (DOWN 4.0 at 0.44), Keysight (UP 4.0 at 0.53, residual plus 3.0) and Elastic (UP 6.0 at 0.52) on the Nov 20 close. Owed: the CBOE Nov 19 rows for 83.31 and 126.04; Alibaba's call; the CBOE Nov 18 row for Nvidia's 150.96; the Nvidia call transcript and 10-Q.
 
+## 2026-11-20 (method) — correction against bear market on the Nasdaq Composite: what the 20 % line has meant
+
+Written while answering a question, no call locked. Daily closes of the Nasdaq Composite from a public series, Feb 1971 to Nov 19 2026. An episode starts at the first close 10 % under the highest close since the last low, and ends at a new high or at a 20 % rise off its low. The definitions were fixed before the counts were read.
+
+- **50 episodes of 10 % or more in 55 years.** 20 of them reached 20 %. By depth already reached: at 14 %, 20 of 31 went on to 20 %; at 16 %, 20 of 27; at 18 %, 20 of 23.
+- **The 20 % line is a name, not a mechanism.** After the first close at 20 % or worse, the further fall to the low was under 5 % in 7 of 20, 5 to 15 % in 4, and over 15 % in 9. A year later the index was higher in 12 of 20, median plus 8 %, with a range from minus 49 % to plus 85 %. After the first close at 10 % it was higher a year later in 37 of 49, median plus 19.5 %.
+- **Speed sorted the cases better than depth.** Of 12 episodes that closed 15 % down within 40 sessions of the peak, 11 went on to 20 % (1996 the exception). Four of the 11 are legs of the 2000 to 2002 fall, so by separate periods it is 8 of 9.
+- **State on Nov 19 2026:** record close 27,599.89 on Oct 6; close 23,879.20, 13.5 % under it, 31 sessions on. The 20 % line is 22,080.
+- **Rule:** a threshold label is tested like any indicator: count what followed the crossing and show the spread. A split of 7 against 9 is two different kinds of event under one name.
+- **Disproof:** the next five first closes at 20 % or worse all followed by a further fall of 5 to 15 %, which would make the line a usable midpoint.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
