@@ -1005,6 +1005,19 @@ Written while answering a question, no call locked. Daily closes of the Nasdaq C
 - **Rule:** a threshold label is tested like any indicator: count what followed the crossing and show the spread. A split of 7 against 9 is two different kinds of event under one name.
 - **Disproof:** the next five first closes at 20 % or worse all followed by a further fall of 5 to 15 %, which would make the line a usable midpoint.
 
+## 2026-11-20 (method, second note) — fast falls from a record on the Nasdaq Composite, with the Fed and credit beside them
+
+Written while answering a question, no call locked. **What was read of this file before writing: all 14 parts printed in full at 19:10 UTC on Nov 19 in this same context; the entries added since were written in it; the guard reports the receipt lapsed and it was not printed again.** Daily closes 1971 to Nov 19 2026 plus a mid-session reading for Nov 20; the effective fed funds rate; a Baa corporate spread from 1986. Cells were defined before the counts were read.
+
+- **A record close followed within 40 sessions by a close 15 % or more lower: seven cases** (1978, 1980, 1987, 1996, 1998, 2000, 2020). Six went on to 20 %. Final depths: 20, 25, 36, 17, 30, 78 and 30 %. The low came 7 to 29 sessions after the 15 % close in six, and 631 sessions after in 2000. A year after that close the index was higher in six of seven.
+- **At 17 % within 40 sessions: six cases, six went past 20 %.**
+- **What the Fed did next sorted them better than anything on the chart.** Fed funds were lower 63 sessions later in 1980, 1987, 1998 and 2020: a new record came within 4 to 23 months. They were higher in 1978 (depth 20 %, record in 10 months) and in 2000 (depth 78 %, record in 15 years). Two cases is the whole evidence for "the Fed keeps hiking".
+- **2007 was a different shape.** Ten per cent down by session 15, then 51 sessions to 15 % and 66 to 20 %, with the Fed already cutting and the Baa spread up a full point by the 20 % mark. Speed, rates and credit all differ from a fast fall.
+- **A second day of minus 4 % at 10 % or more under the record: eight earlier falls.** Seven reached 20 %; the exception came three sessions after its record. Further fall after that day: 2 to 17 % in seven, 75 % in 2000.
+- **State on Nov 20 2026, mid-session:** 17.2 % under the Oct 6 record at session 33; second day of minus 4 % (Nov 5, Nov 20); fed funds up 0.25 in 126 sessions with a December hike priced; two-year yield up 0.61 in 63 sessions; Baa spread 0.16 narrower over 63 sessions; the equal-weight S&P fund 6.6 % under its high while the chip fund is 43 % under.
+- **Rule:** a named year is an analog only on the dimensions measured. List speed, the policy rate's direction, a credit spread's change and breadth for each case, and say which ones match.
+- **Disproof:** the index making a new record within four months while fed funds are higher than at the 15 % close, which would break the Fed sort.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
