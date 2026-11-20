@@ -1018,6 +1018,18 @@ Written while answering a question, no call locked. **What was read of this file
 - **Rule:** a named year is an analog only on the dimensions measured. List speed, the policy rate's direction, a credit spread's change and breadth for each case, and say which ones match.
 - **Disproof:** the index making a new record within four months while fed funds are higher than at the 15 % close, which would break the Fed sort.
 
+## 2026-11-20 (method, third note) — the S&P 500 in a fast correction, and a figure of mine retracted
+
+Written while answering a question after the close, no call locked. The lessons file was not printed again (last full read 19:10 UTC Nov 19, same context; receipt lapsed). S&P 500 daily closes from 1927, the Nasdaq 100 from 1985, the volatility index from 1990. Cells and depth bins were fixed before the counts were read.
+
+- **Closing state, Nov 20 2026:** S&P 500 6,910.39, 11.6 % under its Oct 6 record at session 33, a first close past 10 %, a seventh straight fall. Nasdaq Composite 22,617.73, 18.05 % under. Nasdaq 100 25,028.98, 19.84 % under, 49 points above its 20 % line. Volatility index 35.89.
+- **S&P since 1950, a record followed within 35 sessions by a close 10 % or more lower: ten cases.** Final depth: under 13 % in three (the 10 % close was the low in all three), 13 to 20 % in three, 20 to 30 % in one, over 30 % in three (2000, 2007, 2020). Higher 63 sessions later in seven, a year later in seven. When the Nasdaq Composite was 15 % or more under its own high that day (1990, 2000, 2022): depths 20, 49 and 25 %, none shallow.
+- **First volatility-index close at 35 or more after 60 sessions under it: seventeen cases.** The S&P was higher a week later in 13, a month later in 12, a quarter later in 13, a year later in 14. Further fall before a new record: under 3.5 % in nine, 8 to 15 % in five, 25 % or more in three (2001, 2008, February 2020).
+- **A seven-day losing streak is not a signal:** higher 21 sessions later in 22 of 46.
+- **An estimate without a count is retracted when the count arrives, again.** Earlier the same day I put a 2000-type outcome at 30 %. Four separate cells give 17 to 20 % (1 of 6, 2 of 10, 1 of 6, 3 of 17), and the cases where the Fed went on hiking give 1 of 5. The extra ten points were judgment about an accounting probe, with no count behind it. The figure is 20 %.
+- **Data rule:** one vendor's daily rows carried after-hours prices an hour after the close (the Nasdaq 100 fund 1.3 % off its 4 pm print). After the close, take the exchange's 4 pm print and use vendor rows only for earlier days.
+- **Disproof of the scenario weights:** fewer than two of the next four comparable S&P cases landing in the bin given the most weight or the one next to it.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
