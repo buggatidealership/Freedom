@@ -181,6 +181,8 @@ TAKE: Short, small: Intuit's own guide says growth slows again tonight, its last
 THESIS: Intuit's last four results days split cleanly: up about 4% twice when online growth held at 25%, down 20% and 3% when it slowed to 22% and 17%. Its own guide has revenue growth at 11% this quarter against 14% last quarter, and application software has fallen three days running on fear of AI agents. I'm watching Global Business Solutions growth against 15%, first-quarter revenue against $4.31 billion, and the second-quarter EPS guide against $3.70.
 KILL: Intuit reports Global Business Solutions growth of 15% or more and first-quarter revenue of $4.313 billion or more, guides second-quarter non-GAAP EPS to a midpoint of $3.66 or more, and lowers no fiscal 2027 line.
 
+*Graded Nov 20 22:11 UTC: Intuit closed minus 12.77 % (310.02 to 270.44). Right side. The quarter beat, and business growth held at 15 %. The stock fell on what came next: a second-quarter EPS guide of $3.17 to $3.22 against a street near $3.70, and a lower full-year revenue line because Credit Karma is now guided to 3 to 7 % growth, not 11 to 13 %. The slowdown I named did not happen; the cuts I had only listed as conditions did. My size was a third of the move.*
+
 ## 2026-11-19 — Keysight (KEYS), UP 4.0 %, Nov 20 close vs Nov 19 close
 Keysight UP 4.0 %. It is 26 % under its high with its AI-test peers, orders ran ahead of revenue last quarter, and a raise after a fall like this was bought five times of seven in my record. Revenue under $1.93 billion, orders under $1.90 billion or a first-quarter guide under $1.85 billion proves me wrong.
 
@@ -188,9 +190,13 @@ TAKE: Long, small: Keysight is 26% off its high with its AI-test peers, keeps be
 THESIS: Keysight's orders ran $245 million ahead of revenue last quarter, and revenue came in about 6% over the top of its own range. The stock has fallen 26% from its October high along with the rest of the AI-test group, and in my record a raise after that kind of fall was bought five times of seven. I'm watching fourth-quarter revenue against $1.97 billion, orders against $2.0 billion, and the first-quarter revenue guide against $1.90 billion.
 KILL: Keysight reports fourth-quarter revenue under $1.93 billion, or fourth-quarter orders under $1.90 billion, or guides first-quarter revenue to a midpoint under $1.85 billion.
 
+*Graded Nov 20 22:11 UTC: Keysight closed minus 7.07 % (281.42 to 261.51). Wrong side. The report cleared every line: revenue $1.99 billion, orders $2.34 billion, a first-quarter guide of $2.05 billion. The chip fund lost 10.6 % the same day and Keysight's test peers lost 9.9 %, so it beat them by 2.9 points, which is what I called on the relative line. I had said the absolute call was partly a bet on the index. The index lost.*
+
 ## 2026-11-19 — Elastic (ESTC), UP 6.0 %, Nov 20 close vs Nov 19 close
 Elastic UP 6.0 %. It fell 27 % in three weeks and 7 % today without news, while backlog growth has risen four quarters running and the company has raised its year at each recent report. Backlog growth under 18 %, revenue under $487 million or any lowered full-year line proves me wrong.
 
 TAKE: Long, small: Elastic fell 27% in three weeks and 7% today on no news, while its contracted backlog growth has risen four quarters running.
 THESIS: Elastic's contracted backlog due within a year grew 17%, 19%, 20% and 21% over the last four quarters, and the stock rose 12% and 19% on the two reports where that figure reached 20%. It has dropped 27% from its October high, 7% of it today with no filing and its peers flat. I'm watching backlog growth against 20%, revenue against $492 million, and the full-year revenue guide against a $2.009 billion midpoint.
 KILL: Elastic reports current remaining performance obligations growth under 18%, or second-quarter revenue under $487 million, or lowers any fiscal 2027 guidance line.
+
+*Graded Nov 20 22:11 UTC: Elastic closed minus 2.02 % (76.33 to 74.79). Wrong side. Revenue beat at $496 million, but backlog growth came in at 19 % as reported, under my 20 % line, and the full-year revenue guide stayed at a $2.004 billion midpoint because a stronger dollar ate the beat. The software fund lost 4.8 %, so Elastic beat it by 2.8 points. I never checked the currency before setting a reported-growth line.*
