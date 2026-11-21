@@ -1068,6 +1068,20 @@ Written while answering a question, no call locked. The lessons file was not pri
 - **Rule:** a bottom is described by what stopped, not by price: the policy rate, a credit spread, a fear gauge. Check those three before calling any bounce a low.
 - **Disproof:** a Nasdaq bear market that makes its final low while fed funds rise over the following 63 sessions, the ten-year yield rises, and the Baa spread widens, all three together. None of fourteen did.
 
+## 2026-11-21 (method, second note) — market questions: count the distance still needed, and put a control beside every cell
+
+Written while locking the first four market questions (`MARKET_QUESTIONS.md`), a new ungated class. **What was read of this file before writing: all 15 parts printed in full and uncut in this same context, receipt 094d16ab04f5.** Nasdaq Composite 1971 to Nov 20 2026, S&P 500 from 1950, the volatility index from 1990, fed funds, a Baa spread from 1986. A draft of the four probabilities had been carried across a context summary; the counts were run again from the files and all four moved, the first by thirteen points (0.85 to 0.72).
+
+- **A line-crossing count overstates.** "Reached 20 % under the peak within 27 sessions" was 19 of 23 after a first close at 18 %. "Fell a further 2.4 % from that close", which is what today needs, was 17 of 23. Two cases were already past the line or stopped just under it. Count the distance still needed from each past close.
+- **A control beside every cell.** From any session since 1971 the Nasdaq closed a further 2.4 % lower within 27 sessions 49 % of the time, a further 14.6 % within 87 sessions 15 %, and was higher 65 sessions on 66 %. A cell is information only against those.
+- **A first panic close says nothing about the next leg and something about three months.** First volatility close at 35 or more, 17 cases: a further 2.4 % within 27 sessions in 8 (the control rate); higher 65 sessions on in 13.
+- **The Fed sort has a second face.** At the 18 % mark, the falls in which fed funds were lower 63 sessions later were the deeper ones: 6 of 10 reached 30 % within 87 sessions, against 2 of 7 where funds were higher. The Fed cuts into a crisis. "The Fed stops" marks a low when it is seen at the low; seen from the 18 % mark it marks the worse cases. This narrows the Nov 20 note, which counted time to a new record on six cases.
+- **Calm credit was not comfort (hypothesis, n = 5, one of about ten splits tried).** Where the Baa spread had not widened over the 63 sessions before the first 18 % close (1987, 1990, 2002, 2009, 2022), the index was lower 65 sessions on in 4 of 5. Where it had widened, higher in 10 of 13. A fall without a credit scare has not had its panic yet.
+- **A narrow cell did not survive widening.** "The Nasdaq was already 15 % down when the S&P crossed 10 %: depths 20, 49, 25 %" came from 3 cases. On the 17 cases at an 11.5 % S&P close with the Nasdaq 15 % down, a further 9.5 % within 87 sessions came in 3, no better than all 33 (7).
+- **Two questions that are one event carry one probability.** At the ratio the two indexes have fallen since Oct 6, the S&P's 20 % line and the Nasdaq's 30 % line are the same move. Their cells differ (0.18 to 0.29 against 0.33 to 0.35) and the answers were set four points apart (0.32 and 0.28).
+- **Rule:** for a threshold question, state the remaining distance, count it in every past case, show the control, and list the cells that disagree without averaging away the disagreement in words; the single number is given once, with the cell it leans on.
+- **Disproof:** a Brier score on the class no better than the control's after twenty graded questions; for the calm-credit cell, the next two such falls both higher 65 sessions on.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
