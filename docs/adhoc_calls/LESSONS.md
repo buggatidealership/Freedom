@@ -1054,6 +1054,20 @@ Written 2026-11-20 22:11 UTC. **What was read of this file before writing: nothi
 
 - **Settled-source check, 2026-11-21 08:10 UTC (M).** The exchange's own historical rows agree with the two daily-row sources on every season-two reference and close: Alibaba 84.37 and 83.31, Walmart 127.36 and 126.04, Intuit 310.02 and 270.44, Keysight 281.42 and 261.51, Elastic 76.33 and 74.79. The provisional flags on Elastic and Keysight are lifted; no grade, Brier or tally changes. CBOE rows were still refused. The 4 pm last-sale prints had been 0.10 % and 0.5 % away from the official closes on Keysight and Elastic: the closing-auction rule again.
 
+## 2026-11-21 (method) — fourteen Nasdaq bear markets: how they bounced and what was moving at each low
+
+Written while answering a question, no call locked. The lessons file was not printed again (last full read 19:10 UTC Nov 19; receipt lapsed). Nasdaq Composite closes 1971 to Nov 20 2026; a bear market is a fall of 20 % or more from a record close, with the 2007 to 2009 fall counted from its own cycle high. Fed funds, the ten-year yield, a Baa spread (from 1986) and the volatility index (from 1990) measured around each low. Causes are from memory except where a source read today is cited in the reply.
+
+- **Two shapes.** In eight of fourteen the low came within 39 sessions of the first close at 20 % (1978, 1980, 1987, 1990, 1998, 2018, 2020, 2025): depths 20 to 36 %, a new record 2 to 21 months after the low. In six it came 118 to 624 sessions later (1973, 1981, 1983, 2000, 2007, 2021): depths 29 to 78 %.
+- **The first close at 20 % was within 5 % of the final low in 5 of 14.** The best close in the next ten sessions was 5 % or more higher in 7 of 14. The index was higher 21 sessions later in 8 of 14. A bounce after the label is a coin.
+- **Rallies inside the long ones.** At least one rally of 10 % or more before the final low in 6 of 14: 17 of them in 2000 to 2002, 7 in 2007 to 2009, 3 in 2022.
+- **At the low the Fed had eased, was easing or had stopped in 12 of 14.** Fed funds were higher 63 sessions after the low only twice: 1978 and 2022. In 2022 the ten-year yield was already falling.
+- **Yields split by cause.** After rate-driven lows the ten-year yield fell (1974, 1980, 1982, 1984, 1987, 1990, 2018, 2020, 2022: 9 of 14). After crisis lows it rose (1998, 2002, 2009, 2025): the scare ended.
+- **Credit and fear.** The Baa spread was narrower 21 sessions after the low in 7 of 9. The volatility index peaked at 34 or more within 15 sessions before the low in 7 of 8; 2022 ended at 25, without a panic.
+- **From the low:** plus 15.8 % at the median after 21 sessions (least plus 6.6), plus 25.8 % after 63, plus 57 % after 252 (least plus 23.7). Every one of fourteen.
+- **Rule:** a bottom is described by what stopped, not by price: the policy rate, a credit spread, a fear gauge. Check those three before calling any bounce a low.
+- **Disproof:** a Nasdaq bear market that makes its final low while fed funds rise over the following 63 sessions, the ten-year yield rises, and the Baa spread widens, all three together. None of fourteen did.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
