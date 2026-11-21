@@ -1082,6 +1082,17 @@ Written while locking the first four market questions (`MARKET_QUESTIONS.md`), a
 - **Rule:** for a threshold question, state the remaining distance, count it in every past case, show the control, and list the cells that disagree without averaging away the disagreement in words; the single number is given once, with the cell it leans on.
 - **Disproof:** a Brier score on the class no better than the control's after twenty graded questions; for the calm-credit cell, the next two such falls both higher 65 sessions on.
 
+## 2026-11-21 (method, third note) — three more splits on the 23 first closes at 18 %, and bounces before the line
+
+Written after the market-question lock, while answering follow-up questions; no call locked and no locked number changed. Same 23 Nasdaq cases. Splits were defined before the counts were read.
+
+- **Bounces before a further 2.4 % fall.** Of the 17 that fell it, 10 got there within 3 sessions and 14 within 10. Ten closed above the starting close first; 5 bounced 3 % or more first. After a down next session the fall came in 11 of 12; after an up one, 6 of 11. Once a close 5 % or more above came first, 1 of 7.
+- **Junk-bond fund against its 50-day average (nine cases since 2008): drop.** Three per cent or more under it: further fall in 3 of 5, higher 65 sessions on in 4 of 5. Within 3 %: 3 of 4 and 3 of 4. No separation.
+- **Two-year yield over the prior 63 sessions: drop for the next leg.** Up 0.25 or more: further 2.4 % in 5 of 6, higher at 65 sessions in 3 of 6. Down 0.25 or more: 7 of 10 and 6 of 10. In between: 4 of 6 and 5 of 6.
+- **Narrowness: keep as a hypothesis.** Where the S&P was less than 12 % under its own high on that day (8 cases: 1973, 1978, 1983, 1990, Apr and Oct 2000, 2004, Feb 2022), the Nasdaq fell a further 14.6 % within 87 sessions in 4 and was higher 65 sessions on in 3. Where the S&P was 12 % or more under: 4 of 15 and 11 of 15. A fall the broad index has not yet joined was the less finished kind.
+- **Rule:** a daily gauge that is easy to read (the junk fund, the two-year yield) is not thereby a signal; it is kept only if it splits the listed cases.
+- **Disproof:** the next two narrow falls both higher 65 sessions on.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
