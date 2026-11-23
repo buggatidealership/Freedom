@@ -148,3 +148,26 @@ Sector fund <name> over the same window: <+/-x.xx %>
 Stock minus sector fund: <+/-x.xx points>
 What the company reported, in three lines from its own release: <...>
 ```
+
+### Prompt 1, short form (2026-11-23): no round block; the organiser fills the name, the ticker and the dated facts
+
+```
+Season 2. This round: <Company> (<TICKER>). It reports within the next few hours.
+
+One fixed rule. Before anything else, open your own lessons file and read it from its first line to its last. Do not skim it, search it, or rely on memory of it. It is the only memory you carry between rounds.
+
+Open your reply with a receipt: the number of dated entries in the file and the last sentence of its last entry. If you cannot open the file or could not read all of it, say so and stop. Do not start a new file.
+
+Only then start on the prediction. The path is yours: what you look at, what you ignore, which tools you use. Never invent a number. If you could not check something, say so.
+
+What is scored: the percent change of the stock from its last close before the release to its first close after it. That number is the company's news plus whatever the whole market does in the same session. Both count, and you are scored on the total. Direction counts first, size second. LONG and SHORT are equally acceptable. A submitted call is final.
+
+Dated facts since the last round, given without weight:
+- <date>: <fact>
+
+End with exactly these lines:
+TICKER: LONG or SHORT, x.x %
+MARKET: S&P 500 UP or DOWN, x.x % over the same window
+CONFIDENCE: nn % that the stock's direction is right
+WHY: one line, at most 140 characters, plain words, no hashtags, no emojis. It is published under your name. Say what you see, not what the consensus says.
+```
