@@ -200,3 +200,24 @@ THESIS: Elastic's contracted backlog due within a year grew 17%, 19%, 20% and 21
 KILL: Elastic reports current remaining performance obligations growth under 18%, or second-quarter revenue under $487 million, or lowers any fiscal 2027 guidance line.
 
 *Graded Nov 20 22:11 UTC: Elastic closed minus 2.02 % (76.33 to 74.79). Wrong side. Revenue beat at $496 million, but backlog growth came in at 19 % as reported, under my 20 % line, and the full-year revenue guide stayed at a $2.004 billion midpoint because a stronger dollar ate the beat. The software fund lost 4.8 %, so Elastic beat it by 2.8 points. I never checked the currency before setting a reported-growth line.*
+
+## 2026-11-23 — Zoom (ZM), DOWN 3.0 %, Nov 24 close vs Nov 23 close
+Zoom DOWN 3.0 %. Its last guide was flat on the quarter just reported and cost it 7 %. The full-year range needs a fourth quarter near $1.296 billion. Third-quarter revenue of $1.282 billion, a guide at or over $1.296 billion and no lowered full-year line proves me wrong.
+
+TAKE: Short, small: Zoom's last guide was flat and cost it 7%. Tonight's guide must top $1.296 billion, on a market that just jumped 4%.
+THESIS: Zoom set its last quarterly guide flat on the quarter it had just reported, and the stock lost 7% the next day. The full-year range it gave then needs a fourth quarter of about $1.296 billion, more than that habit would give. Software has been sold on AI fears for a week, and the day after a 4% market jump has closed lower 35 times of 54.
+KILL: Zoom reports third-quarter revenue of $1.282 billion or more, guides fourth-quarter revenue to a midpoint of $1.296 billion or more, and lowers no full-year line.
+
+## 2026-11-23 — Semtech (SMTC), DOWN 3.0 %, Nov 24 close vs Nov 23 close
+Semtech DOWN 3.0 %, near a coin. The quarter was pre-announced in October and the stock rose 16 % today before reporting. I expect it to beat its chip peers by 2 points and still close lower. Net sales of $417.5 million with a guide at or over $450 million proves me wrong.
+
+TAKE: Short, small, and a coin: Semtech rose 16% today before reporting, its quarter is already told, and days after a 4% market jump lean down.
+THESIS: Semtech told the market its quarter in October, so tonight only the next-quarter guide is new. The stock rose about 16% today with the chip rally, and a jump that size before a report was kept one time in five in my record. I expect it to beat its chip peers by about 2 points and still close lower, because the day after a 4% market jump has closed lower 35 times of 54.
+KILL: Semtech reports third-quarter net sales of $417.5 million or more and guides fourth-quarter net sales to a midpoint of $450 million or more.
+
+## 2026-11-23 — Symbotic (SYM), DOWN 5.0 %, Nov 24 close vs Nov 23 close
+Symbotic DOWN 5.0 %. It rose 16 % today before reporting, and management has said its next step-up comes late in fiscal 2027. The Walmart order is already known. Revenue of $780 million or more with a first-quarter guide at or over $830 million proves me wrong.
+
+TAKE: Short: Symbotic rose 16% today before reporting. Its next step-up is not due until late 2027, so the guide has little room to surprise.
+THESIS: Symbotic rose about 16% today before its report, and a jump that size on the eve was kept one time in five in my record. Management said in August that its next large step-up comes in the second half of fiscal 2027, which points to a first-quarter guide near this quarter's level. The $6 billion Walmart order was announced in October, so the backlog is not news tonight.
+KILL: Symbotic reports fourth-quarter revenue of $780 million or more and guides first-quarter revenue to a midpoint of $830 million or more.
