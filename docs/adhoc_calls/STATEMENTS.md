@@ -208,6 +208,8 @@ TAKE: Short, small: Zoom's last guide was flat and cost it 7%. Tonight's guide m
 THESIS: Zoom set its last quarterly guide flat on the quarter it had just reported, and the stock lost 7% the next day. The full-year range it gave then needs a fourth quarter of about $1.296 billion, more than that habit would give. Software has been sold on AI fears for a week, and the day after a 4% market jump has closed lower 35 times of 54.
 KILL: Zoom reports third-quarter revenue of $1.282 billion or more, guides fourth-quarter revenue to a midpoint of $1.296 billion or more, and lowers no full-year line.
 
+*Graded Nov 24 21:55 UTC: Zoom closed plus 2.75 % (86.03 to 88.40, provisional). Wrong side. Revenue beat the top of its own range, the year was raised and a first dividend was declared. The fourth-quarter guide I expected to disappoint landed half a million dollars under my line, which is on it. The case I wrote against myself, a lowered bar cleared and bought, is what happened.*
+
 ## 2026-11-23 — Semtech (SMTC), DOWN 3.0 %, Nov 24 close vs Nov 23 close
 Semtech DOWN 3.0 %, near a coin. The quarter was pre-announced in October and the stock rose 16 % today before reporting. I expect it to beat its chip peers by 2 points and still close lower. Net sales of $417.5 million with a guide at or over $450 million proves me wrong.
 
@@ -215,12 +217,16 @@ TAKE: Short, small, and a coin: Semtech rose 16% today before reporting, its qua
 THESIS: Semtech told the market its quarter in October, so tonight only the next-quarter guide is new. The stock rose about 16% today with the chip rally, and a jump that size before a report was kept one time in five in my record. I expect it to beat its chip peers by about 2 points and still close lower, because the day after a 4% market jump has closed lower 35 times of 54.
 KILL: Semtech reports third-quarter net sales of $417.5 million or more and guides fourth-quarter net sales to a midpoint of $450 million or more.
 
+*Graded Nov 24 21:55 UTC: Semtech closed minus 16.97 % (104.13 to 86.46, provisional). Right side, for the wrong reason. Sales and the guide cleared my lines by the letter; the chip fund lost 8.3 % and took the stock with it. My second line was wrong: I expected Semtech to beat its peers by 2 points and it lost 5 more than they did. The guided quarter has 14 weeks, which I had not checked.*
+
 ## 2026-11-23 — Symbotic (SYM), DOWN 5.0 %, Nov 24 close vs Nov 23 close
 Symbotic DOWN 5.0 %. It rose 16 % today before reporting, and management has said its next step-up comes late in fiscal 2027. The Walmart order is already known. Revenue of $780 million or more with a first-quarter guide at or over $830 million proves me wrong.
 
 TAKE: Short: Symbotic rose 16% today before reporting. Its next step-up is not due until late 2027, so the guide has little room to surprise.
 THESIS: Symbotic rose about 16% today before its report, and a jump that size on the eve was kept one time in five in my record. Management said in August that its next large step-up comes in the second half of fiscal 2027, which points to a first-quarter guide near this quarter's level. The $6 billion Walmart order was announced in October, so the backlog is not news tonight.
 KILL: Symbotic reports fourth-quarter revenue of $780 million or more and guides first-quarter revenue to a midpoint of $830 million or more.
+
+*Graded Nov 24 21:55 UTC: Symbotic closed plus 6.92 % (34.97 to 37.39, provisional). Wrong side. The first-quarter guide came at $805 to $825 million, above the $800 million I said it would miss. The stock opened 3 % lower and was bought all day.*
 
 ## 2026-11-24 — Dell (DELL), DOWN 3.0 %, Nov 25 close vs Nov 24 close
 Dell DOWN 3.0 %, near a coin. It is half off its high and may raise again; I expect it to beat server peers by 3 points. But the chip tape has set the close on every AI name I called up this month. Revenue of $50 billion with the year raised above $192 billion proves me wrong.
