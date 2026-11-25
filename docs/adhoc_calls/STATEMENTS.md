@@ -235,12 +235,16 @@ TAKE: Short, small, and a coin: Dell is half off its high and may well raise, bu
 THESIS: Dell guided $49.0 billion for the quarter and the street sits above that, so a beat and a raise are the likely print. In my record a raise from this deep was bought five times of seven, and I expect Dell to beat its server peers by about 3 points. My three calls to rise inside the AI trade this month all lost to the chip index, so I do not call the close up while that fund is under its 50-day average.
 KILL: Dell reports third-quarter revenue of $50.0 billion or more, raises full-year revenue guidance above $192 billion, and lowers no full-year EPS line.
 
+*Graded Nov 25 22:00 UTC: Dell closed plus 0.60 % (295.28 to 297.06, provisional). Wrong side, by a hair. Revenue was $54.9 billion and the year was raised by $10 billion. The stock opened 9 % lower and came all the way back. I said it would beat its server peers by 3 points; it trailed them by 1.*
+
 ## 2026-11-24 — Ambarella (AMBA), DOWN 6.0 %, Nov 25 close vs Nov 24 close
 Ambarella DOWN 6.0 %. It has closed lower after six of its last seven reports, most of them beats, and chips are falling again. Revenue of $122 million or more with a fourth-quarter guide at or above the third quarter, and a higher close, proves me wrong.
 
 TAKE: Short: Ambarella has closed lower after six of its last seven reports, most of them beats, and the chip tape is falling again today.
 THESIS: Ambarella guided $115 to $124 million and one broker expects a beat and a raise. That has not helped it before: the stock closed lower after six of its last seven reports, by 15% or more on four of them. It is a chip name on a day the chip fund is down about 8%, and I do not call a rise there.
 KILL: Ambarella reports third-quarter revenue of $122 million or more and guides fourth-quarter revenue to a midpoint at or above the third-quarter figure.
+
+*Graded Nov 25 22:00 UTC: Ambarella closed minus 19.77 % (44.47 to 35.68, provisional). Right side. Revenue came at the bottom of its range and the next quarter was guided 37 % lower because customers cannot get memory chips. My size was a third of the move.*
 
 ## 2026-11-24 — HP (HPQ), DOWN 3.5 %, Nov 25 close vs Nov 24 close
 HP DOWN 3.5 %. It gives its fiscal 2027 outlook tonight after saying PC units will fall and memory costs keep rising, and this year's profit holds 19 cents of one-off refunds. A 2027 EPS guide at or over $3.20 with fourth-quarter EPS of $0.74 or more proves me wrong.
@@ -249,6 +253,8 @@ TAKE: Short: HP gives its 2027 outlook tonight after telling investors PC units 
 THESIS: HP gives its first fiscal 2027 outlook tonight, under an interim chief, six weeks before a new one starts. In September it said it plans for PC units to fall next year, and this year's profit includes 19 cents of tariff refunds that will not repeat. I expect the 2027 earnings guide to land under $3.00, against $3.24 this year.
 KILL: HP guides fiscal 2027 non-GAAP EPS to a midpoint of $3.20 or more and reports fourth-quarter non-GAAP EPS of $0.74 or more.
 
+*Graded Nov 25 22:00 UTC: HP closed plus 11.49 % (27.94 to 31.15, provisional). Wrong side, and badly. The 2027 guide I expected under $3.00 came at $3.15 to $3.45. The company had lowered expectations itself and then cleared them; I have seen that bought every time and shorted it anyway.*
+
 ## 2026-11-24 — Workday (WDAY), DOWN 3.0 %, Nov 25 close vs Nov 24 close
 Workday DOWN 3.0 %. It guided backlog growth down to 11-12 % from 14 %, reaffirmed its year while cutting staff, and software is under an AI cloud. Subscription revenue of $2.520 billion, backlog growth of 12 % and a raised year proves me wrong.
 
@@ -256,9 +262,13 @@ TAKE: Short, small: Workday has guided its backlog growth down from 14% to 11-12
 THESIS: Workday guided its 12-month backlog growth down to 11-12% from 14% and has already told the street to expect about 11% growth next year. It reaffirmed, not raised, its year in September while cutting 2.5% of staff. Software has been sold for a week on AI fears, and Workday's last two November reports both lost 6 to 8%.
 KILL: Workday reports third-quarter subscription revenue of $2.520 billion or more and 12-month backlog growth of 12% or more, and raises full-year subscription revenue guidance above $9.950 billion.
 
+*Graded Nov 25 22:00 UTC: Workday closed plus 0.68 % (179.23 to 180.44, provisional). Wrong side, narrowly. Backlog growth came at 12.3 %, above the range I expected it to sit low in, and the year was raised.*
+
 ## 2026-11-24 — Autodesk (ADSK), DOWN 2.5 %, Nov 25 close vs Nov 24 close
 Autodesk DOWN 2.5 %, near a coin. It raised its year at each of its last two reports and fell about 4 % both times, and it has not yet dropped with the rest of software. Revenue of $2.140 billion with the year raised to $8.340 billion and billings held proves me wrong.
 
 TAKE: Short, small, and close to a coin: Autodesk raised its year twice and was sold both times. It has not yet fallen with the rest of software.
 THESIS: Autodesk raised its outlook at each of its last two reports and the stock fell about 4% both times. It is the one software name on my list that has not dropped this month, so it has more to give back if the report is only fine. I see this as close to a coin and my rules do not let me call it up.
 KILL: Autodesk reports third-quarter revenue of $2.140 billion or more, raises full-year revenue guidance to a midpoint of $8.340 billion or more, and does not lower its billings range.
+
+*Graded Nov 25 22:00 UTC: Autodesk closed minus 3.49 % (255.70 to 246.79, provisional). Right side. It raised its year a third time and was sold a third time. The specific line I named, billings, was nudged up and not left alone, so the reason I gave is not the reason.*
