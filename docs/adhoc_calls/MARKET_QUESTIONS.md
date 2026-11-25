@@ -99,7 +99,7 @@ Alternative: the cells disagree because none of them describes this market, and 
 
 ## 2026-11-25 lock: MQ5 to MQ7
 
-Locked 2026-11-25 about 11:35 UTC, before the 13:30 UTC release. Lessons receipt 69c3c601e72b: all 15 parts printed in full on Nov 24 ending 18:31 UTC in this same context, and the entries added since printed uncut today with `read --changes`. Not gate-checked; the gate has no mode for this class.
+Locked 2026-11-25 11:06 UTC, before the 13:30 UTC release. Lessons receipt 69c3c601e72b: all 15 parts printed in full on Nov 24 ending 18:31 UTC in this same context, and the entries added since printed uncut today with `read --changes`. Not gate-checked; the gate has no mode for this class.
 
 **MQ5 and my point view of the low.** Nasdaq Composite: record close 27,599.89 (Oct 6), first close 18 % under it 22,617.73 (Nov 20, session 33), then plus 6.51 % and minus 1.48 %; 23,733.54 on Nov 24. Twenty-one earlier first closes 18 % under a peak (one vendor's daily closes from 1971; a simpler episode rule than the Nov 21 count, which found 23): the final low was within 2.4 % of that close in 5, a further 2.4 to 10 % in 3, more than 10 % in 13; median further fall 13.7 %. In the seven reached within 40 sessions of the peak the low came 3 to 29 sessions later in all seven, with a median further fall of 13.5 % (1.4, 7.8, 19.0, 13.5, 22.0, 4.1, 13.7). No earlier case had a 6 % rise on the very next session. My point view, a hypothesis: a lower closing low near 20,400 between Dec 9 and Dec 23, and if no close under 22,617.73 comes by Jan 29 the low was Nov 20. Reconciliation with MQ1 (0.72, locked, unchanged): the bounce cell written on Nov 21 (1 of 7) now applies, and my present figure for MQ1's event would be near 0.45; MQ1 is not revised.
 
