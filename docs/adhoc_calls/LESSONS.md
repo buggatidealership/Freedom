@@ -1163,6 +1163,19 @@ Written while checking a post the user sent, no call locked. The lessons file wa
 - **Rule:** a list of matching dates is checked for three things before it is given weight: how many separate episodes, the outcome at more than one horizon, and whether the list survives a small change in its thresholds.
 - **Disproof of the one thing that held:** the fund not closing 6 % under its Nov 23 2026 close (651.03) before making a new 252-session high.
 
+## 2026-11-25 (method, second note) — what followed a first Nasdaq close 20 % under a peak, by horizon and by speed
+
+Written while answering a question, no call locked. Nasdaq Composite daily closes from one vendor, Feb 1971 to Nov 24 2026. An episode starts at the first close 10 % under the highest close since the last episode ended and ends at a new high or a 20 % rise off its low; the low is the episode's own low, so the legs of 2000 to 2002 and of 2022 count separately. Definitions fixed before the counts were read. Receipt valid (69c3c601e72b).
+
+- **Twenty first closes at 20 %.** Higher after 5 sessions in 12, after 21 in 10, after 63 in 13, after 126 in 13, after 252 in 12 (median plus 8.1 %, worst minus 49.3 %, best plus 85.0 %). Controls from any day: 58, 61, 66, 70 and 77 %. The label lowers the one-year odds from 77 % to 60 % and widens the range.
+- **Further fall to the episode low:** under 5 % in 7, 5 to 15 % in 4, over 15 % in 9; median 13.6 %. Sessions to the low: 10 or fewer in 7, 11 to 40 in 5, more than 40 in 8.
+- **Speed splits them.** Reached within 45 sessions of the peak (9 cases): further fall under 5 % in 5, median 4.7 %; low within 10 sessions in 5; higher a year on in 7 of 9, median plus 30.2 %. Slower (11 cases): median further fall 17.0 %; higher a year on in 5 of 11, median minus 8.6 %.
+- **Six of the nine fast ones started from a record close** (1978, 1980, 1987, 1998, April 2000, 2020): further fall 0.2, 0.0, 19.0, 5.3, 16.1 and 4.7 %; higher a year on in 5 of 6. The exception is April 2000, minus 48 %.
+- **The first month is a coin either way:** 10 of 20 higher at 21 sessions.
+- **A check on a post:** the volatility index closed at 30 or more on the Wednesday before Thanksgiving twice since 1990 (2008: 54.92; 2011: 33.98). It was 20.35 in 2022. After 2008 the S&P 500 lost 21.1 % in 63 sessions; after 2011 it gained 17.7 %. On all 736 days with a close of 30 or more the index was still 25 or more five sessions later 96 % of the time, so the holiday adds nothing.
+- **Rule:** when a label has a fast kind and a slow kind, say which kind today is before quoting the pooled figure.
+- **Disproof:** the next two fast cases from a record both lower a year on.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
