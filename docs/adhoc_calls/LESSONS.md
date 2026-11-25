@@ -1150,6 +1150,19 @@ Earlier lessons that applied. The middle scenario is capped at 0.20: did not dec
 
 Descriptions, not lessons. Revenue $778 M inside the $760-780 M guide; first full year of GAAP profit; "significant backlog expansion" expected next quarter. The backlog figure and the call were not read.
 
+## 2026-11-25 (method) — checking a viral pattern: a 5 % fall, a 5 % rise, then a gap down, on the Nasdaq 100 fund
+
+Written while checking a post the user sent, no call locked. The lessons file was not printed again (last full read 18:31 UTC Nov 24; receipt lapsed on the entries added since). Daily open and close of the Nasdaq 100 fund from one vendor, Mar 1999 to Nov 24 2026; closes are not adjusted for dividends.
+
+- **The post's list is correct.** A close 5 % or more lower, then a close 5 % or more higher, then an open 1 % or more lower: Jan 4 2001, Mar 14 2001, Oct 17 2008, Mar 11, 16 and 18 2020, and Nov 24 2026. Further fall to the lowest later close: 67.9 %, 54.9 %, 20.8 %, 17.1 %, 12.0 %, 6.4 %.
+- **Six cases are three episodes.** The three in 2020 fall within six sessions of each other.
+- **What the post left out.** A year later the fund was higher in 4 of 6 (minus 34, minus 16, plus 33, plus 52, plus 66, plus 77 %). After 63 sessions, 4 of 6.
+- **What held in all six.** A further fall of 6 % or more before the low, and a lower close five sessions on in 5 of 6.
+- **Where they started.** The 2001 and 2008 cases began 41 to 62 % under the 252-session high; the 2020 cases 14 to 23 % under; Nov 24 2026 began 14.3 % under.
+- **The gap filter does the selecting.** Without it there are 11 earlier cases, five of them in 2000, and the first, in January 2000, was followed by plus 18.5 % in 63 sessions. With thresholds loosened to 4.5 %, 4.5 % and 0.8 %, August 2011 and November 2008 join.
+- **Rule:** a list of matching dates is checked for three things before it is given weight: how many separate episodes, the outcome at more than one horizon, and whether the list survives a small change in its thresholds.
+- **Disproof of the one thing that held:** the fund not closing 6 % under its Nov 23 2026 close (651.03) before making a new 252-session high.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
