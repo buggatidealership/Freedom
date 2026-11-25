@@ -1114,6 +1114,42 @@ Written 2026-11-24 21:55 UTC. **What was read of this file before writing: all 1
 - **Tallies (D), carried from the Nov 20 (US) entry plus these three:** pre-release research **58.0 of 105**; coin 53.5 of 106. Brier running: 105 scored entries **25.5571 vs the coin's 26.250** (mean 0.2434 vs 0.250). DOWN calls **48 of 78**; UP calls 7 of 25; post-release class 1 of 3; TAPE class 4 of 4 on sign. Season two: 4 of 8 on direction, coin 5 of 8, mean Brier 0.226. Named cut-line mechanisms confirmed: 1 of 6. Outside-tape DOWN calls on a named cut line: 3 of 6. Kill lines badly drafted: 8. Residual calls right: 3 of 6.
 - **Pending:** Dell (DOWN 3.0 at 0.48), Ambarella (DOWN 6.0 at 0.36), HP (DOWN 3.5 at 0.41), Workday (DOWN 3.0 at 0.45) and Autodesk (DOWN 2.5 at 0.47) on the Nov 25 close. Three of them were locked three hours before this grade under the two rules this entry questions (the ban, and cut lines built on my own reading); they stand as locked and are graded as tests. Owed: the exchange's Nov 24 rows to re-stamp 88.40, 86.46, 37.39 and the basket; the three calls; the user's ruling on the long type.
 
+## 2026-11-25 (season two result) — Zoom (ZM)
+
+Record as given by the user: the stock moved plus 2.75 %. My call as locked: SHORT 3.0 %, market S&P 500 DOWN 0.5 %, P(up) 0.45. Measured by me on the exchange's rows, which posted overnight and confirm the provisional closes of the Nov 24 entry: stock 86.03 to 88.40; S&P 500 minus 0.50 %; software fund plus 0.09 %. The user's block gave no market or sector figure; those two are mine. **Wrong on the company, right on the market**: called down, the stock beat its sector fund by 2.66 points.
+
+Lessons.
+1. WHEN: a name outside the AI trade has had its bar cut by the street five or more times in 30 days and the stock has been sold into the report, and my own figure is within 0.05 of a coin. THEN: I do not short it. Under the ban on long calls the reply says "no call"; if the user lifts the ban for this case the side is long. RECORD: street-lowered bars cleared and bought 3 of 3 (Novartis, Merck, Zoom); shorted by me 0 of 3. Drop it if two of the next three such reports close down 1 % or more. It would have changed this call.
+2. WHEN: my cut line rests on how I expect a guide to be set, and that convention has been seen fewer than three times in the company's own releases. THEN: the cut line sets the size only; it does not pick the side. RECORD: 0 of 1 (Zoom: one earlier flat guide, then a guide $5 M above the quarter). Drop it if the next two such conventions both hold. It would have removed my stated reason for the short.
+
+Earlier lessons that applied. A dated sector overhang takes the side: hurt, now 2 of 3. My written alternative needing no new fact is the forecast: applied in substance and was not followed, count 5. A gate missed by under one point is met: decided the scenario letter, did not decide the call. The letter of the report predicts the close outside the AI trade on calm days: held, 10 of 11, and I had called against it before the report.
+
+Descriptions, not lessons. Revenue of $1,290.6 M beat the top of the company's range; the year was raised to $5.100-5.105 B; a first dividend of $0.25 was declared; the stock traded 7.8 % higher at its best and kept 2.75 %. The call was not read.
+
+## 2026-11-25 (season two result) — Semtech (SMTC)
+
+Record as given by the user: the stock moved minus 16.97 %. My call as locked: SHORT 3.0 %, market S&P 500 DOWN 0.5 %, P(up) 0.46, with a second line that the stock would beat Credo, Astera and Marvell by 2.0 points. Measured by me on the exchange's rows: stock 104.13 to 86.46; S&P 500 minus 0.50 %; chip fund minus 8.27 %; the three-name basket minus 12.01 %. **Right on the company, right on the market** by the season's definition: called down, the stock did 8.70 points worse than its sector fund. My own second line was wrong by 6.96 points: I said it would beat its peers and it lost 4.96 points more than they did. The short was a forced side at a coin. The four-way label is right and I did not earn it.
+
+Lessons.
+1. WHEN: the chip fund gained 10 % or more in the single session before the report and the name itself gained 15 % or more that day. THEN: no call that the name beats its peers; the short sizes at the down tail of my table, not the shrink line. RECORD: 1 of 1 for the name giving back more than its peers (Semtech); the fund fell the next day 2 of 2 after a run of 10 % or more (Nov 13, Nov 24). Drop it if the next such name beats its basket on a day the fund falls. It would have changed the second line and the size (3.0 against 17.0).
+2. WHEN: the quarter being guided has 14 weeks, which the company's fiscal calendar or last 10-Q shows before the release. THEN: I check it first and write every gate and kill leg per week. RECORD: missed 2 of 2 (Nvidia, Semtech). It would not have changed the side; it would have changed the kill line, which fired on a figure that is about $446 M on 13 weeks against my $450 M line. No drop condition: a checking rule.
+
+Earlier lessons that applied. No call to rise inside the AI trade while the chip fund is under its 50-day average: helped, the side it forced was right. A raise from 25 % or more under the high is bought off liquidation days: not marked, the chip fund lost 8.3 %. Inside the AI trade my reading predicts the gap against peers: hurt, now 3 of 6. A hit that belongs to the tape goes in no evidence cell: applied, five such hits.
+
+Descriptions, not lessons. Net sales $423.0 M; guide $480 M plus or minus $5 M for a 14-week quarter that still includes the business being sold; opened 12.1 % lower and closed 17.0 % lower. Why it lost more than its peers I have not verified; the call was not read.
+
+## 2026-11-25 (season two result) — Symbotic (SYM)
+
+Record as given by the user: the stock moved plus 6.92 %. My call as locked: SHORT 5.0 %, market S&P 500 DOWN 0.5 %, P(up) 0.44. Measured by me on the exchange's rows: stock 34.97 to 37.39; S&P 500 minus 0.50 %; industrials fund minus 0.53 %. The choice of sector fund is mine. **Wrong on the company, right on the market**: called down, the stock beat its fund by 7.45 points.
+
+Lessons.
+1. WHEN: the reason behind my cut line is a management remark I read in a press summary and not in the company's own document. THEN: it does not pick the side and does not lower the odds of a good guide; I read the primary text or drop the reason. RECORD: 0 of 1 (the Aug 5 timing remark; the guide came at $805-825 M against my $800 M line). Drop it if the next two second-hand remarks I set aside would both have been right. It would have changed this call: without that remark there was no reason to short.
+2. WHEN: a name outside the AI trade is 25 % or more under its high, no dated company statement points to a cut, and the middle case is a guide at or above the quarter just reported. THEN: I price the middle case at 0.6 or more to rise, and I do not short. RECORD: a de-rated base buys a met line 8 of 10; I priced it at 0.42 here. Drop it if two of the next three such reports close down. It would have moved my figure from 0.44 to about 0.56.
+
+Earlier lessons that applied. The middle scenario is capped at 0.20: did not decide; the middle case printed, the third time in about seventeen locks. Outside the AI trade a short names the line that will be cut: hurt; named cut lines have happened 1 time in 6, and shorts made on them are 3 of 6. A first reaction is not the result: held; the stock opened 3.0 % lower and closed 6.9 % higher, 11 of 11.
+
+Descriptions, not lessons. Revenue $778 M inside the $760-780 M guide; first full year of GAAP profit; "significant backlog expansion" expected next quarter. The backlog figure and the call were not read.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
