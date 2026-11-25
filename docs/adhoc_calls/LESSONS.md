@@ -1195,6 +1195,27 @@ Written 2026-11-25 22:00 UTC. **What was read of LESSONS.md before writing: not 
 - **Tallies (D), carried from the Nov 24 (US) entry plus these five:** pre-release research **60.0 of 110**; coin 56.5 of 111. Brier running: 110 scored entries **26.8286 vs the coin's 27.500** (mean 0.2439 vs 0.250). DOWN calls **50 of 83**; UP calls 7 of 25; post-release class 1 of 3; TAPE class 4 of 4 on sign. Season two: 6 of 13 on direction, coin 8 of 13, mean Brier 0.237. Since the ban on long calls (Nov 20): 3 of 8, coin 6 of 8. Named cut-line mechanisms confirmed: 1 of 9. Company-lowered bar cleared, bought: 8 of 8. Kill lines badly drafted: 8. Market line: 1 of 2.
 - **Pending:** the exchange's Nov 25 rows for the five names, the two baskets and Autodesk's Nov 24 reference; market questions MQ1 to MQ5; the five calls unread; the user's ruling on the long type and on "no call" at a coin. The Nov 24 closes of Zoom, Semtech and Symbotic were confirmed on the exchange's rows this morning and their ledger notes now say so.
 
+## 2026-11-25 (method, third note) — the user's ruling: a side every time; and what I had not been looking at
+
+Written 2026-11-25 about 22:20 UTC after the user answered my two questions. No call locked. The file was not printed again; the receipt has lapsed on its 24-hour limit.
+
+**The ruling (the user's words, in substance).** "No call" is not allowed: the price closes up or down, so I give a side every time. Where I am at a coin the fix is to widen what I look at, not to abstain. The user did not rule in words on the ban on long calls. My reading, labelled as mine: a side forced by a ban is the luck the user is telling me to stop relying on, so from the next lock the ban no longer picks the side. The side comes from the counted cell that fits, and where none fits, from the two measurements below. If the user meant otherwise they will say so.
+
+**What my own ledger says (D, from CALIBRATION.csv, 127 graded rows counted one by one).** My side was right 68 times, 54 %. Calling every one of them short would have been right 77 times, 61 %. Through October: mine 43 of 69, always-short 44 of 69. Nov 1 to 18: mine 19 of 45, always-short 25. Since Nov 19: mine 6 of 13, always-short 8. In no period did my choice of side beat one fixed side. The research has read the reports well and has added nothing on direction that a single line would not have given. That is the measured starting point, and it is worse than the tallies made it look.
+
+**Two things I never measured before a lock, both reachable today (M).**
+1. *The street's number for the line being guided, and how it has been revised.* The exchange's own site serves, per company, the consensus EPS for each coming quarter and year with the low, the high, the count of estimates and the revisions up and down over four weeks (`api.nasdaq.com/api/analyst/<TICKER>/earnings-forecast`). Read today, a day after the reports and showing no sign of having been updated: HP fiscal 2027 at $3.06 (range $2.75 to $3.36, six estimates, one cut and no raise in four weeks). My cut line was "under $3.00". So my thesis sat two per cent under a number the street already held, and the guide of $3.15 to $3.45 beat that number by eight per cent at its midpoint. For three of this week's calls I wrote "the street's figure was not found". It was one request away. The basis differs by company (HP's is the adjusted figure; Workday's and Autodesk's look like GAAP), so the basis is checked against the company's last reported figure before use.
+2. *The option market's price for the move.* The same site serves the option chain (`api.nasdaq.com/api/quote/<TICKER>/option-chain`). The nearest expiry's at-the-money call plus put, over the price, is the move the market expects; the gap between a put and a call the same distance out is its lean. I have written "option chain not read" in nearly every document since October.
+
+**Rules from the next lock.**
+- Every lock records, in the table of facts: the street's figure for each line the company will guide, its low and high, the revisions up and down over four weeks, and the option-implied move with its lean. A document that says "not found" for the street's forward figure names the request that failed.
+- A cut line or a raise line of mine is written against the street's figure, not against the company's last year. If my line is within three per cent of the street's, I have no view on that line and it cannot pick the side.
+- Cuts to the street's figure in the four weeks before a report are counted as a lowered bar, with the count stated.
+- These two measurements are new and have no record. Each is scored at every grade (did the side they pointed to win) and gets no more weight than a counted cell until it has ten cases.
+- **Disproof:** after twenty locks with both recorded, the side they point to wins no more often than always-short did over the same twenty.
+
+**What stays unknowable at the lock.** The index's move on the grading day. It took the absolute sign on every day it moved three per cent or more. No search fixes that; the reply will keep saying so in one line.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
