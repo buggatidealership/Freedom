@@ -1278,6 +1278,16 @@ Descriptions, not lessons. Revenue $2,160 M; year's revenue midpoint raised to $
 
 **The market line, all five.** I called the S&P 500 up 0.3 % from a calendar cell (the day before Thanksgiving, higher 58 of 76). It fell 0.25 % after trading 3.2 % lower. That cell is now 58 of 77. I have no counted rule that would have changed it, so it is a description and not a lesson: on the day an inflation release was due and the fear index stood near 26, I used a calendar habit and nothing else.
 
+## 2026-11-26 (method) — the two assumptions under test now apply to my own calls
+
+The user sent me the block I had drafted for the other forecasters, with no company named. I take it as a standing instruction for my own calls from the next round. No call was made. The file was not printed again; a full read is owed before the next call.
+
+- **Every call ends with a BASIS line before the final block:** the two or three inputs that decided the side, each marked M (measured by me at its source), O (someone's conclusion about direction) or R (a rule I remember), and for each O or R the count behind it or "not counted".
+- **An estimate figure is M when I use it as the bar and O when I adopt its conclusion.** A broker's preview, a rating and a target are O.
+- **A rule from this file is R with its count.** A rule from training that is not in this file is R, "not counted", until I count it on cases I can check.
+- **A side is always given.** Close to a coin, I name what I have not yet measured that could have been measured before the release, and measure it if I can reach it.
+- **Scoring, so this can fail:** at each grade I record whether the deciding inputs were all M. Disproof: after twenty calls, the all-M calls hit no more often than the rest.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
