@@ -1216,6 +1216,68 @@ Written 2026-11-25 about 22:20 UTC after the user answered my two questions. No 
 
 **What stays unknowable at the lock.** The index's move on the grading day. It took the absolute sign on every day it moved three per cent or more. No search fixes that; the reply will keep saying so in one line.
 
+## 2026-11-26 (season two result) — Dell (DELL)
+
+Record as given by the user: the stock moved plus 0.60 %. My call as locked: SHORT 3.0 %, market S&P 500 UP 0.3 %, P(up) 0.48, with a second line that it would beat Super Micro, Hewlett Packard Enterprise and NetApp by 3.0 points. Measured by me: closes on the exchange's rows; S&P 500 minus 0.25 %; sector-fund moves from one vendor's rows. The user's block gave no market or sector figure; those are mine, and the choice of fund is mine. Stock 295.28 to 297.06; technology fund minus 0.83 %; the three-name basket plus 1.95 %. **Wrong on the company, wrong on the market**: called down, the stock beat its sector fund by 1.43 points; called the market up, it fell. My second line was wrong too: it trailed its peers by 1.35 points.
+
+Lessons.
+1. WHEN: a name inside the AI trade is 25 % or more under its high, fell with its sector, and raised at its last report. THEN: the side is long. A ban on long calls no longer picks the side (the user's ruling of Nov 25: a side every time, found by looking wider, not forced). RECORD: a raise from that deep bought off liquidation days 6 of 8; my shorts against that cell 0 of 3 (CoreWeave, Semtech on the letter, Dell). Drop it if two of the next three such raises close down on days the chip fund falls less than 3 %. It would have changed this call to long.
+2. WHEN: the reporter's closest peers fell 8 % or more the day before on a sibling's report. THEN: I do not call the reporter to beat those peers the next day; they bounce. RECORD: 0 of 1 for my call (peers plus 1.95 %, Dell plus 0.60 %). Drop it if the next two such reporters beat their basket. It would have removed the second line.
+
+Earlier lessons that applied. No call to rise inside the AI trade while the chip fund is under its 50-day average: hurt; scenario A prints there are now 1 up of 2. Lowering the counted odds of a raise without the company's own statement: hurt again, lowered lines fired 10 of 14. A first reaction is not the result: held, the stock opened 9.4 % lower and closed higher, 12 of 12.
+
+Descriptions, not lessons. Revenue $54.9 B; year raised to $202 B; AI-server backlog $132.3 B; a $25 B buyback added. The exchange site's analyst table, read a day after the report, showed the street's year at $25.30 against a guide of $29.68. Why the stock opened 9 % lower I have not verified; the call was not read.
+
+## 2026-11-26 (season two result) — Workday (WDAY)
+
+Record as given by the user: the stock moved plus 0.68 %. My call as locked: SHORT 3.0 %, market S&P 500 UP 0.3 %, P(up) 0.45. Measured by me: closes on the exchange's rows; S&P 500 minus 0.25 %; sector-fund moves from one vendor's rows. The user's block gave no market or sector figure; those are mine, and the choice of fund is mine. Stock 179.23 to 180.44; software fund minus 0.35 %. **Wrong on the company, wrong on the market**: called down, the stock beat its sector fund by 1.03 points.
+
+Lessons.
+1. WHEN: the company has restated its guidance in a filing between two reports. THEN: I keep the odds of a met-or-raised table at the counted 0.8 and do not read "reaffirmed, not raised" as weakness. RECORD: inter-report company statements that pointed to the good tail and were followed by it: Rocket Lab, CoreWeave, Workday, 3 of 3. Drop it if two of the next three restated guides are followed by a cut. It would have moved my table from 0.40 to above 0.5 and the side to long.
+2. WHEN: my cut line sits inside the range the company itself guided (backlog growth of 11 to 12 %; I needed 11.5 % or under). THEN: I have no view on that line and it cannot pick the side. RECORD: 0 of 1. Drop it if the next two such lines both print in my half of the range. It would have removed my reason for the short.
+
+Earlier lessons that applied. A dated sector overhang takes the side: hurt here, now 3 of 5 with Autodesk. A forced short at a coin: hurt, 2 of 5 with coins 5 of 5; no longer allowed as a reason. A raised table outside the AI trade is bought: held, 20 of 25, and I called against it.
+
+Descriptions, not lessons. Subscription revenue $2.532 B; 12-month backlog plus 12.3 %; year raised to $9.958 B; fourth-quarter guide plus 10 %. The move was inside one point either way. The call was not read.
+
+## 2026-11-26 (season two result) — Ambarella (AMBA)
+
+Record as given by the user: the stock moved minus 19.77 %. My call as locked: SHORT 6.0 %, market S&P 500 UP 0.3 %, P(up) 0.36, with a second line of 3.0 points worse than Qualcomm, Lattice and Synaptics. Measured by me: closes on the exchange's rows; S&P 500 minus 0.25 %; sector-fund moves from one vendor's rows. The user's block gave no market or sector figure; those are mine, and the choice of fund is mine. Stock 44.47 to 35.68; chip fund minus 0.50 %; the three-name basket 0.00 %. **Right on the company, wrong on the market**: called down, the stock did 19.27 points worse than its sector fund.
+
+Lessons.
+1. WHEN: the company named a supply constraint at its last report, and other companies reporting the same week name the same constraint as worse (here memory: Hewlett Packard Enterprise, HP and the Dell previews). THEN: I put the cut at 0.45 or more and size at the down tail of my table. RECORD: 1 of 1. Drop it if the next such company holds its guide. It would have changed the size from 6.0 to 15 and the confidence from 64 to about 75; the side was already right.
+2. WHEN: a name inside the AI trade has closed lower after 7 of its last 8 reports. THEN: short, whatever a broker's preview says. RECORD: own lopsided-down habits inside the AI trade 4 of 4 (Samsung, Intel, Qualcomm, Ambarella). Drop it if the next two such names close up. It is the lesson that made this call; kept because it is the only cell that gave a clean hit this round.
+
+Earlier lessons that applied. Own habit at threshold governs: helped. After a deep fall into a report a short sizes at the shrink line: hurt; it was written for a five-session fall and I stretched it to a one-day fall. A scenario C print sizes at the C leg: held, 15 against 19.8.
+
+Descriptions, not lessons. Revenue $115.2 M at the bottom of its range; next quarter guided to $70-75 M; the company says memory scarcity "has intensified". The stock had lost 20 % the day before the report.
+
+## 2026-11-26 (season two result) — HP (HPQ)
+
+Record as given by the user: the stock moved plus 11.49 %. My call as locked: SHORT 3.5 %, market S&P 500 UP 0.3 %, P(up) 0.41. Measured by me: closes on the exchange's rows; S&P 500 minus 0.25 %; sector-fund moves from one vendor's rows. The user's block gave no market or sector figure; those are mine, and the choice of fund is mine. Stock 27.94 to 31.15; technology fund minus 0.83 %. **Wrong on the company, wrong on the market**: called down, the stock beat its sector fund by 12.32 points. My worst call of the round.
+
+Lessons.
+1. WHEN: the company has itself stated a negative before the report (units to fall, costs to rise, results at the low end) and has not said it got worse. THEN: the side is long; that statement lowers the bar and cannot be my reason to short. RECORD: bought 8 of 8 (Novartis, Merck, AstraZeneca, Novo, BMW, McDonald's, Sony against its index, HP); shorted by me 4 times, 0 of 4. Drop it if two of the next four close down 2 % or more. It would have changed this call to long.
+2. WHEN: I name a figure a first-time guide will miss. THEN: before the lock I open the street's figure for that line on the exchange site's analyst table; if mine is within 3 % of it I have no view. RECORD: 0 of 1. Mine was $3.00; the street's, read a day after the report, was $3.06 with a range of $2.75 to $3.36; the guide was $3.15 to $3.45. Drop it if, over ten cases, lines of mine within 3 % of the street's pick the side as well as lines further away. It would have removed the short's reason.
+
+Earlier lessons that applied. Outside the AI trade a short names the line that will be cut: hurt; named lines have happened 1 time in 9 and the rule is retired. My written alternative needing no new fact is the forecast: hurt, count 6; I wrote this exact outcome in the odds section. A new chief's first report re-baselines: did not decide; the interim chief guided up.
+
+Descriptions, not lessons. Fourth-quarter EPS $0.83 with $0.15 of tariff refunds; fiscal 2027 free cash flow guided below fiscal 2026; PC units down 29 % with revenue up 14 %; dividend raised. Whether the 2027 guide includes further refunds I did not check.
+
+## 2026-11-26 (season two result) — Autodesk (ADSK)
+
+Record as given by the user: the stock moved minus 3.49 %. My call as locked: SHORT 2.5 %, market S&P 500 UP 0.3 %, P(up) 0.47. Measured by me: closes on the exchange's rows; S&P 500 minus 0.25 %; sector-fund moves from one vendor's rows. The user's block gave no market or sector figure; those are mine, and the choice of fund is mine. Stock 255.70 to 246.785; software fund minus 0.35 %. **Right on the company, wrong on the market**: called down, the stock did 3.14 points worse than its sector fund. By my own rubric the hit is luck: every gate I wrote for the good case was cleared and the stock fell anyway.
+
+Lessons.
+1. WHEN: a name is up over the prior 21 sessions while its sector fund is 5 % or more under its 50-day average. THEN: short, at the called-side size from the table and not the shrink line, with confidence near 60. RECORD: 2 of 2 (Verizon, Autodesk). Drop it if the next two such names close up on their reports. It would have changed the size from 2.5 to about 4 and the confidence from 53 to about 60.
+2. WHEN: a company's last two raises were each followed by a lower close. THEN: I do not treat a third raise as the good case; I price it at 0.4 to rise. RECORD: 3 of 3 on this name; one name is not a rule elsewhere. Drop it for this name at its first raise that closes up. It would have moved my table from 0.43 to about 0.35.
+
+Earlier lessons that applied. The letter of the report predicts the close outside the AI trade on calm days: hurt, an A print closed down, 12 of 14. A raised table outside the AI trade is bought: hurt, 20 of 25. A cut line of mine: did not happen (billings was nudged up) and did not decide.
+
+Descriptions, not lessons. Revenue $2,160 M; year's revenue midpoint raised to $8,367.5 M; the top of the billings range and the cash-flow guide were held; total backlog plus 3 %. Why it fell I have not verified; the call was not read.
+
+**The market line, all five.** I called the S&P 500 up 0.3 % from a calendar cell (the day before Thanksgiving, higher 58 of 76). It fell 0.25 % after trading 3.2 % lower. That cell is now 58 of 77. I have no counted rule that would have changed it, so it is a description and not a lesson: on the day an inflation release was due and the fear index stood near 26, I used a calendar habit and nothing else.
+
 ## Trust calibration (standing section; updated at every grading)
 
 The asset is not the hit rate, it is the record of *which kind of call* can be trusted and by how much. `CALIBRATION.csv` holds one row per call (side, size, P(up), realised move, hit/miss); this section states the rule that reads it. A future session starts from this section and the standing lessons, not from pretraining priors.
