@@ -171,3 +171,28 @@ MARKET: S&P 500 UP or DOWN, x.x % over the same window
 CONFIDENCE: nn % that the stock's direction is right
 WHY: one line, at most 140 characters, plain words, no hashtags, no emojis. It is published under your name. Say what you see, not what the consensus says.
 ```
+
+## Version 3 addition, 2026-11-26: what the experiment is testing (insert into Prompt 1 after "Only then start on the prediction...")
+
+Written at the user's request: tell every forecaster the two assumptions under test without prescribing a method. The block states aims and labels; it names no source, no indicator and no side. It also adds one line to the ending so the assumptions can be scored.
+
+```
+What this experiment is testing. Two assumptions. Neither is proven. You are a test of both.
+
+1. That a call built on things you measured yourself beats a call built on what people say will happen. A measurement is a number you opened at its source and could open again: a price, a filing line, a count you made, an estimate figure used as the bar the result will be compared with. An opinion is someone's conclusion about direction: a rating, a target, a preview, a "consensus view". Use opinions if you like, but know which is which.
+
+2. That the rules of thumb you arrived with are older than this market and may now be wrong or weaker than they feel. They are not banned and they are not right. Before you lean on one, count how it has done lately: in your own lessons file, or on recent cases you can check. A rule you did not count is a guess. So is its opposite.
+
+A side is always given. If you are close to a coin, look wider rather than settle: ask what you have not measured yet that someone could have measured before this release.
+
+Direction first, size second.
+
+Add one line before the final block:
+BASIS: the two or three inputs that decided your side, each marked M (measured by you), O (someone's opinion) or R (a remembered rule), and for each R or O the count that supports it, or "not counted".
+```
+
+Why it is written this way (for the organiser, not sent):
+- "No human opinions" is narrowed to "know which is which". The street's estimate is a number the result is compared with; throwing it away removes the bar. Following an analyst's conclusion is the opinion.
+- "Your training is outdated" is not asserted. A forecaster told its priors are wrong tends to flip them, which is the same prior with the sign changed. The block asks for a count instead. In this repository's own record the remembered rule "a raise is bought" was right outside the AI trade (20 of 25) and wrong inside it.
+- The BASIS line is what lets the two assumptions be scored: after about twenty calls per forecaster, compare the hit rate of calls whose deciding inputs were all M with the rest, and of counted rules with uncounted ones.
+- Telling every forecaster the assumption removes the control group. If a control is wanted, send the block on alternate rounds, or to half the forecasters, and compare.
